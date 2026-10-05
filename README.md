@@ -26,6 +26,19 @@ Backend chạy tại `http://127.0.0.1:8000`.
 
 Kiểm tra nhanh: mở `http://127.0.0.1:8000/api/v1/health/` và xác nhận response có `status: ok`.
 
+`python manage.py migrate` là cách khởi tạo database được khuyến nghị. Schema SQLite tương ứng với 13 bảng nghiệp vụ cũng có trong `backend/schema.sql`. Nếu cần khởi tạo bảng trực tiếp từ SQL trên database mới, chạy các lệnh sau trong thư mục `backend`:
+
+```powershell
+python manage.py migrate contenttypes
+python manage.py migrate auth
+python -c "import sqlite3; sqlite3.connect('db.sqlite3').executescript(open('schema.sql', encoding='utf-8').read())"
+python manage.py migrate clinic --fake
+python manage.py migrate
+python manage.py seed_dental_data
+```
+
+Không chạy bước SQL này trên database đã có dữ liệu cần giữ; dùng migration Django thông thường để cập nhật database hiện có.
+
 ## 3. Khởi chạy frontend
 
 Mở một PowerShell mới:
@@ -37,17 +50,22 @@ npm run dev -- --host 127.0.0.1
 ```
 
 Mở URL Vite hiển thị trong terminal, thường là `http://127.0.0.1:5173`.
+Tailwind CSS v4 đã được tích hợp với Vite; Lucide Icons được dùng làm bộ biểu tượng giao diện.
 
 Frontend tự gọi API backend. Nếu backend chưa chạy, giao diện vẫn hiển thị demo data để chụp ảnh bố cục; trạng thái góc trên sẽ ghi `Demo data` thay vì `Live API`.
 
 ## 4. Dữ liệu demo
 
-Lệnh `seed_dental_data` tạo:
+Các migration Django tạo 13 bảng nghiệp vụ trong ứng dụng `clinic`: `Role`, `ClinicUser`, `Doctor`, `Patient`, `Appointment`, `Tooth`, `ToothCondition`, `Service`, `TreatmentPlan`, `TreatmentItem`, `Invoice`, `InvoiceItem` và `Payment`. Các bảng quản trị mặc định của Django (`auth`, `admin`, `sessions`) được tạo riêng bởi migration của Django.
+
+Chạy `python manage.py migrate` để tạo schema từ migration. Sau đó chạy `python manage.py seed_dental_data` để tạo:
 
 - 32 mã răng người lớn `A01` đến `A32`.
 - 20 mã răng trẻ em `C01` đến `C20`.
-- Bệnh nhân demo `DMS-0001` và `DMS-0002`.
-- Lịch hẹn và hóa đơn mẫu.
+- 1 tài khoản quản trị, 2 bác sĩ và 1 lễ tân (các tài khoản demo không có mật khẩu sử dụng được mặc định).
+- 5 bệnh nhân, danh mục dịch vụ nha khoa cơ bản, lịch hẹn, kế hoạch điều trị và hóa đơn mẫu.
+
+Để cấp mật khẩu cho tài khoản quản trị được seed, đặt biến môi trường `DMS_SEED_ADMIN_PASSWORD` trước khi chạy lệnh seed; hoặc dùng `python manage.py changepassword dms_admin`.
 
 ## 5. API chính
 
