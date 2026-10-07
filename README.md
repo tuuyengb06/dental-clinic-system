@@ -46,13 +46,14 @@ Mở một PowerShell mới:
 ```powershell
 cd frontend
 npm install
-npm run dev -- --host 127.0.0.1
+npm run dev -- --host 0.0.0.0
 ```
 
-Mở URL Vite hiển thị trong terminal, thường là `http://127.0.0.1:5173`.
-Tailwind CSS v4 đã được tích hợp với Vite; Lucide Icons được dùng làm bộ biểu tượng giao diện.
+Máy chạy frontend/backend và người cùng nhóm cần dùng chung một mạng Wi-Fi/LAN. Mở URL Vite hiển thị trong terminal trên máy chủ, rồi cho người kia truy cập `http://<IP-máy-chủ>:5173` (lấy địa chỉ IPv4 bằng `ipconfig`). Nếu Windows Firewall hỏi, chỉ cho phép trên mạng Private. Vite chuyển tiếp `/api` đến backend trên cùng máy ở `http://127.0.0.1:8000`; vì vậy cả hai người dùng cùng một backend và database SQLite trên máy chủ. Chỉ dùng cách này trên mạng tin cậy cho demo, không mở development server ra Internet. Tailwind CSS v4 đã được tích hợp với Vite; Lucide Icons được dùng làm bộ biểu tượng giao diện. Khi triển khai riêng frontend và backend, đặt `VITE_API_BASE_URL` thành URL gốc API.
 
-Frontend tự gọi API backend. Nếu backend chưa chạy, giao diện vẫn hiển thị demo data để chụp ảnh bố cục; trạng thái góc trên sẽ ghi `Demo data` thay vì `Live API`.
+Đăng nhập bằng username/password của tài khoản Django có hồ sơ clinic. Tài khoản quản trị demo có username `admin`; đặt mật khẩu bằng `python manage.py changepassword admin` hoặc cấu hình `DMS_SEED_ADMIN_PASSWORD` trước khi seed. Mật khẩu của tài khoản bác sĩ/lễ tân được đặt bằng `python manage.py changepassword doctor1`, `doctor2` hoặc `receptionist1`. JWT access/refresh token được lưu trong LocalStorage và tự refresh khi access token hết hạn.
+
+Sidebar hiển thị mục theo role `ADMIN`, `DENTIST` hoặc `RECEPTIONIST`. Chỉ ADMIN được tạo/sửa/ngừng dịch vụ; các hồ sơ bác sĩ có thể xem trong danh mục Doctors.
 
 ## 4. Dữ liệu demo
 
@@ -65,10 +66,13 @@ Chạy `python manage.py migrate` để tạo schema từ migration. Sau đó ch
 - 1 tài khoản quản trị, 2 bác sĩ và 1 lễ tân (các tài khoản demo không có mật khẩu sử dụng được mặc định).
 - 5 bệnh nhân, danh mục dịch vụ nha khoa cơ bản, lịch hẹn, kế hoạch điều trị và hóa đơn mẫu.
 
-Để cấp mật khẩu cho tài khoản quản trị được seed, đặt biến môi trường `DMS_SEED_ADMIN_PASSWORD` trước khi chạy lệnh seed; hoặc dùng `python manage.py changepassword dms_admin`.
+Để cấp mật khẩu cho tài khoản quản trị được seed, đặt biến môi trường `DMS_SEED_ADMIN_PASSWORD` trước khi chạy lệnh seed; hoặc dùng `python manage.py changepassword admin`. Nếu database đã có tài khoản demo `dms_admin`, lệnh seed sẽ đổi tên tài khoản đó thành `admin`.
 
 ## 5. API chính
 
+- `POST /api/v1/auth/token/` (đăng nhập, lấy JWT)
+- `POST /api/v1/auth/token/refresh/` (làm mới JWT)
+- `GET /api/v1/auth/me/` (hồ sơ người dùng và role, cần JWT)
 - `GET/POST /api/v1/patients/`
 - `GET /api/v1/patients/{id}/tooth_chart/`
 - `PUT /api/v1/patients/{id}/tooth_chart/`
@@ -77,7 +81,9 @@ Chạy `python manage.py migrate` để tạo schema từ migration. Sau đó ch
 - `POST /api/v1/appointments/{id}/cancel/`
 - `GET/POST /api/v1/invoices/`
 - `POST /api/v1/invoices/{id}/pay/`
-- `GET /api/v1/health/`
+- `GET/POST /api/v1/services/` (ghi dữ liệu chỉ dành cho ADMIN; `PATCH/DELETE /api/v1/services/{id}/`)
+- `GET /api/v1/doctors/`
+- `GET /api/v1/health/` (public health check; các API nghiệp vụ khác cần JWT)
 
 ## 6. Build kiểm tra
 

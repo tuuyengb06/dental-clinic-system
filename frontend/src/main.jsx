@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Activity, CalendarDays, ChevronDown, CircleDollarSign, ClipboardPlus, FileImage, LayoutDashboard, Menu, Search, Settings2, ShieldCheck, Stethoscope, UserRound, Users, X } from 'lucide-react';
+import { Activity, CalendarDays, ChevronDown, CircleDollarSign, ClipboardPlus, FileImage, LayoutDashboard, Menu, Pencil, Plus, Search, ShieldCheck, Stethoscope, Trash2, UserRound, Users, X } from 'lucide-react';
 import './styles.css';
+import './app.css';
 
-const API = 'http://127.0.0.1:8000/api/v1';
+const API = import.meta.env.DEV ? '/api/v1' : (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1');
 const fallbackPatients = [
   { id: 1, patient_code: 'DMS-0001', full_name: 'Nguyen Minh Anh', phone: '090 123 4567', dentition_type: 'ADULT', allergies: 'Penicillin' },
   { id: 2, patient_code: 'DMS-0002', full_name: 'Tran Gia Bao', phone: '091 234 5678', dentition_type: 'CHILD', allergies: '' },
@@ -16,44 +17,358 @@ const fallbackAppointments = [
 ];
 const teethAdult = Array.from({ length: 32 }, (_, i) => ({ id: i + 1, code: `A${String(i + 1).padStart(2, '0')}`, state: i === 6 || i === 18 ? 'Needs care' : 'Healthy' }));
 const teethChild = Array.from({ length: 20 }, (_, i) => ({ id: i + 1, code: `C${String(i + 1).padStart(2, '0')}`, state: i === 3 ? 'Monitor' : 'Healthy' }));
+const navigationByRole = {
+  ADMIN: [
+    ['Overview', LayoutDashboard], ['Patients', Users], ['Appointments', CalendarDays], ['Tooth chart', Stethoscope],
+    ['Billing', CircleDollarSign], ['Radiographs', FileImage], ['Services', ClipboardPlus], ['Doctors', UserRound]
+  ],
+  DENTIST: [
+    ['Overview', LayoutDashboard], ['Patients', Users], ['Appointments', CalendarDays],
+    ['Tooth chart', Stethoscope], ['Radiographs', FileImage]
+  ],
+  RECEPTIONIST: [
+    ['Overview', LayoutDashboard], ['Patients', Users], ['Appointments', CalendarDays], ['Billing', CircleDollarSign]
+  ]
+};
 
-async function fetchApi(path) { const response = await fetch(`${API}${path}`); if (!response.ok) throw new Error('API unavailable'); return response.json(); }
+const TOKEN_STORAGE_KEY = 'dms.auth.tokens';
+
+async function apiRequest(path, { tokens, onTokens, method = 'GET', body } = {}) {
+  const send = (accessToken) => fetch(`${API}${path}`, {
+    method,
+    headers: {
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
+    },
+    ...(body ? { body: JSON.stringify(body) } : {})
+  });
+
+  let response = await send(tokens?.access);
+  if (response.status === 401 && tokens?.refresh && onTokens) {
+    const refreshed = await fetch(`${API}/auth/token/refresh/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh: tokens.refresh })
+    });
+    if (!refreshed.ok) {
+      onTokens(null);
+      throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+    }
+    const nextTokens = { ...tokens, ...(await refreshed.json()) };
+    onTokens(nextTokens);
+    response = await send(nextTokens.access);
+  }
+
+  const payload = response.status === 204 ? null : await response.json().catch(() => null);
+  if (!response.ok) {
+    const detail = payload?.detail || Object.values(payload || {}).flat().join(' ') || `Yêu cầu thất bại (${response.status}).`;
+    throw new Error(detail);
+  }
+  return payload;
+}
 
 function App() {
   const [section, setSection] = useState('Overview');
   const [patients, setPatients] = useState(fallbackPatients);
   const [appointments, setAppointments] = useState(fallbackAppointments);
+  const [tokens, setTokens] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [authError, setAuthError] = useState('');
   const [query, setQuery] = useState('');
   const [dentition, setDentition] = useState('ADULT');
   const [selectedTooth, setSelectedTooth] = useState(null);
   const [apiLive, setApiLive] = useState(false);
+  const [apiError, setApiError] = useState('');
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
-    Promise.all([fetchApi('/patients/'), fetchApi('/appointments/')]).then(([p, a]) => { setPatients(p); setAppointments(a); setApiLive(true); }).catch(() => setApiLive(false));
+    let active = true;
+    async function restoreSession() {
+      try {
+        const stored = localStorage.getItem(TOKEN_STORAGE_KEY);
+        if (!stored) return;
+        let savedTokens;
+        try {
+          savedTokens = JSON.parse(stored);
+        } catch {
+          localStorage.removeItem(TOKEN_STORAGE_KEY);
+          return;
+        }
+        if (!savedTokens?.access || !savedTokens?.refresh) {
+          localStorage.removeItem(TOKEN_STORAGE_KEY);
+          return;
+        }
+        let currentTokens = savedTokens;
+        const currentUser = await apiRequest('/auth/me/', {
+          tokens: savedTokens,
+          onTokens: (nextTokens) => {
+            if (!nextTokens) {
+              localStorage.removeItem(TOKEN_STORAGE_KEY);
+              return;
+            }
+            currentTokens = nextTokens;
+            localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(nextTokens));
+            if (active) setTokens(nextTokens);
+          }
+        });
+        if (active) {
+          setTokens(currentTokens);
+          setProfile(currentUser);
+        }
+      } catch (error) {
+        localStorage.removeItem(TOKEN_STORAGE_KEY);
+        if (active) setAuthError(error.message);
+      } finally {
+        if (active) setAuthReady(true);
+      }
+    }
+    restoreSession();
+    return () => { active = false; };
   }, []);
 
+  useEffect(() => {
+    if (!tokens || !profile) return;
+    Promise.all([
+      apiRequest('/patients/', { tokens, onTokens: updateTokens }),
+      apiRequest('/appointments/', { tokens, onTokens: updateTokens })
+    ]).then(([patientData, appointmentData]) => {
+      setPatients(patientData);
+      setAppointments(appointmentData);
+      setApiLive(true);
+      setApiError('');
+    }).catch((error) => {
+      setApiLive(false);
+      setApiError(error.message);
+    });
+  }, [tokens, profile]);
+
+  const updateTokens = useCallback((nextTokens) => {
+    if (!nextTokens) {
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
+      setTokens(null);
+      setProfile(null);
+      setAuthError('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+      return;
+    }
+    localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(nextTokens));
+    setTokens(nextTokens);
+  }, []);
+
+  async function login(username, password) {
+    const nextTokens = await apiRequest('/auth/token/', { method: 'POST', body: { username, password } });
+    const currentUser = await apiRequest('/auth/me/', { tokens: nextTokens });
+    localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(nextTokens));
+    setTokens(nextTokens);
+    setProfile(currentUser);
+    setAuthError('');
+  }
+
+  function logout() {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    setTokens(null);
+    setProfile(null);
+    setSection('Overview');
+    setAuthError('');
+  }
+
+  if (!authReady) return <div className="auth-loading">Checking your session…</div>;
+  if (!profile) return <LoginPage onLogin={login} initialError={authError} />;
+
   const visiblePatients = patients.filter((patient) => `${patient.full_name} ${patient.patient_code} ${patient.phone}`.toLowerCase().includes(query.toLowerCase()));
-  const nav = [
-    ['Overview', LayoutDashboard], ['Patients', Users], ['Appointments', CalendarDays], ['Tooth chart', Stethoscope], ['Billing', CircleDollarSign], ['Radiographs', FileImage]
-  ];
+  const nav = navigationByRole[profile.role] || navigationByRole.RECEPTIONIST;
   return <div className="app-shell">
     <aside className={`sidebar ${mobileOpen ? 'open' : ''}`}>
       <div className="brand"><div className="brand-mark">D</div><div><strong>DMS</strong><span>Dental management</span></div><button className="icon-button close-menu" onClick={() => setMobileOpen(false)}><X size={18} /></button></div>
       <div className="workspace"><span className="eyebrow">Workspace</span><button className="workspace-button">Lotus Dental Clinic <ChevronDown size={15} /></button></div>
-      <nav>{nav.map(([name, Icon]) => <button key={name} className={section === name ? 'nav-item active' : 'nav-item'} onClick={() => { setSection(name); setMobileOpen(false); }}><Icon size={18} /><span>{name}</span>{name === 'Appointments' && <b>3</b>}</button>)}</nav>
-      <div className="sidebar-bottom"><button className="nav-item"><Settings2 size={18} /><span>Settings</span></button><div className="user-card"><div className="avatar">LH</div><div><strong>Le Thu Ha</strong><span>Clinic manager</span></div><ChevronDown size={15} /></div></div>
+      <nav aria-label="Main navigation">{nav.map(([name, Icon]) => <button key={name} className={section === name ? 'nav-item active' : 'nav-item'} aria-current={section === name ? 'page' : undefined} onClick={() => { setSection(name); setMobileOpen(false); }}><Icon size={18} /><span>{name}</span>{name === 'Appointments' && <b>3</b>}</button>)}</nav>
     </aside>
     <main className="main-content">
-      <header className="topbar"><button className="icon-button menu-button" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><div><span className="eyebrow">Tuesday, 08 September 2026</span><h1>{section === 'Overview' ? 'Good morning, Ha' : section}</h1></div><div className="topbar-actions"><span className={`api-status ${apiLive ? 'live' : ''}`}><span />{apiLive ? 'Live API' : 'Demo data'}</span><button className="icon-button"><Activity size={19} /></button><div className="avatar">LH</div></div></header>
+      <header className="topbar"><button className="icon-button menu-button" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><div><span className="eyebrow">Tuesday, 08 September 2026</span><h1>{section === 'Overview' ? `Good morning, ${profile.display_name}` : section}</h1></div><div className="topbar-actions"><span className={`api-status ${apiLive ? 'live' : ''}`}><span />{apiLive ? 'Live API' : 'Connecting'}</span><button className="icon-button"><Activity size={19} /></button><div className="user-card"><div className="avatar">{profile.display_name.split(' ').map((part) => part[0]).slice(-2).join('')}</div><div><strong>{profile.display_name}</strong><span>{profile.role}</span></div><button className="secondary-button" onClick={logout}>Log out</button></div></div></header>
+      {apiError && <div className="api-error" role="alert">{apiError}</div>}
       {section === 'Overview' && <Overview appointments={appointments} patients={patients} setSection={setSection} />}
       {section === 'Patients' && <Patients patients={visiblePatients} query={query} setQuery={setQuery} />}
       {section === 'Appointments' && <Appointments appointments={appointments} />}
       {section === 'Tooth chart' && <ToothChart dentition={dentition} setDentition={setDentition} selectedTooth={selectedTooth} setSelectedTooth={setSelectedTooth} />}
       {section === 'Billing' && <Billing patients={patients} />}
       {section === 'Radiographs' && <Radiographs />}
+      {section === 'Services' && profile.role === 'ADMIN' && <ServiceManagement tokens={tokens} onTokensChanged={updateTokens} />}
+      {section === 'Doctors' && profile.role === 'ADMIN' && <DoctorDirectory tokens={tokens} onTokensChanged={updateTokens} />}
     </main>
   </div>;
+}
+
+function LoginPage({ onLogin, initialError }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState(initialError);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError('');
+    try {
+      await onLogin(username.trim(), password);
+    } catch (loginError) {
+      setError(loginError.message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return <main className="login-screen">
+    <form className="login-card" onSubmit={handleSubmit}>
+      <div className="brand-mark">D</div>
+      <span className="eyebrow">LOTUS DENTAL CLINIC</span>
+      <h1>Sign in to your clinic</h1>
+      <p>Use your clinic account to continue.</p>
+      <label htmlFor="login-username">Username</label>
+      <input id="login-username" autoComplete="username" required value={username} onChange={(event) => setUsername(event.target.value)} />
+      <label htmlFor="login-password">Password</label>
+      <input id="login-password" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} />
+      {error && <div className="form-error" role="alert">{error}</div>}
+      <button className="primary-button login-submit" type="submit" disabled={submitting}>{submitting ? 'Signing in…' : 'Sign in'}</button>
+    </form>
+  </main>;
+}
+
+const emptyService = { code: '', name: '', description: '', price: '', duration_minutes: 30, is_active: true };
+
+function ServiceManagement({ tokens, onTokensChanged }) {
+  const [services, setServices] = useState([]);
+  const [form, setForm] = useState(emptyService);
+  const [editingId, setEditingId] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  async function loadServices() {
+    setLoading(true);
+    try {
+      setServices(await apiRequest('/services/', { tokens, onTokens: onTokensChanged }));
+      setError('');
+    } catch (loadError) {
+      setError(loadError.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { loadServices(); }, [tokens, onTokensChanged]);
+
+  function startCreate() {
+    setEditingId(null);
+    setForm(emptyService);
+    setShowForm(true);
+    setError('');
+  }
+
+  function startEdit(service) {
+    setEditingId(service.id);
+    setForm({
+      code: service.code,
+      name: service.name,
+      description: service.description,
+      price: service.price,
+      duration_minutes: service.duration_minutes,
+      is_active: service.is_active
+    });
+    setShowForm(true);
+    setError('');
+  }
+
+  async function saveService(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      await apiRequest(editingId ? `/services/${editingId}/` : '/services/', {
+        tokens,
+        onTokens: onTokensChanged,
+        method: editingId ? 'PATCH' : 'POST',
+        body: { ...form, duration_minutes: Number(form.duration_minutes) }
+      });
+      setShowForm(false);
+      await loadServices();
+    } catch (saveError) {
+      setError(saveError.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteService(service) {
+    if (!window.confirm(`Deactivate service "${service.name}"?`)) return;
+    setError('');
+    try {
+      await apiRequest(`/services/${service.id}/`, { tokens, onTokens: onTokensChanged, method: 'DELETE' });
+      await loadServices();
+    } catch (deleteError) {
+      setError(deleteError.message);
+    }
+  }
+
+  return <section className="page-section management-page">
+    <div className="section-toolbar">
+      <div><span className="eyebrow">CLINIC CATALOG</span><h2>Service catalog</h2></div>
+      {!showForm && <button className="primary-button" onClick={startCreate}><Plus size={16} /> Add service</button>}
+    </div>
+    {error && <div className="form-error" role="alert">{error}</div>}
+    {showForm && <form className="panel management-form" onSubmit={saveService}>
+      <h3>{editingId ? 'Edit service' : 'New service'}</h3>
+      <div className="form-grid">
+        <label>Service code<input required maxLength="30" value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value.toUpperCase() })} /></label>
+        <label>Service name<input required maxLength="160" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+        <label>Price (VND)<input required type="number" min="0" step="1000" value={form.price} onChange={(event) => setForm({ ...form, price: event.target.value })} /></label>
+        <label>Duration (minutes)<input required type="number" min="1" value={form.duration_minutes} onChange={(event) => setForm({ ...form, duration_minutes: event.target.value })} /></label>
+        <label className="form-wide">Description<textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
+        <label className="checkbox-field"><input type="checkbox" checked={form.is_active} onChange={(event) => setForm({ ...form, is_active: event.target.checked })} /> Available for booking</label>
+      </div>
+      <div className="form-actions"><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save service'}</button><button className="secondary-button" type="button" onClick={() => setShowForm(false)}>Cancel</button></div>
+    </form>}
+    <div className="panel table-panel management-table">
+      {loading ? <p className="management-state">Loading services…</p> : services.length === 0 ? <p className="management-state">No services found. Add a service to get started.</p> :
+        <table><thead><tr><th>Code</th><th>Service</th><th>Price</th><th>Duration</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody>{services.map((service) => <tr key={service.id}>
+            <td><code>{service.code}</code></td><td><strong>{service.name}</strong><small className="table-description">{service.description || '—'}</small></td>
+            <td>{Number(service.price).toLocaleString('vi-VN')} ₫</td><td>{service.duration_minutes} min</td>
+            <td><span className={`pill ${service.is_active ? '' : 'inactive'}`}>{service.is_active ? 'Active' : 'Inactive'}</span></td>
+            <td><div className="row-actions"><button className="icon-button" aria-label={`Edit ${service.name}`} onClick={() => startEdit(service)}><Pencil size={16} /></button>{service.is_active && <button className="icon-button danger-button" aria-label={`Deactivate ${service.name}`} onClick={() => deleteService(service)}><Trash2 size={16} /></button>}</div></td>
+          </tr>)}</tbody>
+        </table>}
+    </div>
+  </section>;
+}
+
+function DoctorDirectory({ tokens, onTokensChanged }) {
+  const [doctors, setDoctors] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    apiRequest('/doctors/', { tokens, onTokens: onTokensChanged })
+      .then((data) => { if (active) setDoctors(data); })
+      .catch((loadError) => { if (active) setError(loadError.message); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [tokens, onTokensChanged]);
+
+  return <section className="page-section management-page">
+    <div className="section-toolbar"><div><span className="eyebrow">CLINIC TEAM</span><h2>Dentist directory</h2></div><span className="pill">{doctors.length} dentists</span></div>
+    {error && <div className="form-error" role="alert">{error}</div>}
+    <div className="panel table-panel management-table">
+      {loading ? <p className="management-state">Loading dentist directory…</p> : doctors.length === 0 ? <p className="management-state">No dentists found.</p> :
+        <table><thead><tr><th>Dentist</th><th>License</th><th>Specialization</th><th>Phone</th><th>Role</th></tr></thead>
+          <tbody>{doctors.map((doctor) => <tr key={doctor.id}>
+            <td><div className="table-person"><div className="small-avatar">{doctor.full_name.split(' ').map((part) => part[0]).slice(-2).join('')}</div><strong>{doctor.full_name}</strong></div></td>
+            <td><code>{doctor.license_number}</code></td><td>{doctor.specialization || '—'}</td><td>{doctor.phone || '—'}</td><td><span className="pill">{doctor.role}</span></td>
+          </tr>)}</tbody>
+        </table>}
+    </div>
+  </section>;
 }
 
 function Overview({ appointments, patients, setSection }) { return <>

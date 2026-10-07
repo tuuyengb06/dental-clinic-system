@@ -1,9 +1,50 @@
 from django.db.models import Q
 from rest_framework import status, viewsets
+from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
+from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from .models import Appointment, Invoice, Patient, Tooth, ToothCondition
-from .serializers import AppointmentSerializer, InvoiceSerializer, PatientSerializer, ToothConditionSerializer, ToothSerializer
+from .models import Appointment, Doctor, Invoice, Patient, Service, Tooth, ToothCondition
+from .serializers import AppointmentSerializer, ClinicUserSerializer, DoctorDirectorySerializer, InvoiceSerializer, PatientSerializer, ServiceSerializer, ToothConditionSerializer, ToothSerializer
+
+
+class CurrentUserView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profile = getattr(request.user, "clinic_profile", None)
+        if profile is None:
+            return Response({"detail": "Account has no clinic role assigned."}, status=status.HTTP_403_FORBIDDEN)
+        return Response(ClinicUserSerializer(profile).data)
+
+
+class IsClinicAdmin(BasePermission):
+    message = "Only clinic administrators can manage the service catalog."
+
+    def has_permission(self, request, view):
+        profile = getattr(request.user, "clinic_profile", None)
+        return bool(request.user and request.user.is_authenticated and profile and profile.role.code == "ADMIN")
+
+
+class ServiceViewSet(viewsets.ModelViewSet):
+    queryset = Service.objects.order_by("name")
+    serializer_class = ServiceSerializer
+
+    def get_permissions(self):
+        permission_classes = [IsAuthenticated] if self.action in {"list", "retrieve"} else [IsClinicAdmin]
+        return [permission() for permission in permission_classes]
+
+    def destroy(self, request, *args, **kwargs):
+        service = self.get_object()
+        service.is_active = False
+        service.save(update_fields=["is_active"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class DoctorDirectoryViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Doctor.objects.select_related("clinic_user__user", "clinic_user__role").order_by("clinic_user__user__last_name", "clinic_user__user__first_name")
+    serializer_class = DoctorDirectorySerializer
+    permission_classes = [IsAuthenticated]
 
 
 class PatientViewSet(viewsets.ModelViewSet):
@@ -80,5 +121,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
 
 
 class HealthViewSet(viewsets.ViewSet):
+    permission_classes = [AllowAny]
+
     def list(self, request):
         return Response({"status": "ok", "service": "DMS API"})

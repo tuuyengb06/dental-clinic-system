@@ -1,5 +1,38 @@
 from rest_framework import serializers
-from .models import Appointment, Invoice, Patient, Tooth, ToothCondition
+from .models import Appointment, ClinicUser, Doctor, Invoice, Patient, Service, Tooth, ToothCondition
+
+
+class ClinicUserSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(source="user.username", read_only=True)
+    display_name = serializers.SerializerMethodField()
+    role = serializers.CharField(source="role.code", read_only=True)
+
+    class Meta:
+        model = ClinicUser
+        fields = ["id", "username", "display_name", "role", "phone"]
+
+    def get_display_name(self, obj):
+        return obj.user.get_full_name() or obj.user.username
+
+
+class ServiceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Service
+        fields = ["id", "code", "name", "description", "price", "duration_minutes", "is_active"]
+
+
+class DoctorDirectorySerializer(serializers.ModelSerializer):
+    full_name = serializers.SerializerMethodField()
+    phone = serializers.CharField(source="clinic_user.phone", read_only=True)
+    role = serializers.CharField(source="clinic_user.role.name", read_only=True)
+
+    class Meta:
+        model = Doctor
+        fields = ["id", "full_name", "license_number", "specialization", "phone", "role"]
+
+    def get_full_name(self, obj):
+        user = obj.clinic_user.user
+        return user.get_full_name() or user.username
 
 
 class PatientSerializer(serializers.ModelSerializer):

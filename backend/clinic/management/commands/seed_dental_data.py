@@ -38,13 +38,18 @@ class Command(BaseCommand):
         }
 
         staff_specs = [
-            ("dms_admin", "DMS", "Administrator", "ADMIN", "0901000001", ""),
+            ("admin", "DMS", "Administrator", "ADMIN", "0901000001", ""),
             ("doctor1", "Le Thu", "Ha", "DENTIST", "0901000002", "DMS-DOC-001"),
             ("doctor2", "Pham", "Quoc", "DENTIST", "0901000003", "DMS-DOC-002"),
             ("receptionist1", "Nguyen", "Lan", "RECEPTIONIST", "0901000004", ""),
         ]
         staff = {}
         admin_password = os.environ.get("DMS_SEED_ADMIN_PASSWORD")
+        legacy_admin = User.objects.filter(username="dms_admin").first()
+        if legacy_admin and not User.objects.filter(username="admin").exists():
+            legacy_admin.username = "admin"
+            legacy_admin.save(update_fields=["username"])
+
         for username, first_name, last_name, role_code, phone, license_number in staff_specs:
             user, created = User.objects.get_or_create(
                 username=username,
@@ -184,8 +189,8 @@ class Command(BaseCommand):
                 "5 patients, 5 services, 52 teeth, and related demo records."
             )
         )
-        if not admin_password:
+        if not User.objects.get(username="admin").has_usable_password():
             self.stdout.write(
                 "The seeded admin has no usable password. Set DMS_SEED_ADMIN_PASSWORD before seeding, "
-                "or run `python manage.py changepassword dms_admin`."
+                "or run `python manage.py changepassword admin`."
             )
