@@ -1,0 +1,9 @@
+@echo off
+title Dental Management System Starter
+echo [1/2] Dang khoi chay Backend Server...
+start "DMS Backend" cmd /k "cd /d %~dp0backend && .\.venv\Scripts\activate.bat && python manage.py runserver 8000"
+echo [2/2] Dang khoi chay Frontend Server...
+start "DMS Frontend" cmd /k "cd /d %~dp0frontend && npm run dev -- --host 127.0.0.1"
+echo Dang mo trang web tren trinh duyet...
+timeout /t 3 >nul
+start http://127.0.0.1:5173
