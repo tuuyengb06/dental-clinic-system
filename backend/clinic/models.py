@@ -1,9 +1,8 @@
 from decimal import Decimal
-
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
-
+from authentication.models import User
 
 class Role(models.Model):
     code = models.CharField(max_length=30, unique=True)
@@ -28,6 +27,7 @@ class Doctor(models.Model):
     clinic_user = models.OneToOneField(ClinicUser, on_delete=models.CASCADE, related_name="doctor_profile")
     license_number = models.CharField(max_length=40, unique=True)
     specialization = models.CharField(max_length=120, blank=True)
+    experience_years = models.IntegerField(default=0)
 
     def __str__(self):
         return str(self.clinic_user)
@@ -76,6 +76,28 @@ class ToothCondition(models.Model):
         constraints = [models.UniqueConstraint(fields=["patient", "tooth"], name="unique_patient_tooth")]
 
 
+class Service(models.Model):
+    code = models.CharField(max_length=30, unique=True)
+    name = models.CharField(max_length=160)
+    description = models.TextField(blank=True)
+    price = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0"))])
+    duration_minutes = models.PositiveSmallIntegerField(default=30)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.name
+
+
+class WorkSchedule(models.Model):
+    doctor = models.ForeignKey(Doctor, on_delete=models.CASCADE, related_name='schedules')
+    work_date = models.DateField()
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+
+    def __str__(self):
+        return f"Lịch làm việc của {self.doctor} ngày {self.work_date}"
+
+
 class Appointment(models.Model):
     SCHEDULED = "SCHEDULED"
     CONFIRMED = "CONFIRMED"
@@ -94,18 +116,6 @@ class Appointment(models.Model):
         constraints = [
             models.CheckConstraint(condition=models.Q(end_at__gt=models.F("start_at")), name="appointment_end_after_start")
         ]
-
-
-class Service(models.Model):
-    code = models.CharField(max_length=30, unique=True)
-    name = models.CharField(max_length=160)
-    description = models.TextField(blank=True)
-    price = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0"))])
-    duration_minutes = models.PositiveSmallIntegerField(default=30)
-    is_active = models.BooleanField(default=True)
-
-    def __str__(self):
-        return self.name
 
 
 class TreatmentPlan(models.Model):
@@ -128,14 +138,14 @@ class TreatmentItem(models.Model):
     IN_PROGRESS = "IN_PROGRESS"
     DONE = "DONE"
     CANCELLED = "CANCELLED"
-    STATUS_CHOICES = [(PLANNED, "Planned"), (IN_PROGRESS, "In progress"), (DONE, "Done"), (CANCELLED, "Cancelled")]
+    STATUS_CHOICES = [(PLANN_STATUS := PLANNED, "Planned"), (IN_PROGRESS, "In progress"), (DONE, "Done"), (CANCELLED, "Cancelled")] # simplified choices safely below
     plan = models.ForeignKey(TreatmentPlan, on_delete=models.CASCADE, related_name="items")
     appointment = models.ForeignKey(Appointment, on_delete=models.SET_NULL, null=True, blank=True, related_name="treatment_items")
     service = models.ForeignKey(Service, on_delete=models.PROTECT, null=True, blank=True, related_name="treatment_items")
     procedure_name = models.CharField(max_length=180)
     tooth = models.ForeignKey(Tooth, on_delete=models.PROTECT, null=True, blank=True, related_name="treatment_items")
     cost = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0"))])
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=PLANNED)
+    status = models.CharField(max_length=20, choices=[(PLANNED, "Planned"), (IN_PROGRESS, "In progress"), (DONE, "Done"), (CANCELLED, "Cancelled")], default=PLANNED)
 
 
 class Invoice(models.Model):

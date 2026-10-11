@@ -1,16 +1,12 @@
-from django.urls import include, path
+from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import AppointmentViewSet, CurrentUserView, DoctorDirectoryViewSet, HealthViewSet, InvoiceViewSet, PatientViewSet, ServiceViewSet, ToothViewSet
+from .views import DoctorViewSet, WorkScheduleViewSet, DentalServiceViewSet
 
 router = DefaultRouter()
-router.register("patients", PatientViewSet)
-router.register("appointments", AppointmentViewSet)
-router.register("teeth", ToothViewSet)
-router.register("invoices", InvoiceViewSet)
-router.register("services", ServiceViewSet)
-router.register("doctors", DoctorDirectoryViewSet, basename="doctor-directory")
-router.register("health", HealthViewSet, basename="health")
+router.register(r'doctors', DoctorViewSet)
+router.register(r'schedules', WorkScheduleViewSet)
+router.register(r'services', DentalServiceViewSet)
+
 urlpatterns = [
-    path("auth/me/", CurrentUserView.as_view(), name="current-user"),
-    path("", include(router.urls)),
+    path('', include(router.urls)),
 ]

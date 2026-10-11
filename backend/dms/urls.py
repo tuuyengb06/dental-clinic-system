@@ -1,10 +1,9 @@
 from django.contrib import admin
-from django.urls import include, path
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from django.urls import path, include
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
-    path("api/v1/auth/token/", TokenObtainPairView.as_view(), name="token"),
-    path("api/v1/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
-    path("api/v1/", include("clinic.urls")),
+    path('admin/', admin.site.urls),
+    path('api/auth/', include('authentication.urls')),       # Đường dẫn Auth & JWT
+    path('api/clinic/', include('clinic.urls')),             # Đường dẫn quản lý danh mục (Doctor, Service, Schedule)
+    path('api/', include('appointments.urls')),              # Đường dẫn lịch hẹn & hồ sơ bệnh án
 ]
