@@ -5,16 +5,6 @@ import './styles.css';
 import './app.css';
 
 const API = import.meta.env.DEV ? '/api/v1' : (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1');
-const fallbackPatients = [
-  { id: 1, patient_code: 'DMS-0001', full_name: 'Nguyen Minh Anh', phone: '090 123 4567', dentition_type: 'ADULT', allergies: 'Penicillin' },
-  { id: 2, patient_code: 'DMS-0002', full_name: 'Tran Gia Bao', phone: '091 234 5678', dentition_type: 'CHILD', allergies: '' },
-  { id: 3, patient_code: 'DMS-0003', full_name: 'Le Thu Phuong', phone: '098 555 2026', dentition_type: 'ADULT', allergies: 'None recorded' }
-];
-const fallbackAppointments = [
-  { id: 1, patient_name: 'Nguyen Minh Anh', dentist_name: 'Dr. Le Thu Ha', start_at: '09:00', room: 'Room 01', status: 'CONFIRMED', type: 'Implant consultation' },
-  { id: 2, patient_name: 'Tran Gia Bao', dentist_name: 'Dr. Pham Quoc', start_at: '10:30', room: 'Room 02', status: 'SCHEDULED', type: 'Child check-up' },
-  { id: 3, patient_name: 'Le Thu Phuong', dentist_name: 'Dr. Le Thu Ha', start_at: '13:30', room: 'Room 01', status: 'SCHEDULED', type: 'Cleaning & scan' }
-];
 const teethAdult = Array.from({ length: 32 }, (_, i) => ({ id: i + 1, code: `A${String(i + 1).padStart(2, '0')}`, state: i === 6 || i === 18 ? 'Needs care' : 'Healthy' }));
 const teethChild = Array.from({ length: 20 }, (_, i) => ({ id: i + 1, code: `C${String(i + 1).padStart(2, '0')}`, state: i === 3 ? 'Monitor' : 'Healthy' }));
 const navigationByRole = {
@@ -69,8 +59,8 @@ async function apiRequest(path, { tokens, onTokens, method = 'GET', body } = {})
 
 function App() {
   const [section, setSection] = useState('Overview');
-  const [patients, setPatients] = useState(fallbackPatients);
-  const [appointments, setAppointments] = useState(fallbackAppointments);
+  const [patients, setPatients] = useState([]);
+  const [appointments, setAppointments] = useState([]);
   const [tokens, setTokens] = useState(null);
   const [profile, setProfile] = useState(null);
   const [authReady, setAuthReady] = useState(false);
@@ -155,6 +145,17 @@ function App() {
     setTokens(nextTokens);
   }, []);
 
+  async function createPatient(patient) {
+    const createdPatient = await apiRequest('/patients/', {
+      tokens,
+      onTokens: updateTokens,
+      method: 'POST',
+      body: patient
+    });
+    setPatients((currentPatients) => [createdPatient, ...currentPatients]);
+    return createdPatient;
+  }
+
   async function login(username, password) {
     const nextTokens = await apiRequest('/auth/token/', { method: 'POST', body: { username, password } });
     const currentUser = await apiRequest('/auth/me/', { tokens: nextTokens });
@@ -176,7 +177,8 @@ function App() {
   if (!profile) return <LoginPage onLogin={login} initialError={authError} />;
 
   const visiblePatients = patients.filter((patient) => `${patient.full_name} ${patient.patient_code} ${patient.phone}`.toLowerCase().includes(query.toLowerCase()));
-  const nav = navigationByRole[profile.role] || navigationByRole.RECEPTIONIST;
+  const role = String(profile.role || '').toUpperCase() === 'DOCTOR' ? 'DENTIST' : String(profile.role || '').toUpperCase();
+  const nav = navigationByRole[role] || navigationByRole.RECEPTIONIST;
   return <div className="app-shell">
     <aside className={`sidebar ${mobileOpen ? 'open' : ''}`}>
       <div className="brand"><div className="brand-mark">D</div><div><strong>DMS</strong><span>Dental management</span></div><button className="icon-button close-menu" onClick={() => setMobileOpen(false)}><X size={18} /></button></div>
@@ -184,16 +186,16 @@ function App() {
       <nav aria-label="Main navigation">{nav.map(([name, Icon]) => <button key={name} className={section === name ? 'nav-item active' : 'nav-item'} aria-current={section === name ? 'page' : undefined} onClick={() => { setSection(name); setMobileOpen(false); }}><Icon size={18} /><span>{name}</span>{name === 'Appointments' && <b>3</b>}</button>)}</nav>
     </aside>
     <main className="main-content">
-      <header className="topbar"><button className="icon-button menu-button" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><div><span className="eyebrow">Tuesday, 08 September 2026</span><h1>{section === 'Overview' ? `Good morning, ${profile.display_name}` : section}</h1></div><div className="topbar-actions"><span className={`api-status ${apiLive ? 'live' : ''}`}><span />{apiLive ? 'Live API' : 'Connecting'}</span><button className="icon-button"><Activity size={19} /></button><div className="user-card"><div className="avatar">{profile.display_name.split(' ').map((part) => part[0]).slice(-2).join('')}</div><div><strong>{profile.display_name}</strong><span>{profile.role}</span></div><button className="secondary-button" onClick={logout}>Log out</button></div></div></header>
+      <header className="topbar"><button className="icon-button menu-button" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><div><span className="eyebrow">Tuesday, 08 September 2026</span><h1>{section === 'Overview' ? `Good morning, ${profile.display_name}` : section}</h1></div><div className="topbar-actions"><span className={`api-status ${apiLive ? 'live' : ''}`}><span />{apiLive ? 'Live API' : 'Connecting'}</span><button className="icon-button"><Activity size={19} /></button><div className="user-card"><div className="avatar">{profile.display_name.split(' ').map((part) => part[0]).slice(-2).join('')}</div><div><strong>{profile.display_name}</strong><span>{role}</span></div><button className="secondary-button" onClick={logout}>Log out</button></div></div></header>
       {apiError && <div className="api-error" role="alert">{apiError}</div>}
       {section === 'Overview' && <Overview appointments={appointments} patients={patients} setSection={setSection} />}
-      {section === 'Patients' && <Patients patients={visiblePatients} query={query} setQuery={setQuery} />}
+      {section === 'Patients' && <Patients patients={visiblePatients} query={query} setQuery={setQuery} onCreatePatient={createPatient} />}
       {section === 'Appointments' && <Appointments appointments={appointments} />}
       {section === 'Tooth chart' && <ToothChart dentition={dentition} setDentition={setDentition} selectedTooth={selectedTooth} setSelectedTooth={setSelectedTooth} />}
       {section === 'Billing' && <Billing patients={patients} />}
       {section === 'Radiographs' && <Radiographs />}
-      {section === 'Services' && profile.role === 'ADMIN' && <ServiceManagement tokens={tokens} onTokensChanged={updateTokens} />}
-      {section === 'Doctors' && profile.role === 'ADMIN' && <DoctorDirectory tokens={tokens} onTokensChanged={updateTokens} />}
+      {section === 'Services' && role === 'ADMIN' && <ServiceManagement tokens={tokens} onTokensChanged={updateTokens} />}
+      {section === 'Doctors' && role === 'ADMIN' && <DoctorDirectory tokens={tokens} onTokensChanged={updateTokens} />}
     </main>
   </div>;
 }
@@ -378,7 +380,89 @@ function Overview({ appointments, patients, setSection }) { return <>
 </>; }
 function Metric({ label, value, detail, accent, icon: Icon }) { return <div className={`metric-card ${accent}`}><div className="metric-icon"><Icon size={18} /></div><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>; }
 function AppointmentRow({ item }) { return <div className="appointment-row"><div className="time">{item.start_at}</div><div className="appointment-avatar">{item.patient_name.split(' ').map((v) => v[0]).slice(-2).join('')}</div><div className="appointment-info"><strong>{item.patient_name}</strong><span>{item.type || 'Dental consultation'} · {item.dentist_name}</span></div><span className={`status ${item.status.toLowerCase()}`}>{item.status === 'CONFIRMED' ? 'Confirmed' : 'Scheduled'}</span></div>; }
-function Patients({ patients, query, setQuery }) { return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">PATIENT DIRECTORY</span><h2>Patient records</h2></div><button className="primary-button"><UserRound size={17} /> New patient</button></div><div className="search-field"><Search size={17} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name, patient code or phone" /></div><div className="panel table-panel"><table><thead><tr><th>Patient</th><th>Code</th><th>Phone</th><th>Dental profile</th><th>Allergy note</th></tr></thead><tbody>{patients.map((p) => <tr key={p.id}><td><div className="table-person"><div className="small-avatar">{p.full_name.split(' ').map((v) => v[0]).slice(-2).join('')}</div><strong>{p.full_name}</strong></div></td><td><code>{p.patient_code}</code></td><td>{p.phone || '—'}</td><td><span className="pill">{p.dentition_type === 'CHILD' ? '20 teeth · child' : '32 teeth · adult'}</span></td><td>{p.allergies || 'No known allergies'}</td></tr>)}</tbody></table></div></section>; }
+const emptyPatient = {
+  patient_code: '',
+  full_name: '',
+  phone: '',
+  date_of_birth: '',
+  dentition_type: 'ADULT',
+  medical_history: '',
+  allergies: ''
+};
+
+function Patients({ patients, query, setQuery, onCreatePatient }) {
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState(emptyPatient);
+  const [selectedPatient, setSelectedPatient] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  async function savePatient(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      const patient = await onCreatePatient({
+        ...form,
+        date_of_birth: form.date_of_birth || null
+      });
+      setSelectedPatient(patient);
+      setForm(emptyPatient);
+      setShowForm(false);
+    } catch (saveError) {
+      setError(saveError.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <section className="page-section management-page">
+    <div className="section-toolbar">
+      <div><span className="eyebrow">PATIENT DIRECTORY</span><h2>Patient records</h2></div>
+      <button className="primary-button" onClick={() => { setShowForm(!showForm); setError(''); }}>
+        <UserRound size={17} /> {showForm ? 'Cancel' : 'New patient'}
+      </button>
+    </div>
+    {error && <div className="form-error" role="alert">{error}</div>}
+    {showForm && <form className="panel management-form" onSubmit={savePatient}>
+      <h3>New patient profile</h3>
+      <div className="form-grid">
+        <label>Patient code<input required maxLength="20" value={form.patient_code} onChange={(event) => setForm({ ...form, patient_code: event.target.value.trim().toUpperCase() })} /></label>
+        <label>Full name<input required maxLength="160" value={form.full_name} onChange={(event) => setForm({ ...form, full_name: event.target.value })} /></label>
+        <label>Phone<input maxLength="30" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
+        <label>Date of birth<input type="date" value={form.date_of_birth} onChange={(event) => setForm({ ...form, date_of_birth: event.target.value })} /></label>
+        <label>Dental profile<select value={form.dentition_type} onChange={(event) => setForm({ ...form, dentition_type: event.target.value })}><option value="ADULT">Adult · 32 teeth</option><option value="CHILD">Child · 20 teeth</option></select></label>
+        <label>Allergies<textarea value={form.allergies} onChange={(event) => setForm({ ...form, allergies: event.target.value })} /></label>
+        <label className="form-wide">Medical history<textarea value={form.medical_history} onChange={(event) => setForm({ ...form, medical_history: event.target.value })} /></label>
+      </div>
+      <div className="form-actions"><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Create patient'}</button></div>
+    </form>}
+    {selectedPatient && <section className="panel patient-profile">
+      <div className="panel-heading"><div><span className="eyebrow">PATIENT PROFILE</span><h3>{selectedPatient.full_name}</h3></div><button className="secondary-button" onClick={() => setSelectedPatient(null)}>Close</button></div>
+      <div className="patient-profile-grid">
+        <div><span>Patient code</span><strong>{selectedPatient.patient_code}</strong></div>
+        <div><span>Phone</span><strong>{selectedPatient.phone || '—'}</strong></div>
+        <div><span>Date of birth</span><strong>{selectedPatient.date_of_birth || '—'}</strong></div>
+        <div><span>Dental profile</span><strong>{selectedPatient.dentition_type === 'CHILD' ? 'Child · 20 teeth' : 'Adult · 32 teeth'}</strong></div>
+        <div><span>Allergies</span><p>{selectedPatient.allergies || 'No known allergies recorded'}</p></div>
+        <div><span>Medical history</span><p>{selectedPatient.medical_history || 'No medical history recorded'}</p></div>
+      </div>
+    </section>}
+    <div className="search-field"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, patient code or phone" /></div>
+    <div className="panel table-panel">
+      {patients.length === 0 ? <p className="management-state">{query ? 'No matching patients.' : 'No patient records found.'}</p> :
+        <table><thead><tr><th>Patient</th><th>Code</th><th>Phone</th><th>Dental profile</th><th>Allergy note</th><th>Profile</th></tr></thead>
+          <tbody>{patients.map((patient) => <tr key={patient.id}>
+            <td><div className="table-person"><div className="small-avatar">{patient.full_name.split(' ').map((part) => part[0]).slice(-2).join('')}</div><strong>{patient.full_name}</strong></div></td>
+            <td><code>{patient.patient_code}</code></td><td>{patient.phone || '—'}</td>
+            <td><span className="pill">{patient.dentition_type === 'CHILD' ? '20 teeth · child' : '32 teeth · adult'}</span></td>
+            <td>{patient.allergies || 'No known allergies'}</td>
+            <td><button className="text-button" onClick={() => setSelectedPatient(patient)}>View profile</button></td>
+          </tr>)}</tbody>
+        </table>}
+    </div>
+  </section>;
+}
 function Appointments({ appointments }) { return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">LIVE CALENDAR</span><h2>Appointment schedule</h2></div><button className="primary-button"><CalendarDays size={17} /> Book appointment</button></div><div className="calendar-strip"><strong>Tue<br /><b>08</b></strong><span>Wed<br /><b>09</b></span><span>Thu<br /><b>10</b></span><span>Fri<br /><b>11</b></span><span>Sat<br /><b>12</b></span></div><div className="panel schedule-panel"><div className="appointment-list">{appointments.concat(appointments).map((item, index) => <AppointmentRow item={{ ...item, id: `${item.id}-${index}`, start_at: index > 2 ? ['14:30', '15:15', '16:00'][index - 3] : item.start_at }} key={`${item.id}-${index}`} />)}</div></div></section>; }
 function ToothChart({ dentition, setDentition, selectedTooth, setSelectedTooth }) { const teeth = dentition === 'ADULT' ? teethAdult : teethChild; return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">CLINICAL RECORD</span><h2>Interactive tooth chart</h2></div><div className="segmented"><button className={dentition === 'ADULT' ? 'selected' : ''} onClick={() => setDentition('ADULT')}>Adult · 32</button><button className={dentition === 'CHILD' ? 'selected' : ''} onClick={() => setDentition('CHILD')}>Child · 20</button></div></div><div className="chart-layout"><div className="panel tooth-panel"><div className="chart-header"><div><strong>Nguyen Minh Anh</strong><span>DMS-0001 · {dentition === 'ADULT' ? 'Permanent dentition' : 'Primary dentition'}</span></div><span className="status confirmed">In treatment</span></div><div className="mouth-label">UPPER ARCH</div><div className={`teeth-grid ${dentition.toLowerCase()}`}>{teeth.slice(0, Math.ceil(teeth.length / 2)).map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-line" /><div className={`teeth-grid lower ${dentition.toLowerCase()}`}>{teeth.slice(Math.ceil(teeth.length / 2)).reverse().map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-label lower-label">LOWER ARCH</div><div className="chart-legend"><span><i className="dot healthy" />Healthy</span><span><i className="dot care" />Needs care</span><span><i className="dot monitor" />Monitor</span></div></div><aside className="panel tooth-detail"><span className="eyebrow">SELECTED TOOTH</span>{selectedTooth ? <><div className="tooth-number">{teeth.find((tooth) => tooth.id === selectedTooth)?.code}</div><h3>Clinical condition</h3><p>Update this tooth’s condition and add a treatment note for the patient record.</p><select defaultValue="Healthy"><option>Healthy</option><option>Needs care</option><option>Monitor</option><option>Restored</option></select><textarea placeholder="Add a clinical note..." /><button className="primary-button full">Save condition</button></> : <div className="empty-detail"><Stethoscope size={28} /><p>Select a tooth to inspect its clinical record.</p></div>}</aside></div></section>; }
 function Tooth({ tooth, selected, onClick }) { return <button onClick={onClick} className={`tooth ${tooth.state.toLowerCase().replace(' ', '-')} ${selected ? 'selected' : ''}`}><span>{tooth.code.slice(1)}</span><div className="tooth-shape" /></button>; }

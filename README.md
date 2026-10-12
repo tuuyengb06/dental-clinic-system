@@ -73,17 +73,14 @@ Chạy `python manage.py migrate` để tạo schema từ migration. Sau đó ch
 - `POST /api/v1/auth/token/` (đăng nhập, lấy JWT)
 - `POST /api/v1/auth/token/refresh/` (làm mới JWT)
 - `GET /api/v1/auth/me/` (hồ sơ người dùng và role, cần JWT)
-- `GET/POST /api/v1/patients/`
-- `GET /api/v1/patients/{id}/tooth_chart/`
-- `PUT /api/v1/patients/{id}/tooth_chart/`
-- `GET/POST /api/v1/appointments/`
-- `POST /api/v1/appointments/{id}/confirm/`
-- `POST /api/v1/appointments/{id}/cancel/`
+- `GET/POST /api/v1/patients/` (hồ sơ gồm ngày sinh, kiểu răng, tiền sử bệnh và dị ứng)
+- `GET /api/v1/appointments/` (danh sách lịch hẹn)
 - `GET/POST /api/v1/invoices/`
-- `POST /api/v1/invoices/{id}/pay/`
-- `GET/POST /api/v1/services/` (ghi dữ liệu chỉ dành cho ADMIN; `PATCH/DELETE /api/v1/services/{id}/`)
+- `GET/POST /api/v1/services/` (`POST/PATCH/DELETE` chỉ dành cho ADMIN; DELETE sẽ ngừng dịch vụ)
 - `GET /api/v1/doctors/`
 - `GET /api/v1/health/` (public health check; các API nghiệp vụ khác cần JWT)
+
+Frontend dùng thống nhất các endpoint API v1. Role từ `/auth/me/` được chuẩn hóa thành `ADMIN`, `DENTIST` hoặc `RECEPTIONIST`; chỉ ADMIN được ghi danh mục dịch vụ, còn người dùng đã đăng nhập có thể xem danh sách bác sĩ. Môi trường local mặc định dùng SQLite; chọn SQL Server bằng `DMS_DB_ENGINE=mssql` cùng các biến `DMS_DB_*`.
 
 ## 6. Build kiểm tra
 
@@ -110,4 +107,4 @@ python manage.py check
 
 ## Phạm vi MVP
 
-Đã có giao diện và API nền cho patient, appointment, tooth chart, invoice/payment và health check. Prescription allergy check, radiograph upload thật, treatment plan chi tiết và RBAC đầy đủ vẫn là các bước tiếp theo trong `docs/KN2/03_implementation_plan.md`.
+API đã kết nối cho đăng nhập, hồ sơ bệnh nhân, danh sách lịch hẹn, hóa đơn cơ bản, danh mục dịch vụ, danh sách bác sĩ và health check. Tooth chart hiện vẫn là dữ liệu giao diện mẫu; tạo/sửa lịch hẹn, thanh toán hóa đơn, tải radiograph và treatment plan chi tiết chưa có API hoàn chỉnh.

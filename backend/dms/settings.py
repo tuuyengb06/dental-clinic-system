@@ -13,19 +13,28 @@ ALLOWED_HOSTS = ['*']
 ROOT_URLCONF = 'dms.urls'
 WSGI_APPLICATION = 'dms.wsgi.application'
 
-# 1. Cấu hình Database cho SQL Server
-DATABASES = {
-    'default': {
-        'ENGINE': 'mssql',
-        'NAME': 'dental_clinic_db',  # Tên database cậu đã tạo trong SSMS
-        'HOST': 'DESKTOP-D1LIOMN',   # Tên máy chủ của cậu
-        'PORT': '1433',
-        'OPTIONS': {
-            'driver': 'ODBC Driver 17 for SQL Server',
-            'trusted_connection': 'yes',  # Dùng xác thực Windows
-        },
+# SQLite is the portable default for local development. Set DMS_DB_ENGINE=mssql
+# to use SQL Server, and configure its connection through environment variables.
+if os.environ.get("DMS_DB_ENGINE") == "mssql":
+    DATABASES = {
+        "default": {
+            "ENGINE": "mssql",
+            "NAME": os.environ.get("DMS_DB_NAME", "dental_clinic_db"),
+            "HOST": os.environ.get("DMS_DB_HOST", "localhost"),
+            "PORT": os.environ.get("DMS_DB_PORT", "1433"),
+            "OPTIONS": {
+                "driver": os.environ.get("DMS_DB_DRIVER", "ODBC Driver 17 for SQL Server"),
+                "trusted_connection": os.environ.get("DMS_DB_TRUSTED_CONNECTION", "yes"),
+            },
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": os.environ.get("DMS_DB_NAME", BASE_DIR / "db.sqlite3"),
+        }
+    }
 
 # 2. Cấu hình các App được cài đặt trong Project
 INSTALLED_APPS = [
