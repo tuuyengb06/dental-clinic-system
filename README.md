@@ -74,13 +74,16 @@ Chạy `python manage.py migrate` để tạo schema từ migration. Sau đó ch
 - `POST /api/v1/auth/token/refresh/` (làm mới JWT)
 - `GET /api/v1/auth/me/` (hồ sơ người dùng và role, cần JWT)
 - `GET/POST /api/v1/patients/` (hồ sơ gồm ngày sinh, kiểu răng, tiền sử bệnh và dị ứng)
-- `GET /api/v1/appointments/` (danh sách lịch hẹn)
+- `GET/POST /api/v1/appointments/` (danh sách/đặt lịch; giờ hẹn phải nằm trong ca làm của bác sĩ và không trùng lịch)
+- `GET/POST /api/v1/schedules/` (xem/đặt ca làm theo bác sĩ, ngày và giờ; không cho phép ca chồng nhau)
+- `GET /api/v1/teeth/` (danh mục răng để lập hồ sơ bệnh án)
+- `GET/POST /api/v1/medical-records/` (bác sĩ lập/cập nhật chẩn đoán, hướng điều trị, răng và dịch vụ chỉ định)
 - `GET/POST /api/v1/invoices/`
 - `GET/POST /api/v1/services/` (`POST/PATCH/DELETE` chỉ dành cho ADMIN; DELETE sẽ ngừng dịch vụ)
 - `GET /api/v1/doctors/`
 - `GET /api/v1/health/` (public health check; các API nghiệp vụ khác cần JWT)
 
-Frontend dùng thống nhất các endpoint API v1. Role từ `/auth/me/` được chuẩn hóa thành `ADMIN`, `DENTIST` hoặc `RECEPTIONIST`; chỉ ADMIN được ghi danh mục dịch vụ, còn người dùng đã đăng nhập có thể xem danh sách bác sĩ. Môi trường local mặc định dùng SQLite; chọn SQL Server bằng `DMS_DB_ENGINE=mssql` cùng các biến `DMS_DB_*`.
+Frontend dùng thống nhất các endpoint API v1. Role từ `/auth/me/` được chuẩn hóa thành `ADMIN`, `DENTIST` hoặc `RECEPTIONIST`. Lễ tân/Admin quản lý ca làm và đặt lịch; bác sĩ chỉ xem các lịch của mình và chỉ được lập bệnh án cho các lịch được giao. Chỉ ADMIN được ghi danh mục dịch vụ. Môi trường local mặc định dùng SQLite; chọn SQL Server bằng `DMS_DB_ENGINE=mssql` cùng các biến `DMS_DB_*`.
 
 ## 6. Build kiểm tra
 
@@ -103,8 +106,10 @@ python manage.py check
 3. Chụp Dashboard.
 4. Chọn `Patients` để chụp danh sách hồ sơ.
 5. Chọn `Tooth chart`, thử `Adult · 32` và `Child · 20`, chụp cả hai trạng thái.
-6. Chọn `Appointments` và `Billing` để chụp lịch cùng công nợ.
+6. Đăng nhập role lễ tân/Admin, mở `Reception` để chụp form tiếp nhận; vào `Appointments` để tạo ca làm và đặt hẹn.
+7. Đăng nhập role bác sĩ, mở `EMR` để nhập chẩn đoán, chọn răng và dịch vụ chỉ định.
+8. Chọn `Billing` để chụp phần công nợ.
 
 ## Phạm vi MVP
 
-API đã kết nối cho đăng nhập, hồ sơ bệnh nhân, danh sách lịch hẹn, hóa đơn cơ bản, danh mục dịch vụ, danh sách bác sĩ và health check. Tooth chart hiện vẫn là dữ liệu giao diện mẫu; tạo/sửa lịch hẹn, thanh toán hóa đơn, tải radiograph và treatment plan chi tiết chưa có API hoàn chỉnh.
+Đã có giao diện tiếp nhận bệnh nhân cho lễ tân, lịch tuần và đặt lịch theo ca, cùng hồ sơ bệnh án điện tử cho bác sĩ. Các chức năng thanh toán hóa đơn, tải radiograph và treatment plan chi tiết vẫn chưa có API hoàn chỉnh.

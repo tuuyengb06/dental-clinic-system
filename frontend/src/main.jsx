@@ -10,14 +10,14 @@ const teethChild = Array.from({ length: 20 }, (_, i) => ({ id: i + 1, code: `C${
 const navigationByRole = {
   ADMIN: [
     ['Overview', LayoutDashboard], ['Patients', Users], ['Appointments', CalendarDays], ['Tooth chart', Stethoscope],
-    ['Billing', CircleDollarSign], ['Radiographs', FileImage], ['Services', ClipboardPlus], ['Doctors', UserRound]
+    ['Billing', CircleDollarSign], ['Radiographs', FileImage], ['Services', ClipboardPlus], ['Doctors', UserRound], ['Reception', UserRound]
   ],
   DENTIST: [
     ['Overview', LayoutDashboard], ['Patients', Users], ['Appointments', CalendarDays],
-    ['Tooth chart', Stethoscope], ['Radiographs', FileImage]
+    ['Tooth chart', Stethoscope], ['Radiographs', FileImage], ['EMR', ClipboardPlus]
   ],
   RECEPTIONIST: [
-    ['Overview', LayoutDashboard], ['Patients', Users], ['Appointments', CalendarDays], ['Billing', CircleDollarSign]
+    ['Overview', LayoutDashboard], ['Reception', UserRound], ['Appointments', CalendarDays], ['Patients', Users], ['Billing', CircleDollarSign]
   ]
 };
 
@@ -61,6 +61,11 @@ function App() {
   const [section, setSection] = useState('Overview');
   const [patients, setPatients] = useState([]);
   const [appointments, setAppointments] = useState([]);
+  const [doctors, setDoctors] = useState([]);
+  const [services, setServices] = useState([]);
+  const [schedules, setSchedules] = useState([]);
+  const [teeth, setTeeth] = useState([]);
+  const [medicalRecords, setMedicalRecords] = useState([]);
   const [tokens, setTokens] = useState(null);
   const [profile, setProfile] = useState(null);
   const [authReady, setAuthReady] = useState(false);
@@ -119,12 +124,26 @@ function App() {
 
   useEffect(() => {
     if (!tokens || !profile) return;
+    const currentRole = String(profile.role || '').toUpperCase();
+    const recordRequest = currentRole === 'DENTIST' || currentRole === 'ADMIN'
+      ? apiRequest('/medical-records/', { tokens, onTokens: updateTokens })
+      : Promise.resolve([]);
     Promise.all([
       apiRequest('/patients/', { tokens, onTokens: updateTokens }),
-      apiRequest('/appointments/', { tokens, onTokens: updateTokens })
-    ]).then(([patientData, appointmentData]) => {
+      apiRequest('/appointments/', { tokens, onTokens: updateTokens }),
+      apiRequest('/doctors/', { tokens, onTokens: updateTokens }),
+      apiRequest('/services/', { tokens, onTokens: updateTokens }),
+      apiRequest('/schedules/', { tokens, onTokens: updateTokens }),
+      apiRequest('/teeth/', { tokens, onTokens: updateTokens }),
+      recordRequest
+    ]).then(([patientData, appointmentData, doctorData, serviceData, scheduleData, toothData, recordData]) => {
       setPatients(patientData);
       setAppointments(appointmentData);
+      setDoctors(doctorData);
+      setServices(serviceData.filter((service) => service.is_active));
+      setSchedules(scheduleData);
+      setTeeth(toothData);
+      setMedicalRecords(recordData);
       setApiLive(true);
       setApiError('');
     }).catch((error) => {
@@ -154,6 +173,35 @@ function App() {
     });
     setPatients((currentPatients) => [createdPatient, ...currentPatients]);
     return createdPatient;
+  }
+
+  async function createAppointment(appointment) {
+    const created = await apiRequest('/appointments/', {
+      tokens, onTokens: updateTokens, method: 'POST', body: appointment
+    });
+    setAppointments((current) => [...current, created]);
+    return created;
+  }
+
+  async function createSchedule(schedule) {
+    const created = await apiRequest('/schedules/', {
+      tokens, onTokens: updateTokens, method: 'POST', body: schedule
+    });
+    setSchedules((current) => [...current, created]);
+    return created;
+  }
+
+  async function saveMedicalRecord(record, id) {
+    const saved = await apiRequest(id ? `/medical-records/${id}/` : '/medical-records/', {
+      tokens,
+      onTokens: updateTokens,
+      method: id ? 'PATCH' : 'POST',
+      body: record
+    });
+    setMedicalRecords((current) => id
+      ? current.map((item) => item.id === id ? saved : item)
+      : [...current, saved]);
+    return saved;
   }
 
   async function login(username, password) {
@@ -189,8 +237,10 @@ function App() {
       <header className="topbar"><button className="icon-button menu-button" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><div><span className="eyebrow">Tuesday, 08 September 2026</span><h1>{section === 'Overview' ? `Good morning, ${profile.display_name}` : section}</h1></div><div className="topbar-actions"><span className={`api-status ${apiLive ? 'live' : ''}`}><span />{apiLive ? 'Live API' : 'Connecting'}</span><button className="icon-button"><Activity size={19} /></button><div className="user-card"><div className="avatar">{profile.display_name.split(' ').map((part) => part[0]).slice(-2).join('')}</div><div><strong>{profile.display_name}</strong><span>{role}</span></div><button className="secondary-button" onClick={logout}>Log out</button></div></div></header>
       {apiError && <div className="api-error" role="alert">{apiError}</div>}
       {section === 'Overview' && <Overview appointments={appointments} patients={patients} setSection={setSection} />}
-      {section === 'Patients' && <Patients patients={visiblePatients} query={query} setQuery={setQuery} onCreatePatient={createPatient} />}
-      {section === 'Appointments' && <Appointments appointments={appointments} />}
+      {section === 'Patients' && <Patients patients={visiblePatients} query={query} setQuery={setQuery} onCreatePatient={createPatient} canCreate={role === 'ADMIN' || role === 'RECEPTIONIST'} />}
+      {section === 'Reception' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Reception patients={patients} appointments={appointments} onCreatePatient={createPatient} setSection={setSection} />}
+      {section === 'Appointments' && <Appointments appointments={appointments} patients={patients} doctors={doctors} services={services} schedules={schedules} role={role} onCreateAppointment={createAppointment} onCreateSchedule={createSchedule} />}
+      {section === 'EMR' && (role === 'DENTIST' || role === 'ADMIN') && <MedicalRecords appointments={appointments} patients={patients} services={services} teeth={teeth} records={medicalRecords} onSave={saveMedicalRecord} />}
       {section === 'Tooth chart' && <ToothChart dentition={dentition} setDentition={setDentition} selectedTooth={selectedTooth} setSelectedTooth={setSelectedTooth} />}
       {section === 'Billing' && <Billing patients={patients} />}
       {section === 'Radiographs' && <Radiographs />}
@@ -379,7 +429,19 @@ function Overview({ appointments, patients, setSection }) { return <>
   <div className="content-grid"><section className="panel schedule-panel"><div className="panel-heading"><div><span className="eyebrow">APPOINTMENTS</span><h3>Today’s schedule</h3></div><button className="text-button" onClick={() => setSection('Appointments')}>View calendar <span>→</span></button></div><div className="appointment-list">{appointments.map((item) => <AppointmentRow key={item.id} item={item} />)}</div></section><section className="panel focus-panel"><div className="panel-heading"><div><span className="eyebrow">CLINIC FOCUS</span><h3>At a glance</h3></div><ShieldCheck size={19} color="#1d6857" /></div><div className="focus-stat"><span className="focus-icon green"><UserRound size={18} /></span><div><strong>{patients.length} patient records</strong><span>Digitized and searchable</span></div></div><div className="focus-stat"><span className="focus-icon peach"><Stethoscope size={18} /></span><div><strong>2 care alerts</strong><span>Need dentist review</span></div></div><div className="alert-box"><strong>Medication check</strong><p>One prescription needs allergy confirmation before signing.</p><button onClick={() => setSection('Patients')}>Review record →</button></div></section></div>
 </>; }
 function Metric({ label, value, detail, accent, icon: Icon }) { return <div className={`metric-card ${accent}`}><div className="metric-icon"><Icon size={18} /></div><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>; }
-function AppointmentRow({ item }) { return <div className="appointment-row"><div className="time">{item.start_at}</div><div className="appointment-avatar">{item.patient_name.split(' ').map((v) => v[0]).slice(-2).join('')}</div><div className="appointment-info"><strong>{item.patient_name}</strong><span>{item.type || 'Dental consultation'} · {item.dentist_name}</span></div><span className={`status ${item.status.toLowerCase()}`}>{item.status === 'CONFIRMED' ? 'Confirmed' : 'Scheduled'}</span></div>; }
+function AppointmentRow({ item }) {
+  const appointmentDate = item.appointment_date || item.start_at;
+  const time = appointmentDate && appointmentDate.includes('T')
+    ? new Date(appointmentDate).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : appointmentDate;
+  const status = String(item.status || '').toLowerCase();
+  return <div className="appointment-row">
+    <div className="time">{time}</div>
+    <div className="appointment-avatar">{(item.patient_name || 'Patient').split(' ').map((part) => part[0]).slice(-2).join('')}</div>
+    <div className="appointment-info"><strong>{item.patient_name}</strong><span>{item.service_name || item.type || 'Dental consultation'} · {item.dentist_name}</span></div>
+    <span className={`status ${status === 'confirmed' ? 'confirmed' : status === 'completed' ? 'paid' : status === 'cancelled' ? 'inactive' : 'scheduled'}`}>{item.status}</span>
+  </div>;
+}
 const emptyPatient = {
   patient_code: '',
   full_name: '',
@@ -390,7 +452,7 @@ const emptyPatient = {
   allergies: ''
 };
 
-function Patients({ patients, query, setQuery, onCreatePatient }) {
+function Patients({ patients, query, setQuery, onCreatePatient, canCreate }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyPatient);
   const [selectedPatient, setSelectedPatient] = useState(null);
@@ -419,9 +481,9 @@ function Patients({ patients, query, setQuery, onCreatePatient }) {
   return <section className="page-section management-page">
     <div className="section-toolbar">
       <div><span className="eyebrow">PATIENT DIRECTORY</span><h2>Patient records</h2></div>
-      <button className="primary-button" onClick={() => { setShowForm(!showForm); setError(''); }}>
+      {canCreate && <button className="primary-button" onClick={() => { setShowForm(!showForm); setError(''); }}>
         <UserRound size={17} /> {showForm ? 'Cancel' : 'New patient'}
-      </button>
+      </button>}
     </div>
     {error && <div className="form-error" role="alert">{error}</div>}
     {showForm && <form className="panel management-form" onSubmit={savePatient}>
@@ -463,7 +525,280 @@ function Patients({ patients, query, setQuery, onCreatePatient }) {
     </div>
   </section>;
 }
-function Appointments({ appointments }) { return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">LIVE CALENDAR</span><h2>Appointment schedule</h2></div><button className="primary-button"><CalendarDays size={17} /> Book appointment</button></div><div className="calendar-strip"><strong>Tue<br /><b>08</b></strong><span>Wed<br /><b>09</b></span><span>Thu<br /><b>10</b></span><span>Fri<br /><b>11</b></span><span>Sat<br /><b>12</b></span></div><div className="panel schedule-panel"><div className="appointment-list">{appointments.concat(appointments).map((item, index) => <AppointmentRow item={{ ...item, id: `${item.id}-${index}`, start_at: index > 2 ? ['14:30', '15:15', '16:00'][index - 3] : item.start_at }} key={`${item.id}-${index}`} />)}</div></div></section>; }
+function dateKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function Appointments({ appointments, patients, doctors, services, schedules, role, onCreateAppointment, onCreateSchedule }) {
+  const [weekDate, setWeekDate] = useState(() => new Date());
+  const [bookingOpen, setBookingOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [booking, setBooking] = useState({ patient: '', doctor: '', service: '', date: dateKey(new Date()), time: '09:00', notes: '' });
+  const [schedule, setSchedule] = useState({ doctor: '', work_date: dateKey(new Date()), start_time: '09:00', end_time: '17:00' });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const monday = new Date(weekDate);
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(monday);
+    date.setDate(monday.getDate() + index);
+    return date;
+  });
+  const slots = Array.from({ length: 20 }, (_, index) => {
+    const minutes = 8 * 60 + index * 30;
+    return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+  });
+  const isReceptionRole = role === 'ADMIN' || role === 'RECEPTIONIST';
+
+  async function submitBooking(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      await onCreateAppointment({
+        patient: Number(booking.patient),
+        doctor: Number(booking.doctor),
+        service: Number(booking.service),
+        appointment_date: new Date(`${booking.date}T${booking.time}:00`).toISOString(),
+        notes: booking.notes
+      });
+      setBookingOpen(false);
+      setBooking({ ...booking, patient: '', notes: '' });
+    } catch (saveError) {
+      setError(saveError.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function submitSchedule(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      await onCreateSchedule({
+        doctor: Number(schedule.doctor),
+        work_date: schedule.work_date,
+        start_time: schedule.start_time,
+        end_time: schedule.end_time
+      });
+      setScheduleOpen(false);
+    } catch (saveError) {
+      setError(saveError.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function openBooking(date, time) {
+    setBooking((current) => ({
+      ...current,
+      date: dateKey(date),
+      time,
+      doctor: current.doctor || String(doctors[0]?.id || ''),
+      patient: current.patient || String(patients[0]?.id || ''),
+      service: current.service || String(services[0]?.id || '')
+    }));
+    setBookingOpen(true);
+    setError('');
+  }
+
+  return <section className="page-section management-page">
+    <div className="section-toolbar">
+      <div><span className="eyebrow">CLINIC TIMETABLE</span><h2>Appointments & work shifts</h2></div>
+      <div className="calendar-actions">
+        {isReceptionRole && <button className="secondary-button" onClick={() => { setScheduleOpen(!scheduleOpen); setError(''); }}>{scheduleOpen ? 'Close shift form' : 'Add work shift'}</button>}
+        {isReceptionRole && <button className="primary-button" onClick={() => openBooking(weekDate, '09:00')}><CalendarDays size={17} /> Book appointment</button>}
+      </div>
+    </div>
+    {error && <div className="form-error" role="alert">{error}</div>}
+    {scheduleOpen && <form className="panel management-form" onSubmit={submitSchedule}>
+      <h3>Set dentist working hours</h3>
+      <div className="form-grid">
+        <label>Dentist<select required value={schedule.doctor} onChange={(event) => setSchedule({ ...schedule, doctor: event.target.value })}><option value="">Select dentist</option>{doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.full_name}</option>)}</select></label>
+        <label>Date<input required type="date" value={schedule.work_date} onChange={(event) => setSchedule({ ...schedule, work_date: event.target.value })} /></label>
+        <label>Start time<input required type="time" value={schedule.start_time} onChange={(event) => setSchedule({ ...schedule, start_time: event.target.value })} /></label>
+        <label>End time<input required type="time" value={schedule.end_time} onChange={(event) => setSchedule({ ...schedule, end_time: event.target.value })} /></label>
+      </div>
+      <div className="form-actions"><button className="primary-button" disabled={saving}>{saving ? 'Saving…' : 'Save work shift'}</button></div>
+    </form>}
+    {bookingOpen && <form className="panel management-form" onSubmit={submitBooking}>
+      <h3>Book an appointment</h3>
+      <div className="form-grid">
+        <label>Patient<select required value={booking.patient} onChange={(event) => setBooking({ ...booking, patient: event.target.value })}><option value="">Select patient</option>{patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.full_name} · {patient.patient_code}</option>)}</select></label>
+        <label>Dentist<select required value={booking.doctor} onChange={(event) => setBooking({ ...booking, doctor: event.target.value })}><option value="">Select dentist</option>{doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.full_name}</option>)}</select></label>
+        <label>Service<select required value={booking.service} onChange={(event) => setBooking({ ...booking, service: event.target.value })}><option value="">Select service</option>{services.map((service) => <option key={service.id} value={service.id}>{service.name} · {service.duration_minutes} min</option>)}</select></label>
+        <label>Date<input required type="date" value={booking.date} onChange={(event) => setBooking({ ...booking, date: event.target.value })} /></label>
+        <label>Start time<input required type="time" value={booking.time} onChange={(event) => setBooking({ ...booking, time: event.target.value })} /></label>
+        <label>Visit notes<input value={booking.notes} onChange={(event) => setBooking({ ...booking, notes: event.target.value })} /></label>
+      </div>
+      <p className="management-hint">Appointments must fit within a saved dentist work shift and cannot overlap another visit.</p>
+      <div className="form-actions"><button className="primary-button" disabled={saving}>{saving ? 'Booking…' : 'Confirm booking'}</button><button className="secondary-button" type="button" onClick={() => setBookingOpen(false)}>Cancel</button></div>
+    </form>}
+    <div className="calendar-toolbar panel">
+      <button className="secondary-button" onClick={() => setWeekDate(new Date(weekDate.getFullYear(), weekDate.getMonth(), weekDate.getDate() - 7))}>Previous week</button>
+      <strong>{days[0].toLocaleDateString('en', { month: 'short', day: 'numeric' })} – {days[6].toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}</strong>
+      <button className="secondary-button" onClick={() => setWeekDate(new Date(weekDate.getFullYear(), weekDate.getMonth(), weekDate.getDate() + 7))}>Next week</button>
+      <input aria-label="Go to date" type="date" value={dateKey(weekDate)} onChange={(event) => { if (event.target.value) setWeekDate(new Date(`${event.target.value}T12:00:00`)); }} />
+    </div>
+    {doctors.length === 0 && <div className="form-error" role="status">No dentist profiles are available. Add clinic dentist accounts before scheduling.</div>}
+    <div className="panel timetable-panel">
+      <div className="timetable-grid">
+        <div className="timetable-head timetable-time">Time</div>
+        {days.map((date) => <div className="timetable-head" key={dateKey(date)}><strong>{date.toLocaleDateString('en', { weekday: 'short' })}</strong><span>{date.toLocaleDateString('en', { month: 'short', day: 'numeric' })}</span></div>)}
+        {slots.map((time) => <div className="timetable-row" key={time}>
+          <div className="timetable-time">{time}</div>
+          {days.map((date) => {
+            const key = dateKey(date);
+            const minute = Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
+            const shifts = schedules.filter((item) => item.work_date === key && (!booking.doctor || Number(item.doctor) === Number(booking.doctor)) && Number(item.start_time.slice(0, 2)) * 60 + Number(item.start_time.slice(3, 5)) <= minute && Number(item.end_time.slice(0, 2)) * 60 + Number(item.end_time.slice(3, 5)) > minute);
+            const events = appointments.filter((item) => {
+              const start = new Date(item.appointment_date || item.start_at);
+              const slotMinute = Math.floor(start.getMinutes() / 30) * 30;
+              return dateKey(start) === key && start.getHours() === Number(time.slice(0, 2)) && slotMinute === Number(time.slice(3));
+            });
+            return <div className={`timetable-cell ${shifts.length ? 'shift-available' : ''}`} key={`${key}-${time}`}>
+              {events.map((item) => <div className="calendar-event" key={item.id}><strong>{new Date(item.appointment_date || item.start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {item.patient_name}</strong><span>{item.service_name || item.type} / {item.dentist_name}</span><small>{item.status}</small></div>)}
+              {!events.length && isReceptionRole && shifts.length > 0 && <button aria-label={`Book ${key} at ${time}`} className="empty-slot" onClick={() => openBooking(date, time)} title="Book this available slot">+</button>}
+            </div>;
+          })}
+        </div>)}
+      </div>
+    </div>
+    <div className="panel appointment-list-panel"><div className="panel-heading"><div><span className="eyebrow">UPCOMING VISITS</span><h3>Scheduled appointments</h3></div></div>
+      {appointments.length ? <div className="appointment-list">{[...appointments].sort((a, b) => new Date(a.appointment_date || a.start_at) - new Date(b.appointment_date || b.start_at)).map((item) => <AppointmentRow key={item.id} item={{ ...item, start_at: new Date(item.appointment_date || item.start_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }} />)}</div> : <p className="management-state">No appointments have been scheduled.</p>}
+    </div>
+  </section>;
+}
+
+function Reception({ patients, appointments, onCreatePatient, setSection }) {
+  const [form, setForm] = useState(emptyPatient);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  async function registerPatient(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    setSuccess('');
+    try {
+      const patient = await onCreatePatient({ ...form, date_of_birth: form.date_of_birth || null });
+      setSuccess(`${patient.full_name} (${patient.patient_code}) has been registered.`);
+      setForm(emptyPatient);
+    } catch (saveError) {
+      setError(saveError.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <section className="page-section management-page">
+    <div className="section-toolbar"><div><span className="eyebrow">FRONT DESK</span><h2>Patient reception</h2></div><button className="primary-button" onClick={() => setSection('Appointments')}><CalendarDays size={17} /> Open timetable</button></div>
+    <div className="reception-layout">
+      <form className="panel management-form" onSubmit={registerPatient}>
+        <h3>New patient intake</h3>
+        <p className="management-hint">Register patient details and flag medical history or allergies for the clinical team.</p>
+        {error && <div className="form-error" role="alert">{error}</div>}
+        {success && <div className="form-success" role="status">{success}</div>}
+        <div className="form-grid">
+          <label>Patient code<input required maxLength="20" value={form.patient_code} onChange={(event) => setForm({ ...form, patient_code: event.target.value.trim().toUpperCase() })} /></label>
+          <label>Full name<input required maxLength="160" value={form.full_name} onChange={(event) => setForm({ ...form, full_name: event.target.value })} /></label>
+          <label>Phone<input maxLength="30" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
+          <label>Date of birth<input type="date" value={form.date_of_birth} onChange={(event) => setForm({ ...form, date_of_birth: event.target.value })} /></label>
+          <label>Dental profile<select value={form.dentition_type} onChange={(event) => setForm({ ...form, dentition_type: event.target.value })}><option value="ADULT">Adult · 32 teeth</option><option value="CHILD">Child · 20 teeth</option></select></label>
+          <label>Allergies<textarea value={form.allergies} onChange={(event) => setForm({ ...form, allergies: event.target.value })} /></label>
+          <label className="form-wide">Medical history<textarea value={form.medical_history} onChange={(event) => setForm({ ...form, medical_history: event.target.value })} /></label>
+        </div>
+        <div className="form-actions"><button className="primary-button" disabled={saving}>{saving ? 'Registering…' : 'Register patient'}</button></div>
+      </form>
+      <aside className="panel reception-summary">
+        <span className="eyebrow">FRONT DESK SUMMARY</span>
+        <h3>{patients.length} patient records</h3>
+        <p>Today's appointments: {appointments.filter((item) => dateKey(new Date(item.appointment_date || item.start_at)) === dateKey(new Date())).length}</p>
+        <div className="reception-patients">{patients.slice(0, 8).map((patient) => <div key={patient.id}><div className="small-avatar">{patient.full_name.split(' ').map((part) => part[0]).slice(-2).join('')}</div><span><strong>{patient.full_name}</strong><small>{patient.patient_code} · {patient.phone || 'No phone'}</small></span></div>)}</div>
+      </aside>
+    </div>
+  </section>;
+}
+
+function MedicalRecords({ appointments, patients, services, teeth, records, onSave }) {
+  const eligibleAppointments = appointments.filter((item) => item.status !== 'Cancelled' && item.status !== 'CANCELLED');
+  const [appointmentId, setAppointmentId] = useState('');
+  const [form, setForm] = useState({ diagnosis: '', treatment_plan: '', prescription: '', notes: '', teeth: [], services: [] });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const selectedAppointment = eligibleAppointments.find((item) => String(item.id) === appointmentId);
+  const selectedPatient = patients.find((patient) => patient.id === selectedAppointment?.patient);
+  const record = records.find((item) => String(item.appointment) === appointmentId);
+  const patientTeeth = teeth.filter((tooth) => tooth.dentition_type === (selectedPatient?.dentition_type || 'ADULT'));
+
+  useEffect(() => {
+    if (!appointmentId && eligibleAppointments.length) setAppointmentId(String(eligibleAppointments[0].id));
+  }, [appointments, appointmentId]);
+
+  useEffect(() => {
+    setForm(record ? {
+      diagnosis: record.diagnosis,
+      treatment_plan: record.treatment_plan,
+      prescription: record.prescription || '',
+      notes: record.notes || '',
+      teeth: record.teeth || [],
+      services: record.services || []
+    } : { diagnosis: '', treatment_plan: '', prescription: '', notes: '', teeth: [], services: [] });
+    setError('');
+    setSuccess('');
+  }, [appointmentId, record?.id]);
+
+  function toggleSelection(field, id) {
+    setForm((current) => ({
+      ...current,
+      [field]: current[field].includes(id)
+        ? current[field].filter((value) => value !== id)
+        : [...current[field], id]
+    }));
+  }
+
+  async function saveRecord(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    setSuccess('');
+    try {
+      await onSave({ ...form, appointment: Number(appointmentId) }, record?.id);
+      setSuccess('Medical record saved.');
+    } catch (saveError) {
+      setError(saveError.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <section className="page-section management-page">
+    <div className="section-toolbar"><div><span className="eyebrow">CLINICAL WORKSPACE</span><h2>Electronic medical record</h2></div></div>
+    {error && <div className="form-error" role="alert">{error}</div>}
+    {success && <div className="form-success" role="status">{success}</div>}
+    {!eligibleAppointments.length ? <div className="panel management-state">No appointments are available for clinical documentation.</div> :
+      <form className="panel management-form emr-form" onSubmit={saveRecord}>
+        <label className="emr-appointment">Appointment
+          <select value={appointmentId} onChange={(event) => setAppointmentId(event.target.value)}>
+            {eligibleAppointments.map((item) => <option key={item.id} value={item.id}>{new Date(item.appointment_date || item.start_at).toLocaleString()} · {item.patient_name} · {item.dentist_name}</option>)}
+          </select>
+        </label>
+        {selectedPatient && <div className="emr-patient-alert"><strong>{selectedPatient.full_name}</strong><span>{selectedPatient.patient_code} · {selectedPatient.phone || 'No phone'}</span><p>Allergies: {selectedPatient.allergies || 'None recorded'} · Medical history: {selectedPatient.medical_history || 'None recorded'}</p></div>}
+        <label>Diagnosis<textarea required rows="3" value={form.diagnosis} onChange={(event) => setForm({ ...form, diagnosis: event.target.value })} /></label>
+        <label>Treatment plan<textarea required rows="3" value={form.treatment_plan} onChange={(event) => setForm({ ...form, treatment_plan: event.target.value })} /></label>
+        <div className="emr-selection-grid">
+          <fieldset><legend>Select teeth</legend><div className="selection-chips">{patientTeeth.map((tooth) => <label key={tooth.id} className={form.teeth.includes(tooth.id) ? 'selection-chip selected' : 'selection-chip'}><input type="checkbox" checked={form.teeth.includes(tooth.id)} onChange={() => toggleSelection('teeth', tooth.id)} />{tooth.code}</label>)}</div></fieldset>
+          <fieldset><legend>Prescribed services</legend><div className="service-options">{services.map((service) => <label key={service.id}><input type="checkbox" checked={form.services.includes(service.id)} onChange={() => toggleSelection('services', service.id)} /><span>{service.name}</span><small>{Number(service.price).toLocaleString('vi-VN')} ₫</small></label>)}</div></fieldset>
+        </div>
+        <label>Prescription<textarea rows="2" value={form.prescription} onChange={(event) => setForm({ ...form, prescription: event.target.value })} /></label>
+        <label>Clinical notes<textarea rows="2" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
+        <div className="form-actions"><button className="primary-button" disabled={saving}>{saving ? 'Saving…' : record ? 'Update medical record' : 'Save medical record'}</button></div>
+      </form>}
+  </section>;
+}
 function ToothChart({ dentition, setDentition, selectedTooth, setSelectedTooth }) { const teeth = dentition === 'ADULT' ? teethAdult : teethChild; return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">CLINICAL RECORD</span><h2>Interactive tooth chart</h2></div><div className="segmented"><button className={dentition === 'ADULT' ? 'selected' : ''} onClick={() => setDentition('ADULT')}>Adult · 32</button><button className={dentition === 'CHILD' ? 'selected' : ''} onClick={() => setDentition('CHILD')}>Child · 20</button></div></div><div className="chart-layout"><div className="panel tooth-panel"><div className="chart-header"><div><strong>Nguyen Minh Anh</strong><span>DMS-0001 · {dentition === 'ADULT' ? 'Permanent dentition' : 'Primary dentition'}</span></div><span className="status confirmed">In treatment</span></div><div className="mouth-label">UPPER ARCH</div><div className={`teeth-grid ${dentition.toLowerCase()}`}>{teeth.slice(0, Math.ceil(teeth.length / 2)).map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-line" /><div className={`teeth-grid lower ${dentition.toLowerCase()}`}>{teeth.slice(Math.ceil(teeth.length / 2)).reverse().map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-label lower-label">LOWER ARCH</div><div className="chart-legend"><span><i className="dot healthy" />Healthy</span><span><i className="dot care" />Needs care</span><span><i className="dot monitor" />Monitor</span></div></div><aside className="panel tooth-detail"><span className="eyebrow">SELECTED TOOTH</span>{selectedTooth ? <><div className="tooth-number">{teeth.find((tooth) => tooth.id === selectedTooth)?.code}</div><h3>Clinical condition</h3><p>Update this tooth’s condition and add a treatment note for the patient record.</p><select defaultValue="Healthy"><option>Healthy</option><option>Needs care</option><option>Monitor</option><option>Restored</option></select><textarea placeholder="Add a clinical note..." /><button className="primary-button full">Save condition</button></> : <div className="empty-detail"><Stethoscope size={28} /><p>Select a tooth to inspect its clinical record.</p></div>}</aside></div></section>; }
 function Tooth({ tooth, selected, onClick }) { return <button onClick={onClick} className={`tooth ${tooth.state.toLowerCase().replace(' ', '-')} ${selected ? 'selected' : ''}`}><span>{tooth.code.slice(1)}</span><div className="tooth-shape" /></button>; }
 function Billing({ patients }) { return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">FINANCE</span><h2>Billing & installment plans</h2></div><button className="primary-button"><CircleDollarSign size={17} /> New invoice</button></div><div className="metric-grid compact"><Metric label="Outstanding" value="₫42.8m" detail="Across 18 invoices" accent="gold" icon={CircleDollarSign} /><Metric label="Due this week" value="₫8.4m" detail="6 installments" accent="coral" icon={CalendarDays} /><Metric label="Collected today" value="₫5.2m" detail="11 payments" accent="sage" icon={ShieldCheck} /></div><div className="panel table-panel"><table><thead><tr><th>Invoice</th><th>Patient</th><th>Total</th><th>Paid</th><th>Status</th></tr></thead><tbody>{patients.slice(0, 3).map((p, i) => <tr key={p.id}><td><code>INV-000{i + 1}</code></td><td><strong>{p.full_name}</strong></td><td>₫{['3,500,000', '1,200,000', '850,000'][i]}</td><td>₫{['1,500,000', '1,200,000', '350,000'][i]}</td><td><span className={`status ${i === 1 ? 'paid' : 'scheduled'}`}>{i === 1 ? 'Paid' : 'Installment'}</span></td></tr>)}</tbody></table></div></section>; }
