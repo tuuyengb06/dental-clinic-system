@@ -1,6 +1,7 @@
 from django.db import models
 from authentication.models import User
 from clinic.models import Doctor, Patient, Service
+from clinic.models import Tooth
 
 class Appointment(models.Model):
     class Status(models.TextChoices):
@@ -27,6 +28,8 @@ class MedicalRecord(models.Model):
     treatment_plan = models.TextField()  # Hướng điều trị
     prescription = models.TextField(blank=True, null=True)  # Đơn thuốc
     notes = models.TextField(blank=True, null=True)
+    teeth = models.ManyToManyField(Tooth, blank=True, related_name="medical_records")
+    services = models.ManyToManyField(Service, blank=True, related_name="medical_records")
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

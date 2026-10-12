@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Appointment, Doctor, Patient, WorkSchedule, Service, Invoice
+from .models import Doctor, Patient, Tooth, WorkSchedule, Service, Invoice
 
 class DoctorSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
@@ -22,6 +22,26 @@ class WorkScheduleSerializer(serializers.ModelSerializer):
         model = WorkSchedule
         fields = '__all__'
 
+    def validate(self, attrs):
+        start_time = attrs.get("start_time", self.instance.start_time if self.instance else None)
+        end_time = attrs.get("end_time", self.instance.end_time if self.instance else None)
+        doctor = attrs.get("doctor", self.instance.doctor if self.instance else None)
+        work_date = attrs.get("work_date", self.instance.work_date if self.instance else None)
+        if start_time and end_time and start_time >= end_time:
+            raise serializers.ValidationError({"end_time": "End time must be later than start time."})
+        if doctor and work_date and start_time and end_time:
+            overlapping = WorkSchedule.objects.filter(
+                doctor=doctor,
+                work_date=work_date,
+                start_time__lt=end_time,
+                end_time__gt=start_time,
+            )
+            if self.instance:
+                overlapping = overlapping.exclude(pk=self.instance.pk)
+            if overlapping.exists():
+                raise serializers.ValidationError("This shift overlaps another work shift.")
+        return attrs
+
 class DentalServiceSerializer(serializers.ModelSerializer):
     class Meta:
         model = Service  # Dùng đúng tên Service từ models.py
@@ -38,19 +58,10 @@ class PatientSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at"]
 
 
-class ClinicAppointmentSerializer(serializers.ModelSerializer):
-    patient_name = serializers.CharField(source="patient.full_name", read_only=True)
-    type = serializers.SerializerMethodField()
-
+class ToothSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Appointment
-        fields = [
-            "id", "patient", "patient_name", "dentist_name", "start_at",
-            "end_at", "room", "status", "notes", "type",
-        ]
-
-    def get_type(self, appointment):
-        return appointment.notes or "Dental consultation"
+        model = Tooth
+        fields = ["id", "code", "dentition_type", "display_order"]
 
 
 class InvoiceSerializer(serializers.ModelSerializer):

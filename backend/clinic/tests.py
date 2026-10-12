@@ -1,10 +1,14 @@
+from datetime import datetime, time, timedelta
+
 from django.contrib.auth import get_user_model
 from django.test import override_settings
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import ClinicUser, Doctor, InvoiceItem, Patient, Role, Service
+from appointments.models import Appointment as ScheduledAppointment
+from .models import ClinicUser, Doctor, InvoiceItem, Patient, Role, Service, Tooth
 
 User = get_user_model()
 
@@ -29,7 +33,7 @@ class AuthenticationAndManagementApiTests(APITestCase):
             specialization="General dentistry",
         )
         self.patient = Patient.objects.create(patient_code="DMS-TEST-001", full_name="Test Patient")
-        Service.objects.create(code="CHECKUP", name="Dental check-up", price="250000", duration_minutes=30)
+        self.service = Service.objects.create(code="CHECKUP", name="Dental check-up", price="250000", duration_minutes=30)
 
     def authenticate(self, username, password):
         response = self.client.post(
@@ -125,6 +129,15 @@ class AuthenticationAndManagementApiTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_dentist_cannot_register_patients_from_reception_screen(self):
+        self.authenticate("clinic-dentist", "DentistPass123!")
+        response = self.client.post(
+            "/api/v1/patients/",
+            {"patient_code": "DMS-DENTIST-001", "full_name": "Unauthorized Intake"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
     def test_deleting_service_deactivates_it_to_preserve_references(self):
         self.authenticate("clinic-admin", "AdminPass123!")
         service = Service.objects.get(code="CHECKUP")
@@ -155,3 +168,99 @@ class AuthenticationAndManagementApiTests(APITestCase):
     def test_health_check_remains_public(self):
         response = self.client.get("/api/v1/health/")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_reception_can_book_within_a_dentist_shift_and_overlaps_are_rejected(self):
+        work_date = timezone.localdate() + timedelta(days=3)
+        self.authenticate("clinic-admin", "AdminPass123!")
+        doctor_id = Doctor.objects.get(license_number="DMS-TEST-001").id
+        shift = self.client.post(
+            "/api/v1/schedules/",
+            {
+                "doctor": doctor_id,
+                "work_date": work_date.isoformat(),
+                "start_time": "09:00",
+                "end_time": "12:00",
+            },
+            format="json",
+        )
+        self.assertEqual(shift.status_code, status.HTTP_201_CREATED)
+        appointment_date = timezone.make_aware(datetime.combine(work_date, time(9, 0)))
+        payload = {
+            "patient": self.patient.id,
+            "doctor": doctor_id,
+            "service": self.service.id,
+            "appointment_date": appointment_date.isoformat(),
+        }
+        created = self.client.post("/api/v1/appointments/", payload, format="json")
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(created.data["patient_name"], self.patient.full_name)
+        self.assertEqual(created.data["service_name"], self.service.name)
+        payload["appointment_date"] = timezone.make_aware(
+            datetime.combine(work_date, time(9, 15))
+        ).isoformat()
+        overlap = self.client.post("/api/v1/appointments/", payload, format="json")
+        self.assertEqual(overlap.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_receptionist_can_manage_shifts_and_book_appointments(self):
+        receptionist_role = Role.objects.create(code="RECEPTIONIST", name="Receptionist")
+        receptionist = User.objects.create_user(username="front-desk", password="ReceptionPass123!")
+        ClinicUser.objects.create(user=receptionist, role=receptionist_role)
+        self.client.force_authenticate(receptionist)
+        patient = self.client.post(
+            "/api/v1/patients/",
+            {"patient_code": "DMS-RECEPTION-001", "full_name": "Front Desk Patient"},
+            format="json",
+        )
+        self.assertEqual(patient.status_code, status.HTTP_201_CREATED)
+        work_date = timezone.localdate() + timedelta(days=4)
+        shift = self.client.post(
+            "/api/v1/schedules/",
+            {
+                "doctor": Doctor.objects.get(license_number="DMS-TEST-001").id,
+                "work_date": work_date.isoformat(),
+                "start_time": "10:00",
+                "end_time": "11:00",
+            },
+            format="json",
+        )
+        self.assertEqual(shift.status_code, status.HTTP_201_CREATED)
+        appointment = self.client.post(
+            "/api/v1/appointments/",
+            {
+                "patient": self.patient.id,
+                "doctor": Doctor.objects.get(license_number="DMS-TEST-001").id,
+                "service": self.service.id,
+                "appointment_date": timezone.make_aware(
+                    datetime.combine(work_date, time(10, 0))
+                ).isoformat(),
+            },
+            format="json",
+        )
+        self.assertEqual(appointment.status_code, status.HTTP_201_CREATED)
+
+    def test_dentist_can_save_emr_teeth_and_prescribed_services_for_own_visit(self):
+        doctor = Doctor.objects.get(license_number="DMS-TEST-001")
+        appointment = ScheduledAppointment.objects.create(
+            patient=self.patient,
+            doctor=doctor,
+            service=self.service,
+            appointment_date=timezone.now() + timedelta(days=1),
+        )
+        tooth = Tooth.objects.create(code="A01", dentition_type=Patient.ADULT, display_order=1)
+        self.authenticate("clinic-dentist", "DentistPass123!")
+        response = self.client.post(
+            "/api/v1/medical-records/",
+            {
+                "appointment": appointment.id,
+                "diagnosis": "Caries on upper incisor",
+                "treatment_plan": "Restore and review",
+                "prescription": "",
+                "notes": "Follow-up in two weeks",
+                "teeth": [tooth.id],
+                "services": [self.service.id],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["tooth_codes"], ["A01"])
+        self.assertEqual(response.data["services"], [self.service.id])

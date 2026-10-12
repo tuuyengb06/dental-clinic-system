@@ -3,13 +3,19 @@ from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.http import JsonResponse
-from .models import Appointment, Doctor, Patient, WorkSchedule, Service, Invoice
+from .models import Doctor, Patient, Tooth, WorkSchedule, Service, Invoice
+from appointments.views import (
+    AppointmentViewSet,
+    IsAppointmentStaff,
+    IsScheduleStaff,
+    MedicalRecordViewSet,
+)
 from .serializers import (
-    ClinicAppointmentSerializer,
     DoctorSerializer,
     DentalServiceSerializer,
     InvoiceSerializer,
     PatientSerializer,
+    ToothSerializer,
     WorkScheduleSerializer,
 )
 
@@ -32,12 +38,12 @@ class IsClinicAdminOrReadOnly(BasePermission):
 class PatientViewSet(viewsets.ModelViewSet):
     queryset = Patient.objects.all()
     serializer_class = PatientSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAppointmentStaff]
 
 
-class ClinicAppointmentViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Appointment.objects.select_related("patient").all()
-    serializer_class = ClinicAppointmentSerializer
+class ToothViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Tooth.objects.all()
+    serializer_class = ToothSerializer
     permission_classes = [IsAuthenticated]
 
 
@@ -50,7 +56,7 @@ class DoctorViewSet(viewsets.ReadOnlyModelViewSet):
 class WorkScheduleViewSet(viewsets.ModelViewSet):
     queryset = WorkSchedule.objects.all()
     serializer_class = WorkScheduleSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsScheduleStaff]
 
 class DentalServiceViewSet(viewsets.ModelViewSet):
     queryset = Service.objects.all()
