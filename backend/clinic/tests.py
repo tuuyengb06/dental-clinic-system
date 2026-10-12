@@ -1,10 +1,12 @@
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
 from django.test import override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from .models import ClinicUser, Doctor, InvoiceItem, Patient, Role, Service
+
+User = get_user_model()
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])
@@ -49,6 +51,17 @@ class AuthenticationAndManagementApiTests(APITestCase):
         self.assertEqual(response.data["role"], "ADMIN")
         self.assertEqual(response.data["username"], "clinic-admin")
 
+    def test_legacy_admin_role_without_clinic_profile_does_not_unlock_admin_menu(self):
+        User.objects.create_user(
+            username="unassigned-admin",
+            password="AdminPass123!",
+            role=User.Role.ADMIN,
+        )
+        self.authenticate("unassigned-admin", "AdminPass123!")
+        response = self.client.get("/api/v1/auth/me/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["role"], "RECEPTIONIST")
+
     def test_admin_can_manage_services_and_authenticated_user_can_read_doctors(self):
         self.authenticate("clinic-admin", "AdminPass123!")
         created = self.client.post(
@@ -74,6 +87,28 @@ class AuthenticationAndManagementApiTests(APITestCase):
         doctors = self.client.get("/api/v1/doctors/")
         self.assertEqual(doctors.status_code, status.HTTP_200_OK)
         self.assertEqual(doctors.data[0]["full_name"], "Thu Uyên")
+
+    def test_patient_profile_api_creates_and_returns_full_patient_details(self):
+        self.authenticate("clinic-admin", "AdminPass123!")
+        created = self.client.post(
+            "/api/v1/patients/",
+            {
+                "patient_code": "DMS-FULL-001",
+                "full_name": "Full Profile Patient",
+                "phone": "0900000000",
+                "date_of_birth": "1990-05-21",
+                "dentition_type": "ADULT",
+                "medical_history": "Hypertension",
+                "allergies": "Penicillin",
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(created.data["date_of_birth"], "1990-05-21")
+        self.assertEqual(created.data["medical_history"], "Hypertension")
+        listed = self.client.get("/api/v1/patients/")
+        self.assertEqual(listed.status_code, status.HTTP_200_OK)
+        self.assertEqual(listed.data[0]["patient_code"], "DMS-FULL-001")
 
     def test_dentist_cannot_write_service_catalog(self):
         self.authenticate("clinic-dentist", "DentistPass123!")

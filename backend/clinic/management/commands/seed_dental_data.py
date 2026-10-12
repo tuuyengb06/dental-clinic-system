@@ -2,7 +2,7 @@ import os
 from datetime import date, timedelta
 from decimal import Decimal
 
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
@@ -20,6 +20,8 @@ from clinic.models import (
     TreatmentItem,
     TreatmentPlan,
 )
+
+User = get_user_model()
 
 
 class Command(BaseCommand):

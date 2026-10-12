@@ -21,10 +21,15 @@
 .management-form h3{font-family:Fraunces,Georgia,serif;color:var(--deep);font-size:20px;margin:0 0 18px}
 .form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
 .form-grid label{display:grid;gap:6px;color:var(--deep);font-size:12px;font-weight:700}
-.form-grid input:not([type=checkbox]),.form-grid textarea{width:100%;padding:10px 11px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink);font-size:13px}
+.form-grid input:not([type=checkbox]),.form-grid select,.form-grid textarea{width:100%;padding:10px 11px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink);font-size:13px}
 .form-grid textarea{min-height:76px;resize:vertical}
 .form-grid .form-wide{grid-column:1/-1}
 .form-grid .checkbox-field{display:flex;align-items:center;gap:8px;font-weight:500}
+.patient-profile{padding:22px;margin-bottom:16px}
+.patient-profile-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 24px}
+.patient-profile-grid>div{display:grid;gap:5px}
+.patient-profile-grid span{color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.patient-profile-grid strong,.patient-profile-grid p{margin:0;color:var(--ink);font-size:13px;line-height:1.6;white-space:pre-wrap}
 .form-actions,.row-actions{display:flex;align-items:center;gap:9px}
 .form-actions{margin-top:18px}
 .management-table{margin-top:8px}
@@ -33,4 +38,5 @@
 .pill.inactive{background:#f1eeea;color:#827970}
 .danger-button{color:#b34d3d}
 @media(max-width:700px){.form-grid{grid-template-columns:1fr}.form-grid .form-wide{grid-column:auto}.management-table td,.management-table th{padding:12px 10px}}
+@media(max-width:700px){.patient-profile-grid{grid-template-columns:1fr}}
 @media(max-width:560px){.login-card{padding:27px 22px}.topbar-actions .user-card>div:nth-child(2){display:none}.topbar-actions .user-card .secondary-button{font-size:10px;padding:7px}}
