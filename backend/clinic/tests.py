@@ -114,6 +114,36 @@ class AuthenticationAndManagementApiTests(APITestCase):
         self.assertEqual(listed.status_code, status.HTTP_200_OK)
         self.assertEqual(listed.data[0]["patient_code"], "DMS-FULL-001")
 
+    def test_patient_search_matches_patient_code_name_and_phone(self):
+        self.authenticate("clinic-admin", "AdminPass123!")
+        Patient.objects.create(
+            patient_code="DMS-SEARCH-02",
+            full_name="Nguyen Thi Binh",
+            phone="0912345678",
+        )
+        for query in ("DMS-SEARCH-02", "thi binh", "12345678"):
+            with self.subTest(query=query):
+                response = self.client.get("/api/v1/patients/", {"search": query})
+                self.assertEqual(response.status_code, status.HTTP_200_OK)
+                self.assertEqual(len(response.data), 1)
+                self.assertEqual(response.data[0]["patient_code"], "DMS-SEARCH-02")
+
+    def test_patient_search_returns_empty_list_when_no_match(self):
+        self.authenticate("clinic-admin", "AdminPass123!")
+        response = self.client.get(
+            "/api/v1/patients/", {"search": "UNKNOWN-IDENTIFIER"}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, [])
+
+    def test_patient_search_rejects_blank_or_invalid_terms(self):
+        self.authenticate("clinic-admin", "AdminPass123!")
+        for query in ("   ", "%%%", "A" * 101):
+            with self.subTest(query=query):
+                response = self.client.get("/api/v1/patients/", {"search": query})
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertIn("search", response.data)
+
     def test_dentist_cannot_write_service_catalog(self):
         self.authenticate("clinic-dentist", "DentistPass123!")
         response = self.client.post(
