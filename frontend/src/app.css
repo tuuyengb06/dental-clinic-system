@@ -40,11 +40,23 @@
 .calendar-actions{display:flex;gap:9px;flex-wrap:wrap}
 .management-hint{margin:0;color:var(--muted);font-size:12px;line-height:1.6}
 .calendar-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;margin:16px 0}
-.calendar-toolbar strong{color:var(--deep);font-size:13px}
+.calendar-toolbar strong{color:var(--deep);font-size:13px;text-align:center}
 .calendar-toolbar input{border:1px solid var(--line);border-radius:5px;padding:8px;background:#fff;color:var(--ink)}
+.calendar-navigation,.calendar-view-switch{display:flex;align-items:center;gap:6px}
+.calendar-filter{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:11px;font-weight:700}
+.calendar-filter select{max-width:190px;border:1px solid var(--line);border-radius:5px;padding:8px;background:#fff;color:var(--ink)}
+.calendar-view-switch .active{background:var(--deep);color:#fff}
+.calendar-legend{display:flex;flex-wrap:wrap;gap:14px;margin:0 0 10px;color:var(--muted);font-size:11px}
+.calendar-legend span{display:flex;align-items:center;gap:6px}
+.calendar-legend i{width:12px;height:12px;border:1px solid var(--line);border-radius:2px}
+.legend-shift{background:#f2f8f1}
+.legend-unavailable{background:#f4f2ed}
+.legend-appointment{background:#e3eee6;border-left:3px solid var(--green)!important}
 .timetable-panel{overflow:auto}
 .timetable-grid{min-width:1000px}
-.timetable-head,.timetable-row{display:grid;grid-template-columns:72px repeat(7,minmax(125px,1fr))}
+.timetable-grid.day-view{min-width:360px}
+.timetable-head,.timetable-row{display:grid;grid-template-columns:72px repeat(var(--calendar-day-count),minmax(125px,1fr))}
+.timetable-grid.day-view .timetable-head,.timetable-grid.day-view .timetable-row{grid-template-columns:72px minmax(220px,1fr)}
 .timetable-head{position:sticky;top:0;z-index:1;background:#f7f5ef;border-bottom:1px solid var(--line)}
 .timetable-head>div,.timetable-head{padding:10px 8px}
 .timetable-head:not(.timetable-time){display:flex;flex-direction:column;gap:3px;text-align:center}
@@ -52,9 +64,12 @@
 .timetable-head span{color:var(--muted);font-size:10px}
 .timetable-row{min-height:48px;border-bottom:1px solid #eeeae1}
 .timetable-time{padding:8px;color:var(--muted);font-size:10px;text-align:center;border-right:1px solid var(--line)}
-.timetable-cell{position:relative;min-height:48px;border-right:1px solid #f0ede6;background:#fffdfa}
+.timetable-cell{position:relative;min-height:48px;border-right:1px solid #f0ede6;background:#f4f2ed}
 .timetable-cell.shift-available{background:#f2f8f1}
 .calendar-event{position:relative;z-index:1;display:grid;gap:3px;margin:3px;padding:5px 6px;background:#e3eee6;border-left:2px solid var(--green);border-radius:3px;overflow:hidden}
+.calendar-event.status-confirmed{background:#e3edf7;border-left-color:#4f7ba9}
+.calendar-event.status-completed{background:#e8f2e7;border-left-color:#5d8d57}
+.calendar-event.status-cancelled{background:#f3e8e5;border-left-color:#ae685c;opacity:.8}
 .calendar-event strong{font-size:9px;color:var(--deep);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .calendar-event span,.calendar-event small{font-size:8px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .empty-slot{position:absolute;inset:0;width:100%;background:transparent;color:#74a18b;font-size:18px;opacity:0}
