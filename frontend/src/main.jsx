@@ -252,7 +252,7 @@ function App() {
       {section === 'Patients' && <Patients patients={visiblePatients} query={query} setQuery={setQuery} onCreatePatient={createPatient} canCreate={role === 'ADMIN' || role === 'RECEPTIONIST'} />}
       {section === 'Reception' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Reception tokens={tokens} onTokensChanged={updateTokens} appointments={appointments} setSection={setSection} />}
       {section === 'Appointments' && <Appointments appointments={appointments} patients={patients} doctors={doctors} services={services} schedules={schedules} role={role} loading={apiLoading} loadError={apiError} onCreateAppointment={createAppointment} onCreateSchedule={createSchedule} onCancelAppointment={cancelAppointment} />}
-      {section === 'EMR' && (role === 'DENTIST' || role === 'ADMIN') && <MedicalRecords appointments={appointments} patients={patients} services={services} teeth={teeth} records={medicalRecords} onSave={saveMedicalRecord} />}
+      {section === 'EMR' && (role === 'DENTIST' || role === 'ADMIN') && <MedicalRecords appointments={appointments} patients={patients} services={services} teeth={teeth} records={medicalRecords} loading={apiLoading} loadError={apiError} onSave={saveMedicalRecord} />}
       {section === 'Tooth chart' && <ToothChart dentition={dentition} setDentition={setDentition} selectedTooth={selectedTooth} setSelectedTooth={setSelectedTooth} />}
       {section === 'Billing' && <Billing patients={patients} />}
       {section === 'Radiographs' && <Radiographs />}
@@ -932,7 +932,7 @@ function Reception({ tokens, onTokensChanged, appointments, setSection }) {
   </section>;
 }
 
-function MedicalRecords({ appointments, patients, services, teeth, records, onSave }) {
+function MedicalRecords({ appointments, patients, services, teeth, records, loading, loadError, onSave }) {
   const eligibleAppointments = appointments.filter((item) => item.status !== 'Cancelled' && item.status !== 'CANCELLED');
   const [appointmentId, setAppointmentId] = useState('');
   const [form, setForm] = useState({ diagnosis: '', treatment_plan: '', prescription: '', notes: '', teeth: [], services: [] });
@@ -940,9 +940,10 @@ function MedicalRecords({ appointments, patients, services, teeth, records, onSa
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const selectedAppointment = eligibleAppointments.find((item) => String(item.id) === appointmentId);
-  const selectedPatient = patients.find((patient) => patient.id === selectedAppointment?.patient);
+  const selectedPatient = patients.find((patient) => String(patient.id) === String(selectedAppointment?.patient));
   const record = records.find((item) => String(item.appointment) === appointmentId);
   const patientTeeth = teeth.filter((tooth) => tooth.dentition_type === (selectedPatient?.dentition_type || 'ADULT'));
+  const midpoint = Math.ceil(patientTeeth.length / 2);
 
   useEffect(() => {
     if (!appointmentId && eligibleAppointments.length) setAppointmentId(String(eligibleAppointments[0].id));
@@ -958,7 +959,6 @@ function MedicalRecords({ appointments, patients, services, teeth, records, onSa
       services: record.services || []
     } : { diagnosis: '', treatment_plan: '', prescription: '', notes: '', teeth: [], services: [] });
     setError('');
-    setSuccess('');
   }, [appointmentId, record?.id]);
 
   function toggleSelection(field, id) {
@@ -987,26 +987,54 @@ function MedicalRecords({ appointments, patients, services, teeth, records, onSa
 
   return <section className="page-section management-page">
     <div className="section-toolbar"><div><span className="eyebrow">CLINICAL WORKSPACE</span><h2>Electronic medical record</h2></div></div>
+    {loading && <div className="panel management-state" role="status">Loading appointments, records, teeth and services…</div>}
+    {loadError && <div className="form-error" role="alert">EMR data could not be loaded: {loadError}</div>}
     {error && <div className="form-error" role="alert">{error}</div>}
     {success && <div className="form-success" role="status">{success}</div>}
-    {!eligibleAppointments.length ? <div className="panel management-state">No appointments are available for clinical documentation.</div> :
-      <form className="panel management-form emr-form" onSubmit={saveRecord}>
-        <label className="emr-appointment">Appointment
-          <select value={appointmentId} onChange={(event) => setAppointmentId(event.target.value)}>
-            {eligibleAppointments.map((item) => <option key={item.id} value={item.id}>{new Date(item.appointment_date || item.start_at).toLocaleString()} · {item.patient_name} · {item.dentist_name}</option>)}
-          </select>
-        </label>
-        {selectedPatient && <div className="emr-patient-alert"><strong>{selectedPatient.full_name}</strong><span>{selectedPatient.patient_code} · {selectedPatient.phone || 'No phone'}</span><p>Allergies: {selectedPatient.allergies || 'None recorded'} · Medical history: {selectedPatient.medical_history || 'None recorded'}</p></div>}
-        <label>Diagnosis<textarea required rows="3" value={form.diagnosis} onChange={(event) => setForm({ ...form, diagnosis: event.target.value })} /></label>
-        <label>Treatment plan<textarea required rows="3" value={form.treatment_plan} onChange={(event) => setForm({ ...form, treatment_plan: event.target.value })} /></label>
-        <div className="emr-selection-grid">
-          <fieldset><legend>Select teeth</legend><div className="selection-chips">{patientTeeth.map((tooth) => <label key={tooth.id} className={form.teeth.includes(tooth.id) ? 'selection-chip selected' : 'selection-chip'}><input type="checkbox" checked={form.teeth.includes(tooth.id)} onChange={() => toggleSelection('teeth', tooth.id)} />{tooth.code}</label>)}</div></fieldset>
-          <fieldset><legend>Prescribed services</legend><div className="service-options">{services.map((service) => <label key={service.id}><input type="checkbox" checked={form.services.includes(service.id)} onChange={() => toggleSelection('services', service.id)} /><span>{service.name}</span><small>{Number(service.price).toLocaleString('vi-VN')} ₫</small></label>)}</div></fieldset>
+    {!loading && !loadError && !eligibleAppointments.length && <div className="panel management-state">No appointments are available for clinical documentation.</div>}
+    {!loading && !loadError && eligibleAppointments.length > 0 && selectedAppointment && <form className="panel management-form emr-form" onSubmit={saveRecord}>
+      <label className="emr-appointment">Appointment being examined
+        <select value={appointmentId} onChange={(event) => { setAppointmentId(event.target.value); setSuccess(''); }}>
+          {eligibleAppointments.map((item) => <option key={item.id} value={item.id}>{new Date(item.appointment_date || item.start_at).toLocaleString()} · {item.patient_name} · {item.dentist_name}</option>)}
+        </select>
+      </label>
+      {selectedPatient && <div className="emr-patient-alert">
+        <div className="emr-patient-heading"><strong>{selectedPatient.full_name}</strong><span>{selectedPatient.patient_code} · {selectedPatient.phone || 'No phone recorded'}</span></div>
+        <div className="emr-appointment-details">
+          <span><strong>Appointment:</strong> {new Date(selectedAppointment.appointment_date || selectedAppointment.start_at).toLocaleString()}</span>
+          <span><strong>Dentist:</strong> {selectedAppointment.dentist_name || 'Not recorded'}</span>
+          <span><strong>Status:</strong> {selectedAppointment.status}</span>
         </div>
-        <label>Prescription<textarea rows="2" value={form.prescription} onChange={(event) => setForm({ ...form, prescription: event.target.value })} /></label>
-        <label>Clinical notes<textarea rows="2" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
-        <div className="form-actions"><button className="primary-button" disabled={saving}>{saving ? 'Saving…' : record ? 'Update medical record' : 'Save medical record'}</button></div>
-      </form>}
+        <p><strong>Allergies:</strong> {selectedPatient.allergies || 'None recorded'} · <strong>Medical history:</strong> {selectedPatient.medical_history || 'None recorded'}</p>
+      </div>}
+      <label>Diagnosis<textarea required rows="3" value={form.diagnosis} onChange={(event) => setForm({ ...form, diagnosis: event.target.value })} /></label>
+      <label>Treatment plan<textarea required rows="3" value={form.treatment_plan} onChange={(event) => setForm({ ...form, treatment_plan: event.target.value })} /></label>
+      <div className="emr-selection-grid">
+        <fieldset className="emr-teeth-fieldset">
+          <legend>Teeth examined or treated ({form.teeth.length} selected)</legend>
+          {!patientTeeth.length ? <p className="emr-empty-options">No tooth chart data is available for this patient's dentition.</p> : <div className="emr-tooth-chart">
+            <span className="emr-arch-label">UPPER ARCH</span>
+            <div className="emr-tooth-row">{patientTeeth.slice(0, midpoint).map((tooth) => <button key={tooth.id} type="button" aria-pressed={form.teeth.includes(tooth.id)} className={`emr-tooth ${form.teeth.includes(tooth.id) ? 'selected' : ''}`} onClick={() => toggleSelection('teeth', tooth.id)}>{tooth.code}</button>)}</div>
+            <div className="emr-mouth-line" />
+            <div className="emr-tooth-row lower">{patientTeeth.slice(midpoint).reverse().map((tooth) => <button key={tooth.id} type="button" aria-pressed={form.teeth.includes(tooth.id)} className={`emr-tooth ${form.teeth.includes(tooth.id) ? 'selected' : ''}`} onClick={() => toggleSelection('teeth', tooth.id)}>{tooth.code}</button>)}</div>
+            <span className="emr-arch-label lower">LOWER ARCH</span>
+          </div>}
+        </fieldset>
+        <fieldset>
+          <legend>Treatment services ({form.services.length} selected)</legend>
+          {!services.length ? <p className="emr-empty-options">No active services are available.</p> : <div className="service-options">
+            {services.map((service) => <label key={service.id}>
+              <input type="checkbox" checked={form.services.includes(service.id)} onChange={() => toggleSelection('services', service.id)} />
+              <span><strong>{service.name}</strong><small>{service.description || 'No service description'} · {service.duration_minutes} min</small></span>
+              <small>{Number(service.price).toLocaleString('vi-VN')} ₫</small>
+            </label>)}
+          </div>}
+        </fieldset>
+      </div>
+      <label>Prescription<textarea rows="2" value={form.prescription} onChange={(event) => setForm({ ...form, prescription: event.target.value })} /></label>
+      <label>Clinical notes<textarea rows="2" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
+      <div className="form-actions"><button className="primary-button" disabled={saving || !appointmentId}>{saving ? 'Saving…' : record ? 'Update medical record' : 'Save medical record'}</button></div>
+    </form>}
   </section>;
 }
 function ToothChart({ dentition, setDentition, selectedTooth, setSelectedTooth }) { const teeth = dentition === 'ADULT' ? teethAdult : teethChild; return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">CLINICAL RECORD</span><h2>Interactive tooth chart</h2></div><div className="segmented"><button className={dentition === 'ADULT' ? 'selected' : ''} onClick={() => setDentition('ADULT')}>Adult · 32</button><button className={dentition === 'CHILD' ? 'selected' : ''} onClick={() => setDentition('CHILD')}>Child · 20</button></div></div><div className="chart-layout"><div className="panel tooth-panel"><div className="chart-header"><div><strong>Nguyen Minh Anh</strong><span>DMS-0001 · {dentition === 'ADULT' ? 'Permanent dentition' : 'Primary dentition'}</span></div><span className="status confirmed">In treatment</span></div><div className="mouth-label">UPPER ARCH</div><div className={`teeth-grid ${dentition.toLowerCase()}`}>{teeth.slice(0, Math.ceil(teeth.length / 2)).map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-line" /><div className={`teeth-grid lower ${dentition.toLowerCase()}`}>{teeth.slice(Math.ceil(teeth.length / 2)).reverse().map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-label lower-label">LOWER ARCH</div><div className="chart-legend"><span><i className="dot healthy" />Healthy</span><span><i className="dot care" />Needs care</span><span><i className="dot monitor" />Monitor</span></div></div><aside className="panel tooth-detail"><span className="eyebrow">SELECTED TOOTH</span>{selectedTooth ? <><div className="tooth-number">{teeth.find((tooth) => tooth.id === selectedTooth)?.code}</div><h3>Clinical condition</h3><p>Update this tooth’s condition and add a treatment note for the patient record.</p><select defaultValue="Healthy"><option>Healthy</option><option>Needs care</option><option>Monitor</option><option>Restored</option></select><textarea placeholder="Add a clinical note..." /><button className="primary-button full">Save condition</button></> : <div className="empty-detail"><Stethoscope size={28} /><p>Select a tooth to inspect its clinical record.</p></div>}</aside></div></section>; }
