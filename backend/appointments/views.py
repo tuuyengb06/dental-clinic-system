@@ -1,5 +1,9 @@
-from rest_framework import viewsets
+from django.db import transaction
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
 from rest_framework.permissions import BasePermission
+from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError
 
 from .models import Appointment, MedicalRecord
 from .serializers import AppointmentSerializer, MedicalRecordSerializer
@@ -59,6 +63,23 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         if clinic_profile and clinic_profile.role.code == "DENTIST":
             return queryset.filter(doctor__clinic_user=clinic_profile)
         return queryset
+
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, pk=None):
+        with transaction.atomic():
+            appointment = self.get_object()
+            if appointment.status == Appointment.Status.CANCELLED:
+                raise ValidationError({"status": "This appointment is already cancelled."})
+            if appointment.status not in (
+                Appointment.Status.PENDING,
+                Appointment.Status.CONFIRMED,
+            ):
+                raise ValidationError(
+                    {"status": "Only pending or confirmed appointments can be cancelled."}
+                )
+            appointment.status = Appointment.Status.CANCELLED
+            appointment.save(update_fields=["status"])
+        return Response(self.get_serializer(appointment).data, status=status.HTTP_200_OK)
 
 
 class MedicalRecordViewSet(viewsets.ModelViewSet):

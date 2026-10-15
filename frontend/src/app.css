@@ -37,6 +37,12 @@
 .management-state{padding:20px;color:var(--muted);font-size:13px}
 .pill.inactive{background:#f1eeea;color:#827970}
 .danger-button{color:#b34d3d}
+.cancel-appointment-button{padding:6px 9px;color:#a34c3d;font-size:10px;white-space:nowrap}
+.confirmation-backdrop{position:fixed;inset:0;z-index:20;display:grid;place-items:center;padding:20px;background:#14232188}
+.cancellation-dialog{width:min(100%,440px);padding:24px;box-shadow:0 20px 60px #14232133}
+.cancellation-dialog h3{margin:0 0 10px;color:var(--deep);font:600 20px Fraunces,Georgia,serif}
+.cancellation-dialog p{color:var(--muted);font-size:13px;line-height:1.6}
+.cancellation-dialog .form-error{margin-top:14px}
 .calendar-actions{display:flex;gap:9px;flex-wrap:wrap}
 .management-hint{margin:0;color:var(--muted);font-size:12px;line-height:1.6}
 .calendar-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;margin:16px 0}
