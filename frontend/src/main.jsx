@@ -187,6 +187,14 @@ function App() {
     return created;
   }
 
+  async function cancelAppointment(appointmentId) {
+    const cancelled = await apiRequest(`/appointments/${appointmentId}/cancel/`, {
+      tokens, onTokens: updateTokens, method: 'POST'
+    });
+    setAppointments((current) => current.map((item) => item.id === cancelled.id ? cancelled : item));
+    return cancelled;
+  }
+
   async function createSchedule(schedule) {
     const created = await apiRequest('/schedules/', {
       tokens, onTokens: updateTokens, method: 'POST', body: schedule
@@ -243,7 +251,7 @@ function App() {
       {section === 'Overview' && <Overview appointments={appointments} patients={patients} setSection={setSection} />}
       {section === 'Patients' && <Patients patients={visiblePatients} query={query} setQuery={setQuery} onCreatePatient={createPatient} canCreate={role === 'ADMIN' || role === 'RECEPTIONIST'} />}
       {section === 'Reception' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Reception tokens={tokens} onTokensChanged={updateTokens} appointments={appointments} setSection={setSection} />}
-      {section === 'Appointments' && <Appointments appointments={appointments} patients={patients} doctors={doctors} services={services} schedules={schedules} role={role} loading={apiLoading} loadError={apiError} onCreateAppointment={createAppointment} onCreateSchedule={createSchedule} />}
+      {section === 'Appointments' && <Appointments appointments={appointments} patients={patients} doctors={doctors} services={services} schedules={schedules} role={role} loading={apiLoading} loadError={apiError} onCreateAppointment={createAppointment} onCreateSchedule={createSchedule} onCancelAppointment={cancelAppointment} />}
       {section === 'EMR' && (role === 'DENTIST' || role === 'ADMIN') && <MedicalRecords appointments={appointments} patients={patients} services={services} teeth={teeth} records={medicalRecords} onSave={saveMedicalRecord} />}
       {section === 'Tooth chart' && <ToothChart dentition={dentition} setDentition={setDentition} selectedTooth={selectedTooth} setSelectedTooth={setSelectedTooth} />}
       {section === 'Billing' && <Billing patients={patients} />}
@@ -433,7 +441,7 @@ function Overview({ appointments, patients, setSection }) { return <>
   <div className="content-grid"><section className="panel schedule-panel"><div className="panel-heading"><div><span className="eyebrow">APPOINTMENTS</span><h3>Today’s schedule</h3></div><button className="text-button" onClick={() => setSection('Appointments')}>View calendar <span>→</span></button></div><div className="appointment-list">{appointments.map((item) => <AppointmentRow key={item.id} item={item} />)}</div></section><section className="panel focus-panel"><div className="panel-heading"><div><span className="eyebrow">CLINIC FOCUS</span><h3>At a glance</h3></div><ShieldCheck size={19} color="#1d6857" /></div><div className="focus-stat"><span className="focus-icon green"><UserRound size={18} /></span><div><strong>{patients.length} patient records</strong><span>Digitized and searchable</span></div></div><div className="focus-stat"><span className="focus-icon peach"><Stethoscope size={18} /></span><div><strong>2 care alerts</strong><span>Need dentist review</span></div></div><div className="alert-box"><strong>Medication check</strong><p>One prescription needs allergy confirmation before signing.</p><button onClick={() => setSection('Patients')}>Review record →</button></div></section></div>
 </>; }
 function Metric({ label, value, detail, accent, icon: Icon }) { return <div className={`metric-card ${accent}`}><div className="metric-icon"><Icon size={18} /></div><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>; }
-function AppointmentRow({ item }) {
+function AppointmentRow({ item, canCancel = false, onCancel, cancelling = false }) {
   const appointmentDate = item.appointment_date || item.start_at;
   const time = appointmentDate && appointmentDate.includes('T')
     ? new Date(appointmentDate).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -444,6 +452,7 @@ function AppointmentRow({ item }) {
     <div className="appointment-avatar">{(item.patient_name || 'Patient').split(' ').map((part) => part[0]).slice(-2).join('')}</div>
     <div className="appointment-info"><strong>{item.patient_name}</strong><span>{item.service_name || item.type || 'Dental consultation'} · {item.dentist_name}</span></div>
     <span className={`status ${status === 'confirmed' ? 'confirmed' : status === 'completed' ? 'paid' : status === 'cancelled' ? 'inactive' : 'scheduled'}`}>{item.status}</span>
+    {canCancel && ['pending', 'confirmed'].includes(status) && <button className="secondary-button cancel-appointment-button" type="button" disabled={cancelling} onClick={() => onCancel?.(item)}>{cancelling ? 'Cancelling…' : 'Cancel appointment'}</button>}
   </div>;
 }
 const emptyPatient = {
@@ -533,7 +542,7 @@ function dateKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-function Appointments({ appointments, patients, doctors, services, schedules, role, loading, loadError, onCreateAppointment, onCreateSchedule }) {
+function Appointments({ appointments, patients, doctors, services, schedules, role, loading, loadError, onCreateAppointment, onCreateSchedule, onCancelAppointment }) {
   const [calendarDate, setCalendarDate] = useState(() => new Date());
   const [calendarMode, setCalendarMode] = useState('week');
   const [doctorFilter, setDoctorFilter] = useState('');
@@ -544,6 +553,9 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [cancellationTarget, setCancellationTarget] = useState(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancellationError, setCancellationError] = useState('');
   const monday = new Date(calendarDate);
   monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
   const days = Array.from({ length: calendarMode === 'day' ? 1 : 7 }, (_, index) => {
@@ -631,6 +643,23 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
     }
   }
 
+  async function confirmCancellation() {
+    if (!cancellationTarget) return;
+    setCancelling(true);
+    setCancellationError('');
+    try {
+      await onCancelAppointment(cancellationTarget.id);
+      setSuccess(`Appointment for ${cancellationTarget.patient_name} was cancelled.`);
+      setCancellationTarget(null);
+    } catch (cancelError) {
+      setCancellationError(cancelError.message === 'Failed to fetch'
+        ? 'Could not connect to the clinic API. Check your connection and try again.'
+        : cancelError.message || 'Could not cancel this appointment. Try again.');
+    } finally {
+      setCancelling(false);
+    }
+  }
+
   function openBooking(date, time) {
     setBooking((current) => ({
       ...current,
@@ -655,6 +684,18 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
     </div>
     {success && <div className="form-success" role="status">{success}</div>}
     {error && <div className="form-error" role="alert">{error}</div>}
+    {cancellationTarget && <div className="confirmation-backdrop">
+      <section className="panel cancellation-dialog" role="dialog" aria-modal="true" aria-labelledby="cancel-dialog-title">
+        <h3 id="cancel-dialog-title">Cancel this appointment?</h3>
+        <p>{cancellationTarget.patient_name} · {new Date(cancellationTarget.appointment_date || cancellationTarget.start_at).toLocaleString()}</p>
+        <p className="management-hint">Only pending or confirmed appointments can be cancelled.</p>
+        {cancellationError && <div className="form-error" role="alert">{cancellationError}</div>}
+        <div className="form-actions">
+          <button className="danger-button secondary-button" type="button" disabled={cancelling} onClick={confirmCancellation}>{cancelling ? 'Cancelling…' : 'Confirm cancellation'}</button>
+          <button className="secondary-button" type="button" disabled={cancelling} onClick={() => { setCancellationTarget(null); setCancellationError(''); }}>Keep appointment</button>
+        </div>
+      </section>
+    </div>}
     {scheduleOpen && <form className="panel management-form" onSubmit={submitSchedule}>
       <h3>Set dentist working hours</h3>
       <div className="form-grid">
@@ -754,7 +795,7 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
           </div>
         </div>
         <div className="panel appointment-list-panel"><div className="panel-heading"><div><span className="eyebrow">SELECTED {calendarMode.toUpperCase()}</span><h3>Appointments in this view</h3></div></div>
-          {visibleAppointments.length ? <div className="appointment-list">{[...visibleAppointments].sort((a, b) => new Date(a.appointment_date || a.start_at) - new Date(b.appointment_date || b.start_at)).map((item) => <AppointmentRow key={item.id} item={item} />)}</div> : <p className="management-state">No appointments in this {calendarMode}.</p>}
+          {visibleAppointments.length ? <div className="appointment-list">{[...visibleAppointments].sort((a, b) => new Date(a.appointment_date || a.start_at) - new Date(b.appointment_date || b.start_at)).map((item) => <AppointmentRow key={item.id} item={item} canCancel={isReceptionRole} onCancel={(target) => { setCancellationTarget(target); setCancellationError(''); setSuccess(''); }} />)}</div> : <p className="management-state">No appointments in this {calendarMode}.</p>}
         </div>
       </>}
   </section>;

@@ -76,6 +76,7 @@ Chạy `python manage.py migrate` để tạo schema từ migration. Sau đó ch
 - `GET/POST /api/v1/patients/` (hồ sơ gồm ngày sinh, kiểu răng, tiền sử bệnh và dị ứng)
 - `GET /api/v1/patients/?search=<mã|tên|điện thoại>` (tra cứu hồ sơ bệnh nhân; yêu cầu role Admin hoặc Receptionist)
 - `GET/POST /api/v1/appointments/` (danh sách/đặt lịch; giờ hẹn phải nằm trong ca làm của bác sĩ và không trùng lịch)
+- `POST /api/v1/appointments/{id}/cancel/` (lễ tân/Admin hủy lịch Pending hoặc Confirmed; lịch Completed hoặc đã Cancelled bị từ chối)
 - `GET/POST /api/v1/schedules/` (xem/đặt ca làm theo bác sĩ, ngày và giờ; không cho phép ca chồng nhau)
 - `GET /api/v1/teeth/` (danh mục răng để lập hồ sơ bệnh án)
 - `GET/POST /api/v1/medical-records/` (bác sĩ lập/cập nhật chẩn đoán, hướng điều trị, răng và dịch vụ chỉ định)
@@ -89,6 +90,8 @@ Frontend dùng thống nhất các endpoint API v1. Role từ `/auth/me/` đư�
 Màn hình lịch hẹn hỗ trợ xem theo ngày/tuần, chuyển khoảng thời gian và lọc theo bác sĩ; ca làm và lịch hẹn được đọc từ `/api/v1/schedules/` và `/api/v1/appointments/`. Ngoài giờ làm được phân biệt trực quan với ca làm và lịch hẹn. Thao tác đặt lịch hoặc quản lý ca hiện có trên màn hình vẫn là luồng hiện hữu, không thuộc phạm vi hoàn thiện đặt/hủy lịch của tính năng xem lịch.
 
 Luồng đặt lịch trên giao diện dành cho lễ tân/Admin, gửi `patient`, `doctor`, `service`, `appointment_date` và lý do khám trong `notes` tới `POST /api/v1/appointments/`. Backend xác thực giờ làm, thời lượng dịch vụ và xung đột lịch; giao diện chỉ xác nhận thành công sau khi API tạo lịch, sau đó chuyển tới ngày hẹn để thấy lịch mới. API hiện yêu cầu tài khoản nhân viên đã đăng nhập để tạo lịch, nên chưa hỗ trợ bệnh nhân tự đặt lịch.
+
+Tại màn hình lịch, lễ tân/Admin có thể yêu cầu hủy lịch Pending hoặc Confirmed sau khi xác nhận trong hộp thoại. API trả bản ghi cập nhật; giao diện chỉ đổi trạng thái sau phản hồi thành công và giữ thông báo lỗi nếu API từ chối hoặc mất kết nối. Các trạng thái được phép hủy là quy ước hiện tại, cần được nhóm trưởng xác nhận.
 
 ## 6. Build kiểm tra
 
