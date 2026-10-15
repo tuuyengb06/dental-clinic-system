@@ -70,6 +70,8 @@
 .calendar-event.status-confirmed{background:#e3edf7;border-left-color:#4f7ba9}
 .calendar-event.status-completed{background:#e8f2e7;border-left-color:#5d8d57}
 .calendar-event.status-cancelled{background:#f3e8e5;border-left-color:#ae685c;opacity:.8}
+.calendar-event-reason{white-space:normal!important;overflow-wrap:anywhere}
+.booking-reason{grid-column:1/-1}
 .calendar-event strong{font-size:9px;color:var(--deep);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .calendar-event span,.calendar-event small{font-size:8px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .empty-slot{position:absolute;inset:0;width:100%;background:transparent;color:#74a18b;font-size:18px;opacity:0}
