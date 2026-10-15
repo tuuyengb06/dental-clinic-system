@@ -238,7 +238,7 @@ function App() {
       {apiError && <div className="api-error" role="alert">{apiError}</div>}
       {section === 'Overview' && <Overview appointments={appointments} patients={patients} setSection={setSection} />}
       {section === 'Patients' && <Patients patients={visiblePatients} query={query} setQuery={setQuery} onCreatePatient={createPatient} canCreate={role === 'ADMIN' || role === 'RECEPTIONIST'} />}
-      {section === 'Reception' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Reception patients={patients} appointments={appointments} onCreatePatient={createPatient} setSection={setSection} />}
+      {section === 'Reception' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Reception tokens={tokens} onTokensChanged={updateTokens} appointments={appointments} setSection={setSection} />}
       {section === 'Appointments' && <Appointments appointments={appointments} patients={patients} doctors={doctors} services={services} schedules={schedules} role={role} onCreateAppointment={createAppointment} onCreateSchedule={createSchedule} />}
       {section === 'EMR' && (role === 'DENTIST' || role === 'ADMIN') && <MedicalRecords appointments={appointments} patients={patients} services={services} teeth={teeth} records={medicalRecords} onSave={saveMedicalRecord} />}
       {section === 'Tooth chart' && <ToothChart dentition={dentition} setDentition={setDentition} selectedTooth={selectedTooth} setSelectedTooth={setSelectedTooth} />}
@@ -671,54 +671,134 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
   </section>;
 }
 
-function Reception({ patients, appointments, onCreatePatient, setSection }) {
-  const [form, setForm] = useState(emptyPatient);
-  const [saving, setSaving] = useState(false);
+function Reception({ tokens, onTokensChanged, appointments, setSection }) {
+  const [term, setTerm] = useState('');
+  const [patients, setPatients] = useState([]);
+  const [selectedPatientId, setSelectedPatientId] = useState(null);
+  const [searched, setSearched] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const selectedPatient = patients.find((patient) => patient.id === selectedPatientId);
+  const patientAppointments = selectedPatient
+    ? appointments
+      .filter((appointment) => appointment.patient === selectedPatient.id)
+      .sort((left, right) => new Date(left.appointment_date || left.start_at) - new Date(right.appointment_date || right.start_at))
+    : [];
 
-  async function registerPatient(event) {
+  async function searchPatients(event) {
     event.preventDefault();
-    setSaving(true);
+    const searchTerm = term.trim();
+    setPatients([]);
+    setSelectedPatientId(null);
     setError('');
-    setSuccess('');
+    setSearched(Boolean(searchTerm));
+    if (!searchTerm) return;
+    if (searchTerm.length > 100 || !/^[\p{L}\p{N}\s._+'()\-]+$/u.test(searchTerm)) {
+      setError('Enter a patient code, name, or phone using letters, numbers, spaces, and common separators.');
+      return;
+    }
+
+    setLoading(true);
     try {
-      const patient = await onCreatePatient({ ...form, date_of_birth: form.date_of_birth || null });
-      setSuccess(`${patient.full_name} (${patient.patient_code}) has been registered.`);
-      setForm(emptyPatient);
-    } catch (saveError) {
-      setError(saveError.message);
+      const result = await apiRequest(`/patients/?search=${encodeURIComponent(searchTerm)}`, {
+        tokens,
+        onTokens: onTokensChanged
+      });
+      if (!Array.isArray(result)) {
+        throw new Error('The patient search returned an unexpected response.');
+      }
+      setPatients(result);
+      setSelectedPatientId(result.length === 1 ? result[0].id : null);
+    } catch (searchError) {
+      setError(searchError.message || 'Could not search patients. Please try again.');
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
   }
 
-  return <section className="page-section management-page">
-    <div className="section-toolbar"><div><span className="eyebrow">FRONT DESK</span><h2>Patient reception</h2></div><button className="primary-button" onClick={() => setSection('Appointments')}><CalendarDays size={17} /> Open timetable</button></div>
-    <div className="reception-layout">
-      <form className="panel management-form" onSubmit={registerPatient}>
-        <h3>New patient intake</h3>
-        <p className="management-hint">Register patient details and flag medical history or allergies for the clinical team.</p>
-        {error && <div className="form-error" role="alert">{error}</div>}
-        {success && <div className="form-success" role="status">{success}</div>}
-        <div className="form-grid">
-          <label>Patient code<input required maxLength="20" value={form.patient_code} onChange={(event) => setForm({ ...form, patient_code: event.target.value.trim().toUpperCase() })} /></label>
-          <label>Full name<input required maxLength="160" value={form.full_name} onChange={(event) => setForm({ ...form, full_name: event.target.value })} /></label>
-          <label>Phone<input maxLength="30" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
-          <label>Date of birth<input type="date" value={form.date_of_birth} onChange={(event) => setForm({ ...form, date_of_birth: event.target.value })} /></label>
-          <label>Dental profile<select value={form.dentition_type} onChange={(event) => setForm({ ...form, dentition_type: event.target.value })}><option value="ADULT">Adult · 32 teeth</option><option value="CHILD">Child · 20 teeth</option></select></label>
-          <label>Allergies<textarea value={form.allergies} onChange={(event) => setForm({ ...form, allergies: event.target.value })} /></label>
-          <label className="form-wide">Medical history<textarea value={form.medical_history} onChange={(event) => setForm({ ...form, medical_history: event.target.value })} /></label>
-        </div>
-        <div className="form-actions"><button className="primary-button" disabled={saving}>{saving ? 'Registering…' : 'Register patient'}</button></div>
-      </form>
-      <aside className="panel reception-summary">
-        <span className="eyebrow">FRONT DESK SUMMARY</span>
-        <h3>{patients.length} patient records</h3>
-        <p>Today's appointments: {appointments.filter((item) => dateKey(new Date(item.appointment_date || item.start_at)) === dateKey(new Date())).length}</p>
-        <div className="reception-patients">{patients.slice(0, 8).map((patient) => <div key={patient.id}><div className="small-avatar">{patient.full_name.split(' ').map((part) => part[0]).slice(-2).join('')}</div><span><strong>{patient.full_name}</strong><small>{patient.patient_code} · {patient.phone || 'No phone'}</small></span></div>)}</div>
-      </aside>
+  function formatDate(value) {
+    if (!value) return 'Not recorded';
+    const date = new Date(`${value}T00:00:00`);
+    return Number.isNaN(date.getTime()) ? 'Not recorded' : date.toLocaleDateString();
+  }
+
+  function patientAge(value) {
+    if (!value) return null;
+    const birthDate = new Date(`${value}T00:00:00`);
+    if (Number.isNaN(birthDate.getTime())) return null;
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    if (today.getMonth() < birthDate.getMonth() || (today.getMonth() === birthDate.getMonth() && today.getDate() < birthDate.getDate())) age -= 1;
+    return age >= 0 ? age : null;
+  }
+
+  return <section className="page-section management-page reception-page">
+    <div className="section-toolbar">
+      <div><span className="eyebrow">FRONT DESK</span><h2>Patient reception</h2></div>
+      {selectedPatient && <button className="primary-button" onClick={() => setSection('Appointments')}><CalendarDays size={17} /> Continue to scheduling</button>}
     </div>
+    <form className="panel reception-search" onSubmit={searchPatients} noValidate>
+      <label htmlFor="reception-search">Find an existing patient</label>
+      <p>Search by patient code, full or partial name, or phone number.</p>
+      <div className="reception-search-controls">
+        <Search size={18} aria-hidden="true" />
+        <input
+          id="reception-search"
+          type="search"
+          maxLength={120}
+          value={term}
+          onChange={(event) => {
+            setTerm(event.target.value);
+            setPatients([]);
+            setSelectedPatientId(null);
+            setSearched(false);
+            setError('');
+          }}
+          disabled={loading}
+          placeholder="e.g. DMS-0001, Nguyen Minh Anh, or phone"
+          autoComplete="off"
+        />
+        <button className="primary-button" type="submit" disabled={loading}>{loading ? 'Searching…' : 'Search'}</button>
+      </div>
+      {error && <div className="form-error" role="alert">{error}</div>}
+    </form>
+
+    {loading && <div className="panel reception-state" role="status">Searching patient records…</div>}
+    {!loading && !error && !term.trim() && <div className="panel reception-state">Enter a patient code, name, or phone number to begin.</div>}
+    {!loading && !error && term.trim() && !searched && <div className="panel reception-state">Press Search to look up this patient.</div>}
+    {!loading && !error && searched && patients.length === 0 && <div className="panel reception-state" role="status">No patient found. Check the details and search again.</div>}
+    {!loading && !error && patients.length > 0 && <div className="reception-results-layout">
+      <section className="panel reception-results" aria-label="Patient search results">
+        <div className="panel-heading"><div><span className="eyebrow">SEARCH RESULTS</span><h3>{patients.length} {patients.length === 1 ? 'patient' : 'patients'} found</h3></div></div>
+        {patients.map((patient) => <button
+          type="button"
+          key={patient.id}
+          className={`reception-result ${selectedPatientId === patient.id ? 'selected' : ''}`}
+          onClick={() => setSelectedPatientId(patient.id)}
+        >
+          <span className="small-avatar">{patient.full_name.split(' ').map((part) => part[0]).slice(-2).join('')}</span>
+          <span className="reception-result-info"><strong>{patient.full_name}</strong><small>{patient.patient_code} · {patient.phone || 'No phone recorded'}</small></span>
+          <span className="reception-result-arrow">›</span>
+        </button>)}
+      </section>
+      {selectedPatient && <section className="panel reception-profile">
+        <div className="panel-heading"><div><span className="eyebrow">PATIENT PROFILE</span><h3>{selectedPatient.full_name}</h3></div><span className="pill">{selectedPatient.patient_code}</span></div>
+        <dl className="reception-profile-grid">
+          <div><dt>Phone</dt><dd>{selectedPatient.phone || 'Not recorded'}</dd></div>
+          <div><dt>Date of birth</dt><dd>{formatDate(selectedPatient.date_of_birth)}{patientAge(selectedPatient.date_of_birth) !== null ? ` · ${patientAge(selectedPatient.date_of_birth)} years old` : ''}</dd></div>
+          <div><dt>Dental profile</dt><dd>{selectedPatient.dentition_type === 'CHILD' ? 'Child · 20 teeth' : 'Adult · 32 teeth'}</dd></div>
+          <div className="reception-medical-alert"><dt>Allergies</dt><dd>{selectedPatient.allergies || 'None recorded'}</dd></div>
+          <div className="profile-wide"><dt>Medical history</dt><dd>{selectedPatient.medical_history || 'None recorded'}</dd></div>
+        </dl>
+        <div className="reception-visit-history">
+          <span className="eyebrow">APPOINTMENT HISTORY</span>
+          {patientAppointments.length
+            ? patientAppointments.map((appointment) => <div key={appointment.id}><strong>{new Date(appointment.appointment_date || appointment.start_at).toLocaleString()}</strong><span>{appointment.service_name || appointment.type || 'Dental visit'} · {appointment.status}</span></div>)
+            : <p>No appointments recorded.</p>}
+        </div>
+      </section>}
+      {!selectedPatient && <div className="panel reception-state">Select a patient from the results to review their reception details.</div>}
+    </div>}
   </section>;
 }
 

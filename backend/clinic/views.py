@@ -1,4 +1,8 @@
+import re
+
+from django.db.models import Q
 from rest_framework import status, viewsets
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -39,6 +43,24 @@ class PatientViewSet(viewsets.ModelViewSet):
     queryset = Patient.objects.all()
     serializer_class = PatientSerializer
     permission_classes = [IsAppointmentStaff]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if "search" not in self.request.query_params:
+            return queryset
+
+        search_term = self.request.query_params["search"].strip()
+        if not search_term:
+            raise ValidationError({"search": "Enter a patient code, name, or phone number."})
+        if len(search_term) > 100:
+            raise ValidationError({"search": "Search must be 100 characters or fewer."})
+        if not re.fullmatch(r"[\w\s.\-+'()]+", search_term, flags=re.UNICODE):
+            raise ValidationError({"search": "Search contains unsupported characters."})
+        return queryset.filter(
+            Q(patient_code__icontains=search_term)
+            | Q(full_name__icontains=search_term)
+            | Q(phone__icontains=search_term)
+        )
 
 
 class ToothViewSet(viewsets.ReadOnlyModelViewSet):

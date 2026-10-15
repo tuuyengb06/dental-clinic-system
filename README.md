@@ -74,6 +74,7 @@ Chạy `python manage.py migrate` để tạo schema từ migration. Sau đó ch
 - `POST /api/v1/auth/token/refresh/` (làm mới JWT)
 - `GET /api/v1/auth/me/` (hồ sơ người dùng và role, cần JWT)
 - `GET/POST /api/v1/patients/` (hồ sơ gồm ngày sinh, kiểu răng, tiền sử bệnh và dị ứng)
+- `GET /api/v1/patients/?search=<mã|tên|điện thoại>` (tra cứu hồ sơ bệnh nhân; yêu cầu role Admin hoặc Receptionist)
 - `GET/POST /api/v1/appointments/` (danh sách/đặt lịch; giờ hẹn phải nằm trong ca làm của bác sĩ và không trùng lịch)
 - `GET/POST /api/v1/schedules/` (xem/đặt ca làm theo bác sĩ, ngày và giờ; không cho phép ca chồng nhau)
 - `GET /api/v1/teeth/` (danh mục răng để lập hồ sơ bệnh án)
@@ -112,4 +113,4 @@ python manage.py check
 
 ## Phạm vi MVP
 
-Đã có giao diện tiếp nhận bệnh nhân cho lễ tân, lịch tuần và đặt lịch theo ca, cùng hồ sơ bệnh án điện tử cho bác sĩ. Các chức năng thanh toán hóa đơn, tải radiograph và treatment plan chi tiết vẫn chưa có API hoàn chỉnh.
+Đã có giao diện tiếp nhận tra cứu hồ sơ theo mã bệnh nhân, họ tên hoặc số điện thoại, hiển thị thông tin định danh, ngày sinh, kiểu răng, dị ứng, tiền sử bệnh và các lịch hẹn hiện có. API tra cứu trả lỗi đầu vào rõ ràng cho truy vấn trống hoặc ký tự không hợp lệ. Lịch tuần/đặt lịch và hồ sơ bệnh án điện tử là các phần việc riêng; thanh toán hóa đơn, tải radiograph và treatment plan chi tiết vẫn chưa có API hoàn chỉnh.
