@@ -2,11 +2,12 @@ import os
 from datetime import date, timedelta
 from decimal import Decimal
 
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
+from appointments.models import Appointment as ScheduledAppointment
 from clinic.models import (
     Appointment,
     ClinicUser,
@@ -19,7 +20,10 @@ from clinic.models import (
     Tooth,
     TreatmentItem,
     TreatmentPlan,
+    WorkSchedule,
 )
+
+User = get_user_model()
 
 
 class Command(BaseCommand):
@@ -143,6 +147,22 @@ class Command(BaseCommand):
                 "room": "Room 01",
                 "end_at": start + timedelta(minutes=45),
                 "status": Appointment.CONFIRMED,
+            },
+        )
+        WorkSchedule.objects.get_or_create(
+            doctor=staff["doctor1"].doctor_profile,
+            work_date=start.date(),
+            start_time=start.time(),
+            end_time=start.replace(hour=17).time(),
+        )
+        ScheduledAppointment.objects.get_or_create(
+            patient=patients["DMS-0001"],
+            doctor=staff["doctor1"].doctor_profile,
+            appointment_date=start,
+            defaults={
+                "service": services["CLEANING"],
+                "status": ScheduledAppointment.Status.CONFIRMED,
+                "notes": "Seeded cleaning appointment",
             },
         )
 
