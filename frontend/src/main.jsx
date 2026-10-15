@@ -543,6 +543,7 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
   const [schedule, setSchedule] = useState({ doctor: '', work_date: dateKey(new Date()), start_time: '09:00', end_time: '17:00' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const monday = new Date(calendarDate);
   monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
   const days = Array.from({ length: calendarMode === 'day' ? 1 : 7 }, (_, index) => {
@@ -580,20 +581,32 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
 
   async function submitBooking(event) {
     event.preventDefault();
+    const reason = booking.notes.trim();
+    if (!booking.patient || !booking.doctor || !booking.service || !booking.date || !booking.time || !reason) {
+      setError('Complete all required fields, including the reason for the visit.');
+      return;
+    }
     setSaving(true);
     setError('');
+    setSuccess('');
     try {
-      await onCreateAppointment({
+      const created = await onCreateAppointment({
         patient: Number(booking.patient),
         doctor: Number(booking.doctor),
         service: Number(booking.service),
         appointment_date: new Date(`${booking.date}T${booking.time}:00`).toISOString(),
-        notes: booking.notes
+        notes: reason
       });
       setBookingOpen(false);
-      setBooking({ ...booking, patient: '', notes: '' });
+      setCalendarDate(new Date(`${booking.date}T12:00:00`));
+      setCalendarMode('day');
+      const patientName = patients.find((patient) => patient.id === created.patient)?.full_name;
+      setSuccess(`Appointment request submitted${patientName ? ` for ${patientName}` : ''}. The updated visit is shown on the selected day.`);
+      setBooking((current) => ({ ...current, patient: '', notes: '' }));
     } catch (saveError) {
-      setError(saveError.message);
+      setError(saveError.message === 'Failed to fetch'
+        ? 'Could not connect to the clinic API. Check your connection and try again.'
+        : saveError.message || 'Could not submit the appointment request. Try again.');
     } finally {
       setSaving(false);
     }
@@ -629,6 +642,7 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
     }));
     setBookingOpen(true);
     setError('');
+    setSuccess('');
   }
 
   return <section className="page-section management-page">
@@ -636,9 +650,10 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
       <div><span className="eyebrow">CLINIC TIMETABLE</span><h2>Appointments & work shifts</h2></div>
       <div className="calendar-actions">
         {isReceptionRole && <button className="secondary-button" onClick={() => { setScheduleOpen(!scheduleOpen); setError(''); }}>{scheduleOpen ? 'Close shift form' : 'Add work shift'}</button>}
-        {isReceptionRole && <button className="primary-button" onClick={() => openBooking(weekDate, '09:00')}><CalendarDays size={17} /> Book appointment</button>}
+        {isReceptionRole && <button className="primary-button" onClick={() => openBooking(calendarDate, '09:00')}><CalendarDays size={17} /> Book appointment</button>}
       </div>
     </div>
+    {success && <div className="form-success" role="status">{success}</div>}
     {error && <div className="form-error" role="alert">{error}</div>}
     {scheduleOpen && <form className="panel management-form" onSubmit={submitSchedule}>
       <h3>Set dentist working hours</h3>
@@ -651,16 +666,16 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
       <div className="form-actions"><button className="primary-button" disabled={saving}>{saving ? 'Saving…' : 'Save work shift'}</button></div>
     </form>}
     {bookingOpen && <form className="panel management-form" onSubmit={submitBooking}>
-      <h3>Book an appointment</h3>
+      <h3>Request an appointment</h3>
       <div className="form-grid">
         <label>Patient<select required value={booking.patient} onChange={(event) => setBooking({ ...booking, patient: event.target.value })}><option value="">Select patient</option>{patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.full_name} · {patient.patient_code}</option>)}</select></label>
         <label>Dentist<select required value={booking.doctor} onChange={(event) => setBooking({ ...booking, doctor: event.target.value })}><option value="">Select dentist</option>{doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.full_name}</option>)}</select></label>
         <label>Service<select required value={booking.service} onChange={(event) => setBooking({ ...booking, service: event.target.value })}><option value="">Select service</option>{services.map((service) => <option key={service.id} value={service.id}>{service.name} · {service.duration_minutes} min</option>)}</select></label>
         <label>Date<input required type="date" value={booking.date} onChange={(event) => setBooking({ ...booking, date: event.target.value })} /></label>
         <label>Start time<input required type="time" value={booking.time} onChange={(event) => setBooking({ ...booking, time: event.target.value })} /></label>
-        <label>Visit notes<input value={booking.notes} onChange={(event) => setBooking({ ...booking, notes: event.target.value })} /></label>
+        <label className="booking-reason">Reason for visit<textarea required maxLength={1000} value={booking.notes} onChange={(event) => setBooking({ ...booking, notes: event.target.value })} /></label>
       </div>
-      <p className="management-hint">Appointments must fit within a saved dentist work shift and cannot overlap another visit.</p>
+      <p className="management-hint">The selected dentist must be scheduled for the full service duration. Overlapping appointments are rejected by the API.</p>
       <div className="form-actions"><button className="primary-button" disabled={saving}>{saving ? 'Booking…' : 'Confirm booking'}</button><button className="secondary-button" type="button" onClick={() => setBookingOpen(false)}>Cancel</button></div>
     </form>}
     <div className="calendar-toolbar panel">
@@ -711,6 +726,15 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
                   return dateKey(start) === key
                     && Math.floor((start.getHours() * 60 + start.getMinutes()) / 30) * 30 === minute;
                 });
+                const selectedService = services.find((service) => String(service.id) === booking.service);
+                const proposedStart = new Date(`${key}T${time}:00`);
+                const proposedEnd = new Date(proposedStart.getTime() + (selectedService?.duration_minutes || 30) * 60_000);
+                const slotBusy = visibleAppointments.some((item) => {
+                  if (String(item.status || '').toLowerCase() === 'cancelled') return false;
+                  const start = new Date(item.appointment_date || item.start_at);
+                  const end = item.end_at ? new Date(item.end_at) : new Date(start.getTime() + 30 * 60_000);
+                  return start < proposedEnd && proposedStart < end;
+                });
                 return <div className={`timetable-cell ${shifts.length ? 'shift-available' : ''}`} key={`${key}-${time}`}>
                   {events.map((item) => {
                     const start = new Date(item.appointment_date || item.start_at);
@@ -720,9 +744,10 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
                       <strong>{start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}{end && !Number.isNaN(end.getTime()) ? `–${end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''} · {item.patient_name}</strong>
                       <span>{item.service_name || item.type || 'Dental visit'} · {item.dentist_name}</span>
                       <small>{item.status || 'Scheduled'}</small>
+                      {item.notes && <small className="calendar-event-reason">Reason: {item.notes}</small>}
                     </div>;
                   })}
-                  {!events.length && isReceptionRole && shifts.length > 0 && <button aria-label={`Book ${key} at ${time}`} className="empty-slot" onClick={() => openBooking(date, time)} title="Book this available slot">+</button>}
+                  {!events.length && !slotBusy && isReceptionRole && shifts.length > 0 && <button aria-label={`Book ${key} at ${time}`} className="empty-slot" onClick={() => openBooking(date, time)} title="Request an appointment for this available slot">+</button>}
                 </div>;
               })}
             </div>)}

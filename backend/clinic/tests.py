@@ -220,16 +220,41 @@ class AuthenticationAndManagementApiTests(APITestCase):
             "doctor": doctor_id,
             "service": self.service.id,
             "appointment_date": appointment_date.isoformat(),
+            "notes": "Routine dental check-up",
         }
         created = self.client.post("/api/v1/appointments/", payload, format="json")
         self.assertEqual(created.status_code, status.HTTP_201_CREATED)
         self.assertEqual(created.data["patient_name"], self.patient.full_name)
         self.assertEqual(created.data["service_name"], self.service.name)
+        self.assertEqual(created.data["notes"], "Routine dental check-up")
         payload["appointment_date"] = timezone.make_aware(
             datetime.combine(work_date, time(9, 15))
         ).isoformat()
         overlap = self.client.post("/api/v1/appointments/", payload, format="json")
         self.assertEqual(overlap.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_appointment_rejects_missing_required_fields(self):
+        self.authenticate("clinic-admin", "AdminPass123!")
+        response = self.client.post("/api/v1/appointments/", {}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_appointment_rejects_time_without_a_matching_work_shift(self):
+        self.authenticate("clinic-admin", "AdminPass123!")
+        appointment_date = timezone.make_aware(
+            datetime.combine(timezone.localdate() + timedelta(days=5), time(9, 0))
+        )
+        response = self.client.post(
+            "/api/v1/appointments/",
+            {
+                "patient": self.patient.id,
+                "doctor": Doctor.objects.get(license_number="DMS-TEST-001").id,
+                "service": self.service.id,
+                "appointment_date": appointment_date.isoformat(),
+                "notes": "Tooth pain",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_receptionist_can_manage_shifts_and_book_appointments(self):
         receptionist_role = Role.objects.create(code="RECEPTIONIST", name="Receptionist")
