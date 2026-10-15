@@ -21,7 +21,7 @@
 .management-form h3{font-family:Fraunces,Georgia,serif;color:var(--deep);font-size:20px;margin:0 0 18px}
 .form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
 .form-grid label{display:grid;gap:6px;color:var(--deep);font-size:12px;font-weight:700}
-.form-grid input:not([type=checkbox]),.form-grid textarea{width:100%;padding:10px 11px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink);font-size:13px}
+.form-grid input:not([type=checkbox]),.form-grid select,.form-grid textarea{width:100%;padding:10px 11px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink);font-size:13px}
 .form-grid textarea{min-height:76px;resize:vertical}
 .form-grid .form-wide{grid-column:1/-1}
 .form-grid .checkbox-field{display:flex;align-items:center;gap:8px;font-weight:500}
@@ -32,5 +32,29 @@
 .management-state{padding:20px;color:var(--muted);font-size:13px}
 .pill.inactive{background:#f1eeea;color:#827970}
 .danger-button{color:#b34d3d}
+.form-success{padding:11px 13px;margin:0 0 14px;background:#e1efe6;color:#31725d;border:1px solid #cbe2d3;font-size:12px}
+.booking-hint{font-size:12px;line-height:1.5;color:var(--muted);margin:-8px 0 18px}
 @media(max-width:700px){.form-grid{grid-template-columns:1fr}.form-grid .form-wide{grid-column:auto}.management-table td,.management-table th{padding:12px 10px}}
 @media(max-width:560px){.login-card{padding:27px 22px}.topbar-actions .user-card>div:nth-child(2){display:none}.topbar-actions .user-card .secondary-button{font-size:10px;padding:7px}}
+.appointment-view{white-space:nowrap}
+.appointment-detail{padding:24px}
+.appointment-detail-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding-bottom:20px;border-bottom:1px solid var(--line)}
+.appointment-detail-heading h3{font-family:Fraunces,Georgia,serif;color:var(--deep);font-size:23px;margin:7px 0 4px}
+.appointment-detail-heading>div>span:last-child{color:var(--muted);font-size:12px}
+.appointment-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin:22px 0 0}
+.appointment-detail-grid div{min-width:0}
+.appointment-detail-grid dt{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.appointment-detail-grid dd{margin:0;color:var(--deep);font-size:13px;overflow-wrap:anywhere}
+.appointment-detail-grid .appointment-detail-notes{grid-column:1/-1}
+.status.cancelled{background:#f5e2de;color:#a24f43}
+.medical-record-view{padding:24px}
+.medical-record-form{display:grid;gap:14px}
+.medical-record-form label{display:grid;gap:6px;color:var(--deep);font-size:12px;font-weight:700}
+.medical-record-form label span{color:#b34d3d}
+.medical-record-form textarea{width:100%;min-height:90px;padding:10px 11px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink);font-size:13px;resize:vertical}
+.medical-record-patient{padding-bottom:20px;border-bottom:1px solid var(--line)}
+.medical-record-patient h3{font-family:Fraunces,Georgia,serif;color:var(--deep);font-size:23px;margin:7px 0 4px}
+.medical-record-patient>span:last-child{color:var(--muted);font-size:12px}
+.medical-record-grid{margin-top:22px}
+.medical-record-grid dd{white-space:pre-wrap}
+@media(max-width:560px){.appointment-detail{padding:17px}.appointment-detail-grid{grid-template-columns:1fr;gap:16px}.appointment-detail-grid .appointment-detail-notes{grid-column:auto}.appointment-row{flex-wrap:wrap}.appointment-view{margin-left:auto}}

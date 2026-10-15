@@ -1,19 +1,16 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Activity, CalendarDays, ChevronDown, CircleDollarSign, ClipboardPlus, FileImage, LayoutDashboard, Menu, Pencil, Plus, Search, ShieldCheck, Stethoscope, Trash2, UserRound, Users, X } from 'lucide-react';
+import { Activity, ArrowLeft, CalendarDays, ChevronDown, CircleDollarSign, ClipboardPlus, FileImage, LayoutDashboard, Menu, Pencil, Plus, Search, ShieldCheck, Stethoscope, Trash2, UserRound, Users, X } from 'lucide-react';
 import './styles.css';
 import './app.css';
 
 const API = import.meta.env.DEV ? '/api/v1' : (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1');
+const API_ROOT = API.replace(/\/api\/v1\/?$/, '');
+const CLINIC_API = `${API_ROOT}/api/clinic`;
 const fallbackPatients = [
   { id: 1, patient_code: 'DMS-0001', full_name: 'Nguyen Minh Anh', phone: '090 123 4567', dentition_type: 'ADULT', allergies: 'Penicillin' },
   { id: 2, patient_code: 'DMS-0002', full_name: 'Tran Gia Bao', phone: '091 234 5678', dentition_type: 'CHILD', allergies: '' },
   { id: 3, patient_code: 'DMS-0003', full_name: 'Le Thu Phuong', phone: '098 555 2026', dentition_type: 'ADULT', allergies: 'None recorded' }
-];
-const fallbackAppointments = [
-  { id: 1, patient_name: 'Nguyen Minh Anh', dentist_name: 'Dr. Le Thu Ha', start_at: '09:00', room: 'Room 01', status: 'CONFIRMED', type: 'Implant consultation' },
-  { id: 2, patient_name: 'Tran Gia Bao', dentist_name: 'Dr. Pham Quoc', start_at: '10:30', room: 'Room 02', status: 'SCHEDULED', type: 'Child check-up' },
-  { id: 3, patient_name: 'Le Thu Phuong', dentist_name: 'Dr. Le Thu Ha', start_at: '13:30', room: 'Room 01', status: 'SCHEDULED', type: 'Cleaning & scan' }
 ];
 const teethAdult = Array.from({ length: 32 }, (_, i) => ({ id: i + 1, code: `A${String(i + 1).padStart(2, '0')}`, state: i === 6 || i === 18 ? 'Needs care' : 'Healthy' }));
 const teethChild = Array.from({ length: 20 }, (_, i) => ({ id: i + 1, code: `C${String(i + 1).padStart(2, '0')}`, state: i === 3 ? 'Monitor' : 'Healthy' }));
@@ -33,8 +30,8 @@ const navigationByRole = {
 
 const TOKEN_STORAGE_KEY = 'dms.auth.tokens';
 
-async function apiRequest(path, { tokens, onTokens, method = 'GET', body } = {}) {
-  const send = (accessToken) => fetch(`${API}${path}`, {
+async function apiRequest(path, { tokens, onTokens, method = 'GET', body, apiBase = API } = {}) {
+  const send = (accessToken) => fetch(`${apiBase}${path}`, {
     method,
     headers: {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
@@ -62,7 +59,10 @@ async function apiRequest(path, { tokens, onTokens, method = 'GET', body } = {})
   const payload = response.status === 204 ? null : await response.json().catch(() => null);
   if (!response.ok) {
     const detail = payload?.detail || Object.values(payload || {}).flat().join(' ') || `Yêu cầu thất bại (${response.status}).`;
-    throw new Error(detail);
+    const error = new Error(detail);
+    error.status = response.status;
+    error.code = payload?.code;
+    throw error;
   }
   return payload;
 }
@@ -70,7 +70,9 @@ async function apiRequest(path, { tokens, onTokens, method = 'GET', body } = {})
 function App() {
   const [section, setSection] = useState('Overview');
   const [patients, setPatients] = useState(fallbackPatients);
-  const [appointments, setAppointments] = useState(fallbackAppointments);
+  const [appointments, setAppointments] = useState([]);
+  const [appointmentsLoading, setAppointmentsLoading] = useState(false);
+  const [appointmentsError, setAppointmentsError] = useState('');
   const [tokens, setTokens] = useState(null);
   const [profile, setProfile] = useState(null);
   const [authReady, setAuthReady] = useState(false);
@@ -129,18 +131,38 @@ function App() {
 
   useEffect(() => {
     if (!tokens || !profile) return;
-    Promise.all([
-      apiRequest('/patients/', { tokens, onTokens: updateTokens }),
-      apiRequest('/appointments/', { tokens, onTokens: updateTokens })
-    ]).then(([patientData, appointmentData]) => {
-      setPatients(patientData);
-      setAppointments(appointmentData);
-      setApiLive(true);
-      setApiError('');
-    }).catch((error) => {
-      setApiLive(false);
-      setApiError(error.message);
-    });
+    let active = true;
+    setAppointmentsLoading(true);
+    setAppointmentsError('');
+
+    apiRequest('/patients/', { tokens, onTokens: updateTokens })
+      .then((patientData) => {
+        if (!active) return;
+        setPatients(patientData);
+        setApiError('');
+      })
+      .catch((error) => {
+        if (!active) return;
+        setApiError(error.message);
+      });
+
+    apiRequest('/appointments/', { tokens, onTokens: updateTokens })
+      .then((appointmentData) => {
+        if (!active) return;
+        setAppointments(appointmentData);
+        setApiLive(true);
+        setAppointmentsError('');
+      })
+      .catch((error) => {
+        if (!active) return;
+        setApiLive(false);
+        setAppointmentsError(error.message);
+      })
+      .finally(() => {
+        if (active) setAppointmentsLoading(false);
+      });
+
+    return () => { active = false; };
   }, [tokens, profile]);
 
   const updateTokens = useCallback((nextTokens) => {
@@ -181,14 +203,14 @@ function App() {
     <aside className={`sidebar ${mobileOpen ? 'open' : ''}`}>
       <div className="brand"><div className="brand-mark">D</div><div><strong>DMS</strong><span>Dental management</span></div><button className="icon-button close-menu" onClick={() => setMobileOpen(false)}><X size={18} /></button></div>
       <div className="workspace"><span className="eyebrow">Workspace</span><button className="workspace-button">Lotus Dental Clinic <ChevronDown size={15} /></button></div>
-      <nav aria-label="Main navigation">{nav.map(([name, Icon]) => <button key={name} className={section === name ? 'nav-item active' : 'nav-item'} aria-current={section === name ? 'page' : undefined} onClick={() => { setSection(name); setMobileOpen(false); }}><Icon size={18} /><span>{name}</span>{name === 'Appointments' && <b>3</b>}</button>)}</nav>
+      <nav aria-label="Main navigation">{nav.map(([name, Icon]) => <button key={name} className={section === name ? 'nav-item active' : 'nav-item'} aria-current={section === name ? 'page' : undefined} onClick={() => { setSection(name); setMobileOpen(false); }}><Icon size={18} /><span>{name}</span>{name === 'Appointments' && <b>{appointments.length}</b>}</button>)}</nav>
     </aside>
     <main className="main-content">
       <header className="topbar"><button className="icon-button menu-button" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><div><span className="eyebrow">Tuesday, 08 September 2026</span><h1>{section === 'Overview' ? `Good morning, ${profile.display_name}` : section}</h1></div><div className="topbar-actions"><span className={`api-status ${apiLive ? 'live' : ''}`}><span />{apiLive ? 'Live API' : 'Connecting'}</span><button className="icon-button"><Activity size={19} /></button><div className="user-card"><div className="avatar">{profile.display_name.split(' ').map((part) => part[0]).slice(-2).join('')}</div><div><strong>{profile.display_name}</strong><span>{profile.role}</span></div><button className="secondary-button" onClick={logout}>Log out</button></div></div></header>
       {apiError && <div className="api-error" role="alert">{apiError}</div>}
       {section === 'Overview' && <Overview appointments={appointments} patients={patients} setSection={setSection} />}
       {section === 'Patients' && <Patients patients={visiblePatients} query={query} setQuery={setQuery} />}
-      {section === 'Appointments' && <Appointments appointments={appointments} />}
+      {section === 'Appointments' && <Appointments appointments={appointments} loading={appointmentsLoading} error={appointmentsError} tokens={tokens} onTokensChanged={updateTokens} onAppointmentCreated={(created) => setAppointments((current) => [created, ...current])} onAppointmentUpdated={(updated) => setAppointments((current) => current.map((appointment) => appointment.id === updated.id ? updated : appointment))} onAppointmentsReloaded={setAppointments} />}
       {section === 'Tooth chart' && <ToothChart dentition={dentition} setDentition={setDentition} selectedTooth={selectedTooth} setSelectedTooth={setSelectedTooth} />}
       {section === 'Billing' && <Billing patients={patients} />}
       {section === 'Radiographs' && <Radiographs />}
@@ -377,9 +399,356 @@ function Overview({ appointments, patients, setSection }) { return <>
   <div className="content-grid"><section className="panel schedule-panel"><div className="panel-heading"><div><span className="eyebrow">APPOINTMENTS</span><h3>Today’s schedule</h3></div><button className="text-button" onClick={() => setSection('Appointments')}>View calendar <span>→</span></button></div><div className="appointment-list">{appointments.map((item) => <AppointmentRow key={item.id} item={item} />)}</div></section><section className="panel focus-panel"><div className="panel-heading"><div><span className="eyebrow">CLINIC FOCUS</span><h3>At a glance</h3></div><ShieldCheck size={19} color="#1d6857" /></div><div className="focus-stat"><span className="focus-icon green"><UserRound size={18} /></span><div><strong>{patients.length} patient records</strong><span>Digitized and searchable</span></div></div><div className="focus-stat"><span className="focus-icon peach"><Stethoscope size={18} /></span><div><strong>2 care alerts</strong><span>Need dentist review</span></div></div><div className="alert-box"><strong>Medication check</strong><p>One prescription needs allergy confirmation before signing.</p><button onClick={() => setSection('Patients')}>Review record →</button></div></section></div>
 </>; }
 function Metric({ label, value, detail, accent, icon: Icon }) { return <div className={`metric-card ${accent}`}><div className="metric-icon"><Icon size={18} /></div><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>; }
-function AppointmentRow({ item }) { return <div className="appointment-row"><div className="time">{item.start_at}</div><div className="appointment-avatar">{item.patient_name.split(' ').map((v) => v[0]).slice(-2).join('')}</div><div className="appointment-info"><strong>{item.patient_name}</strong><span>{item.type || 'Dental consultation'} · {item.dentist_name}</span></div><span className={`status ${item.status.toLowerCase()}`}>{item.status === 'CONFIRMED' ? 'Confirmed' : 'Scheduled'}</span></div>; }
+function appointmentDate(value) {
+  if (!value) return 'Not provided';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function appointmentStatus(status = '') {
+  const normalized = status.toLowerCase();
+  const labels = { pending: 'Pending', confirmed: 'Confirmed', completed: 'Completed', cancelled: 'Cancelled' };
+  const classes = { pending: 'scheduled', confirmed: 'confirmed', completed: 'paid', cancelled: 'cancelled' };
+  return { label: labels[normalized] || status || 'Unknown', className: classes[normalized] || 'scheduled' };
+}
+
+function AppointmentRow({ item, onSelect }) {
+  const initials = (item.patient_name || 'Patient').split(' ').map((part) => part[0]).slice(-2).join('');
+  const status = appointmentStatus(item.status);
+  return <div className="appointment-row">
+    <div className="time">{appointmentDate(item.appointment_date)}</div>
+    <div className="appointment-avatar">{initials}</div>
+    <div className="appointment-info"><strong>{item.patient_name || 'Patient information unavailable'}</strong><span>{item.service_name || 'Service not specified'} · {item.dentist_name || 'Dentist not specified'}</span></div>
+    <span className={`status ${status.className}`}>{status.label}</span>
+    {onSelect && <button className="text-button appointment-view" onClick={() => onSelect(item.id)}>View details</button>}
+  </div>;
+}
 function Patients({ patients, query, setQuery }) { return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">PATIENT DIRECTORY</span><h2>Patient records</h2></div><button className="primary-button"><UserRound size={17} /> New patient</button></div><div className="search-field"><Search size={17} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name, patient code or phone" /></div><div className="panel table-panel"><table><thead><tr><th>Patient</th><th>Code</th><th>Phone</th><th>Dental profile</th><th>Allergy note</th></tr></thead><tbody>{patients.map((p) => <tr key={p.id}><td><div className="table-person"><div className="small-avatar">{p.full_name.split(' ').map((v) => v[0]).slice(-2).join('')}</div><strong>{p.full_name}</strong></div></td><td><code>{p.patient_code}</code></td><td>{p.phone || '—'}</td><td><span className="pill">{p.dentition_type === 'CHILD' ? '20 teeth · child' : '32 teeth · adult'}</span></td><td>{p.allergies || 'No known allergies'}</td></tr>)}</tbody></table></div></section>; }
-function Appointments({ appointments }) { return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">LIVE CALENDAR</span><h2>Appointment schedule</h2></div><button className="primary-button"><CalendarDays size={17} /> Book appointment</button></div><div className="calendar-strip"><strong>Tue<br /><b>08</b></strong><span>Wed<br /><b>09</b></span><span>Thu<br /><b>10</b></span><span>Fri<br /><b>11</b></span><span>Sat<br /><b>12</b></span></div><div className="panel schedule-panel"><div className="appointment-list">{appointments.concat(appointments).map((item, index) => <AppointmentRow item={{ ...item, id: `${item.id}-${index}`, start_at: index > 2 ? ['14:30', '15:15', '16:00'][index - 3] : item.start_at }} key={`${item.id}-${index}`} />)}</div></div></section>; }
+function Appointments({ appointments, loading, error, tokens, onTokensChanged, onAppointmentCreated, onAppointmentUpdated, onAppointmentsReloaded }) {
+  const [selectedId, setSelectedId] = useState(null);
+  const [selectedAppointment, setSelectedAppointment] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState('');
+  const [bookingOpen, setBookingOpen] = useState(false);
+  const [booking, setBooking] = useState({ patient: '', doctor: '', service: '', appointment_date: '', notes: '' });
+  const [services, setServices] = useState([]);
+  const [servicesLoading, setServicesLoading] = useState(false);
+  const [servicesError, setServicesError] = useState('');
+  const [bookingError, setBookingError] = useState('');
+  const [bookingSuccess, setBookingSuccess] = useState('');
+  const [bookingSaving, setBookingSaving] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancellationError, setCancellationError] = useState('');
+  const [cancellationSuccess, setCancellationSuccess] = useState('');
+  const [medicalRecordOpen, setMedicalRecordOpen] = useState(false);
+  const [medicalRecord, setMedicalRecord] = useState(null);
+  const [medicalRecordLoading, setMedicalRecordLoading] = useState(false);
+  const [medicalRecordError, setMedicalRecordError] = useState('');
+  const [medicalRecordMissing, setMedicalRecordMissing] = useState(false);
+  const [medicalRecordSaving, setMedicalRecordSaving] = useState(false);
+  const [medicalRecordUpdating, setMedicalRecordUpdating] = useState(false);
+  const [medicalRecordEditing, setMedicalRecordEditing] = useState(false);
+  const [medicalRecordCreated, setMedicalRecordCreated] = useState(false);
+  const [medicalRecordForm, setMedicalRecordForm] = useState({ diagnosis: '', treatment_plan: '', prescription: '', notes: '' });
+
+  useEffect(() => {
+    if (selectedId === null) {
+      setSelectedAppointment(null);
+      setDetailError('');
+      return undefined;
+    }
+    let active = true;
+    setDetailLoading(true);
+    setDetailError('');
+    apiRequest(`/appointments/${selectedId}/`, { tokens, onTokens: onTokensChanged })
+      .then((appointment) => { if (active) setSelectedAppointment(appointment); })
+      .catch((requestError) => {
+        if (!active) return;
+        setDetailError(requestError.status === 404 ? 'This appointment was not found.' : requestError.message);
+      })
+      .finally(() => { if (active) setDetailLoading(false); });
+    return () => { active = false; };
+  }, [selectedId, tokens, onTokensChanged]);
+
+  useEffect(() => {
+    if (!bookingOpen) return undefined;
+    let active = true;
+    setServicesLoading(true);
+    setServicesError('');
+    apiRequest('/services/', { tokens, onTokens: onTokensChanged, apiBase: CLINIC_API })
+      .then((data) => { if (active) setServices(data.filter((service) => service.is_active)); })
+      .catch((requestError) => { if (active) setServicesError(requestError.message); })
+      .finally(() => { if (active) setServicesLoading(false); });
+    return () => { active = false; };
+  }, [bookingOpen, tokens, onTokensChanged]);
+
+  async function submitBooking(event) {
+    event.preventDefault();
+    setBookingSaving(true);
+    setBookingError('');
+    setBookingSuccess('');
+    try {
+      const created = await apiRequest('/appointments/', {
+        tokens,
+        onTokens: onTokensChanged,
+        method: 'POST',
+        body: {
+          patient: Number(booking.patient),
+          doctor: Number(booking.doctor),
+          service: Number(booking.service),
+          appointment_date: new Date(booking.appointment_date).toISOString(),
+          notes: booking.notes.trim()
+        }
+      });
+      onAppointmentCreated(created);
+      setBookingOpen(false);
+      setBooking({ patient: '', doctor: '', service: '', appointment_date: '', notes: '' });
+      setBookingSuccess(`Appointment #${created.id} was booked successfully.`);
+    } catch (requestError) {
+      setBookingError(requestError.message || 'Could not reach the appointment service. Please try again.');
+    } finally {
+      setBookingSaving(false);
+    }
+  }
+
+  async function reloadAppointment(appointmentId) {
+    try {
+      const refreshed = await apiRequest(`/appointments/${appointmentId}/`, { tokens, onTokens: onTokensChanged });
+      setSelectedAppointment(refreshed);
+      onAppointmentUpdated(refreshed);
+      return refreshed;
+    } catch (requestError) {
+      if (requestError.status === 404) {
+        const refreshedList = await apiRequest('/appointments/', { tokens, onTokens: onTokensChanged });
+        onAppointmentsReloaded(refreshedList);
+        setSelectedAppointment(null);
+        setDetailError('This appointment was not found. The list has been refreshed.');
+      }
+      throw requestError;
+    }
+  }
+
+  async function cancelAppointment(appointment) {
+    const patientName = appointment.patient_name || 'this patient';
+    const confirmed = window.confirm(`Cancel appointment #${appointment.id} for ${patientName}? Its status will change to Cancelled.`);
+    if (!confirmed) return;
+
+    setCancelling(true);
+    setCancellationError('');
+    setCancellationSuccess('');
+    try {
+      const cancelled = await apiRequest(`/appointments/${appointment.id}/cancel/`, {
+        tokens,
+        onTokens: onTokensChanged,
+        method: 'POST'
+      });
+      setSelectedAppointment(cancelled);
+      onAppointmentUpdated(cancelled);
+      setCancellationSuccess(`Appointment #${cancelled.id} was cancelled.`);
+    } catch (requestError) {
+      setCancellationError(requestError.message || 'Could not cancel this appointment. Please try again.');
+      if (requestError.status === 404 || requestError.status === 400) {
+        try {
+          await reloadAppointment(appointment.id);
+        } catch {
+          // The cancellation error remains visible while the list or detail refreshes.
+        }
+      }
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  async function openMedicalRecord() {
+    setMedicalRecordOpen(true);
+    setMedicalRecord(null);
+    setMedicalRecordError('');
+    setMedicalRecordMissing(false);
+    setMedicalRecordCreated(false);
+    setMedicalRecordEditing(false);
+    setMedicalRecordLoading(true);
+    try {
+      const record = await apiRequest(`/appointments/${selectedId}/medical-record/`, { tokens, onTokens: onTokensChanged });
+      setMedicalRecord(record);
+    } catch (requestError) {
+      if (requestError.code === 'medical_record_not_found') {
+        setMedicalRecordError('This appointment does not have a medical record yet.');
+        setMedicalRecordMissing(true);
+      } else if (requestError.status === 403) {
+        setMedicalRecordError('You do not have permission to view this medical record.');
+      } else if (requestError.status === 404) {
+        setMedicalRecordError('The appointment or medical record could not be found.');
+      } else {
+        setMedicalRecordError(requestError.message || 'Could not load this medical record. Please try again.');
+      }
+    } finally {
+      setMedicalRecordLoading(false);
+    }
+  }
+
+  async function submitMedicalRecord(event) {
+    event.preventDefault();
+    setMedicalRecordSaving(true);
+    setMedicalRecordError('');
+    setMedicalRecordCreated(false);
+    try {
+      const created = await apiRequest(`/appointments/${selectedId}/medical-record/`, {
+        tokens,
+        onTokens: onTokensChanged,
+        method: 'POST',
+        body: {
+          diagnosis: medicalRecordForm.diagnosis.trim(),
+          treatment_plan: medicalRecordForm.treatment_plan.trim(),
+          prescription: medicalRecordForm.prescription.trim(),
+          notes: medicalRecordForm.notes.trim()
+        }
+      });
+      setMedicalRecord(created);
+      setMedicalRecordMissing(false);
+      setMedicalRecordForm({ diagnosis: '', treatment_plan: '', prescription: '', notes: '' });
+      setMedicalRecordCreated(true);
+    } catch (requestError) {
+      if (requestError.code === 'medical_record_exists') {
+        setMedicalRecordError('A record already exists. Loading the existing record…');
+        try {
+          const existing = await apiRequest(`/appointments/${selectedId}/medical-record/`, { tokens, onTokens: onTokensChanged });
+          setMedicalRecord(existing);
+          setMedicalRecordMissing(false);
+        } catch (loadError) {
+          setMedicalRecordError(loadError.message || requestError.message);
+        }
+      } else {
+        setMedicalRecordError(requestError.message || 'Could not create the medical record. Please try again.');
+      }
+    } finally {
+      setMedicalRecordSaving(false);
+    }
+  }
+
+  function beginMedicalRecordEdit() {
+    setMedicalRecordForm({
+      diagnosis: medicalRecord.diagnosis || '',
+      treatment_plan: medicalRecord.treatment_plan || '',
+      prescription: medicalRecord.prescription || '',
+      notes: medicalRecord.notes || ''
+    });
+    setMedicalRecordError('');
+    setMedicalRecordCreated(false);
+    setMedicalRecordEditing(true);
+  }
+
+  async function submitMedicalRecordUpdate(event) {
+    event.preventDefault();
+    setMedicalRecordUpdating(true);
+    setMedicalRecordError('');
+    setMedicalRecordCreated(false);
+    try {
+      const updated = await apiRequest(`/appointments/${selectedId}/medical-record/`, {
+        tokens,
+        onTokens: onTokensChanged,
+        method: 'PATCH',
+        body: {
+          diagnosis: medicalRecordForm.diagnosis.trim(),
+          treatment_plan: medicalRecordForm.treatment_plan.trim(),
+          prescription: medicalRecordForm.prescription.trim(),
+          notes: medicalRecordForm.notes.trim()
+        }
+      });
+      setMedicalRecord(updated);
+      setMedicalRecordEditing(false);
+      setMedicalRecordCreated(true);
+    } catch (requestError) {
+      setMedicalRecordError(requestError.message || 'Could not update the medical record. Please try again.');
+    } finally {
+      setMedicalRecordUpdating(false);
+    }
+  }
+
+  if (selectedId !== null && medicalRecordOpen) {
+    return <section className="page-section appointment-page">
+      <div className="section-toolbar"><div><span className="eyebrow">MEDICAL RECORD</span><h2>Appointment #{selectedId}</h2></div><button className="secondary-button" onClick={() => setMedicalRecordOpen(false)}><ArrowLeft size={16} /> Back to appointment</button></div>
+      {medicalRecordLoading && <div className="panel management-state" role="status">Loading medical record…</div>}
+      {medicalRecordError && <div className="api-error" role="alert">{medicalRecordError}</div>}
+      {medicalRecordCreated && <div className="form-success" role="status">Medical record saved successfully.</div>}
+      {medicalRecord && !medicalRecordLoading && !medicalRecordEditing && <div className="panel medical-record-view">
+        <div className="medical-record-patient"><span className="eyebrow">PATIENT</span><h3>{medicalRecord.patient_name || 'Patient information unavailable'}</h3><span>{medicalRecord.patient_code || 'Patient code unavailable'}</span></div>
+        {selectedAppointment?.can_open_medical_record && <div className="form-actions"><button className="secondary-button" type="button" onClick={beginMedicalRecordEdit}>Edit medical record</button></div>}
+        <dl className="appointment-detail-grid medical-record-grid">
+          <div><dt>Diagnosis</dt><dd>{medicalRecord.diagnosis || 'No diagnosis recorded.'}</dd></div>
+          <div><dt>Treatment plan</dt><dd>{medicalRecord.treatment_plan || 'No treatment plan recorded.'}</dd></div>
+          <div><dt>Prescription</dt><dd>{medicalRecord.prescription || 'No prescription recorded.'}</dd></div>
+          <div><dt>Clinical notes</dt><dd>{medicalRecord.notes || 'No clinical notes recorded.'}</dd></div>
+          <div><dt>Record created</dt><dd>{appointmentDate(medicalRecord.created_at)}</dd></div>
+        </dl>
+      </div>}
+      {medicalRecord && medicalRecordEditing && <form className="panel management-form medical-record-form" onSubmit={submitMedicalRecordUpdate}>
+        <h3>Update examination record</h3>
+        <label>Diagnosis <span aria-hidden="true">*</span><textarea required value={medicalRecordForm.diagnosis} onChange={(event) => setMedicalRecordForm({ ...medicalRecordForm, diagnosis: event.target.value })} /></label>
+        <label>Treatment plan <span aria-hidden="true">*</span><textarea required value={medicalRecordForm.treatment_plan} onChange={(event) => setMedicalRecordForm({ ...medicalRecordForm, treatment_plan: event.target.value })} /></label>
+        <label>Prescription<textarea value={medicalRecordForm.prescription} onChange={(event) => setMedicalRecordForm({ ...medicalRecordForm, prescription: event.target.value })} /></label>
+        <label>Clinical notes<textarea value={medicalRecordForm.notes} onChange={(event) => setMedicalRecordForm({ ...medicalRecordForm, notes: event.target.value })} /></label>
+        <div className="form-actions"><button className="primary-button" type="submit" disabled={medicalRecordUpdating}>{medicalRecordUpdating ? 'Saving…' : 'Save changes'}</button><button className="secondary-button" type="button" disabled={medicalRecordUpdating} onClick={() => setMedicalRecordEditing(false)}>Cancel</button></div>
+      </form>}
+      {medicalRecordMissing && selectedAppointment?.can_open_medical_record && <form className="panel management-form medical-record-form" onSubmit={submitMedicalRecord}>
+        <h3>Create examination record</h3>
+        <p className="booking-hint">Appointment #{selectedAppointment.id} · {selectedAppointment.patient_name || 'Patient information unavailable'} · {appointmentDate(selectedAppointment.appointment_date)}</p>
+        <label>Diagnosis <span aria-hidden="true">*</span><textarea required value={medicalRecordForm.diagnosis} onChange={(event) => setMedicalRecordForm({ ...medicalRecordForm, diagnosis: event.target.value })} /></label>
+        <label>Treatment plan <span aria-hidden="true">*</span><textarea required value={medicalRecordForm.treatment_plan} onChange={(event) => setMedicalRecordForm({ ...medicalRecordForm, treatment_plan: event.target.value })} /></label>
+        <label>Prescription<textarea value={medicalRecordForm.prescription} onChange={(event) => setMedicalRecordForm({ ...medicalRecordForm, prescription: event.target.value })} /></label>
+        <label>Clinical notes<textarea value={medicalRecordForm.notes} onChange={(event) => setMedicalRecordForm({ ...medicalRecordForm, notes: event.target.value })} /></label>
+        <div className="form-actions"><button className="primary-button" type="submit" disabled={medicalRecordSaving}>{medicalRecordSaving ? 'Saving…' : 'Create medical record'}</button></div>
+      </form>}
+    </section>;
+  }
+
+  if (selectedId !== null) {
+    const appointment = selectedAppointment;
+    const status = appointmentStatus(appointment?.status);
+    return <section className="page-section appointment-page">
+      <div className="section-toolbar"><div><span className="eyebrow">APPOINTMENT DETAILS</span><h2>Appointment #{selectedId}</h2></div><button className="secondary-button" onClick={() => setSelectedId(null)}><ArrowLeft size={16} /> Back to list</button></div>
+      {detailLoading && <div className="panel management-state" role="status">Loading appointment details…</div>}
+      {detailError && <div className="api-error" role="alert">{detailError}</div>}
+      {appointment && !detailLoading && <div className="panel appointment-detail">
+        <div className="appointment-detail-heading"><div><span className="eyebrow">PATIENT</span><h3>{appointment.patient_name || 'Patient information unavailable'}</h3><span>{appointment.patient_code || 'Patient code unavailable'}</span></div><span className={`status ${status.className}`}>{status.label}</span></div>
+        {cancellationSuccess && <div className="form-success" role="status">{cancellationSuccess}</div>}
+        {cancellationError && <div className="form-error" role="alert">{cancellationError}</div>}
+        {appointment.can_open_medical_record && <div className="form-actions"><button className="secondary-button" type="button" onClick={openMedicalRecord}>Open medical record</button></div>}
+        {['Pending', 'Confirmed'].includes(appointment.status) && <div className="form-actions"><button className="secondary-button danger-button" type="button" disabled={cancelling} onClick={() => cancelAppointment(appointment)}>{cancelling ? 'Cancelling…' : 'Cancel appointment'}</button></div>}
+        <dl className="appointment-detail-grid">
+          <div><dt>Appointment ID</dt><dd>{appointment.id}</dd></div>
+          <div><dt>Dentist</dt><dd>{appointment.dentist_name || 'Not specified'}</dd></div>
+          <div><dt>Date and time</dt><dd>{appointmentDate(appointment.appointment_date)}</dd></div>
+          <div><dt>Service / reason</dt><dd>{appointment.service_name || 'Not specified'}</dd></div>
+          <div className="appointment-detail-notes"><dt>Notes</dt><dd>{appointment.notes || 'No notes recorded.'}</dd></div>
+        </dl>
+      </div>}
+    </section>;
+  }
+
+  return <section className="page-section appointment-page">
+    <div className="section-toolbar"><div><span className="eyebrow">APPOINTMENTS</span><h2>Appointment schedule</h2></div><button className="primary-button" onClick={() => { setBookingOpen(true); setBookingError(''); setBookingSuccess(''); }}><CalendarDays size={17} /> Book appointment</button></div>
+    {bookingSuccess && <div className="form-success" role="status">{bookingSuccess}</div>}
+    {error && <div className="api-error" role="alert">{error}</div>}
+    {bookingOpen && <form className="panel management-form appointment-booking-form" onSubmit={submitBooking}>
+      <h3>Book an appointment</h3>
+      <p className="booking-hint">Enter the patient and dentist record IDs. The server checks that both records exist and that the dentist is working at the requested time.</p>
+      <div className="form-grid">
+        <label>Patient ID<input required type="number" min="1" step="1" value={booking.patient} onChange={(event) => setBooking({ ...booking, patient: event.target.value })} /></label>
+        <label>Dentist ID<input required type="number" min="1" step="1" value={booking.doctor} onChange={(event) => setBooking({ ...booking, doctor: event.target.value })} /></label>
+        <label>Service<select required value={booking.service} onChange={(event) => setBooking({ ...booking, service: event.target.value })} disabled={servicesLoading || services.length === 0}><option value="">{servicesLoading ? 'Loading services…' : 'Select a service'}</option>{services.map((service) => <option key={service.id} value={service.id}>{service.name} · {service.duration_minutes} min</option>)}</select></label>
+        <label>Date and time<input required type="datetime-local" value={booking.appointment_date} onChange={(event) => setBooking({ ...booking, appointment_date: event.target.value })} /></label>
+        <label className="form-wide">Reason / notes<textarea value={booking.notes} onChange={(event) => setBooking({ ...booking, notes: event.target.value })} /></label>
+      </div>
+      {servicesError && <div className="form-error" role="alert">Could not load services: {servicesError}</div>}
+      {bookingError && <div className="form-error" role="alert">{bookingError}</div>}
+      <div className="form-actions"><button className="primary-button" type="submit" disabled={bookingSaving || servicesLoading || services.length === 0}>{bookingSaving ? 'Booking…' : 'Confirm booking'}</button><button className="secondary-button" type="button" disabled={bookingSaving} onClick={() => setBookingOpen(false)}>Close</button></div>
+    </form>}
+    <div className="panel schedule-panel">
+      {loading ? <p className="management-state" role="status">Loading appointments…</p> : appointments.length === 0 ? <p className="management-state">No appointments found.</p> :
+        <div className="appointment-list">{appointments.map((item) => <AppointmentRow item={item} key={item.id} onSelect={(id) => { setMedicalRecordOpen(false); setMedicalRecordForm({ diagnosis: '', treatment_plan: '', prescription: '', notes: '' }); setMedicalRecordMissing(false); setSelectedId(id); }} />)}</div>}
+    </div>
+  </section>;
+}
 function ToothChart({ dentition, setDentition, selectedTooth, setSelectedTooth }) { const teeth = dentition === 'ADULT' ? teethAdult : teethChild; return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">CLINICAL RECORD</span><h2>Interactive tooth chart</h2></div><div className="segmented"><button className={dentition === 'ADULT' ? 'selected' : ''} onClick={() => setDentition('ADULT')}>Adult · 32</button><button className={dentition === 'CHILD' ? 'selected' : ''} onClick={() => setDentition('CHILD')}>Child · 20</button></div></div><div className="chart-layout"><div className="panel tooth-panel"><div className="chart-header"><div><strong>Nguyen Minh Anh</strong><span>DMS-0001 · {dentition === 'ADULT' ? 'Permanent dentition' : 'Primary dentition'}</span></div><span className="status confirmed">In treatment</span></div><div className="mouth-label">UPPER ARCH</div><div className={`teeth-grid ${dentition.toLowerCase()}`}>{teeth.slice(0, Math.ceil(teeth.length / 2)).map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-line" /><div className={`teeth-grid lower ${dentition.toLowerCase()}`}>{teeth.slice(Math.ceil(teeth.length / 2)).reverse().map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-label lower-label">LOWER ARCH</div><div className="chart-legend"><span><i className="dot healthy" />Healthy</span><span><i className="dot care" />Needs care</span><span><i className="dot monitor" />Monitor</span></div></div><aside className="panel tooth-detail"><span className="eyebrow">SELECTED TOOTH</span>{selectedTooth ? <><div className="tooth-number">{teeth.find((tooth) => tooth.id === selectedTooth)?.code}</div><h3>Clinical condition</h3><p>Update this tooth’s condition and add a treatment note for the patient record.</p><select defaultValue="Healthy"><option>Healthy</option><option>Needs care</option><option>Monitor</option><option>Restored</option></select><textarea placeholder="Add a clinical note..." /><button className="primary-button full">Save condition</button></> : <div className="empty-detail"><Stethoscope size={28} /><p>Select a tooth to inspect its clinical record.</p></div>}</aside></div></section>; }
 function Tooth({ tooth, selected, onClick }) { return <button onClick={onClick} className={`tooth ${tooth.state.toLowerCase().replace(' ', '-')} ${selected ? 'selected' : ''}`}><span>{tooth.code.slice(1)}</span><div className="tooth-shape" /></button>; }
 function Billing({ patients }) { return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">FINANCE</span><h2>Billing & installment plans</h2></div><button className="primary-button"><CircleDollarSign size={17} /> New invoice</button></div><div className="metric-grid compact"><Metric label="Outstanding" value="₫42.8m" detail="Across 18 invoices" accent="gold" icon={CircleDollarSign} /><Metric label="Due this week" value="₫8.4m" detail="6 installments" accent="coral" icon={CalendarDays} /><Metric label="Collected today" value="₫5.2m" detail="11 payments" accent="sage" icon={ShieldCheck} /></div><div className="panel table-panel"><table><thead><tr><th>Invoice</th><th>Patient</th><th>Total</th><th>Paid</th><th>Status</th></tr></thead><tbody>{patients.slice(0, 3).map((p, i) => <tr key={p.id}><td><code>INV-000{i + 1}</code></td><td><strong>{p.full_name}</strong></td><td>₫{['3,500,000', '1,200,000', '850,000'][i]}</td><td>₫{['1,500,000', '1,200,000', '350,000'][i]}</td><td><span className={`status ${i === 1 ? 'paid' : 'scheduled'}`}>{i === 1 ? 'Paid' : 'Installment'}</span></td></tr>)}</tbody></table></div></section>; }
