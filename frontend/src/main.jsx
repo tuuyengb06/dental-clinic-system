@@ -75,6 +75,7 @@ function App() {
   const [selectedTooth, setSelectedTooth] = useState(null);
   const [apiLive, setApiLive] = useState(false);
   const [apiError, setApiError] = useState('');
+  const [apiLoading, setApiLoading] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
@@ -124,6 +125,7 @@ function App() {
 
   useEffect(() => {
     if (!tokens || !profile) return;
+    setApiLoading(true);
     const currentRole = String(profile.role || '').toUpperCase();
     const recordRequest = currentRole === 'DENTIST' || currentRole === 'ADMIN'
       ? apiRequest('/medical-records/', { tokens, onTokens: updateTokens })
@@ -149,6 +151,8 @@ function App() {
     }).catch((error) => {
       setApiLive(false);
       setApiError(error.message);
+    }).finally(() => {
+      setApiLoading(false);
     });
   }, [tokens, profile]);
 
@@ -235,11 +239,11 @@ function App() {
     </aside>
     <main className="main-content">
       <header className="topbar"><button className="icon-button menu-button" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><div><span className="eyebrow">Tuesday, 08 September 2026</span><h1>{section === 'Overview' ? `Good morning, ${profile.display_name}` : section}</h1></div><div className="topbar-actions"><span className={`api-status ${apiLive ? 'live' : ''}`}><span />{apiLive ? 'Live API' : 'Connecting'}</span><button className="icon-button"><Activity size={19} /></button><div className="user-card"><div className="avatar">{profile.display_name.split(' ').map((part) => part[0]).slice(-2).join('')}</div><div><strong>{profile.display_name}</strong><span>{role}</span></div><button className="secondary-button" onClick={logout}>Log out</button></div></div></header>
-      {apiError && <div className="api-error" role="alert">{apiError}</div>}
+      {apiError && section !== 'Appointments' && <div className="api-error" role="alert">{apiError}</div>}
       {section === 'Overview' && <Overview appointments={appointments} patients={patients} setSection={setSection} />}
       {section === 'Patients' && <Patients patients={visiblePatients} query={query} setQuery={setQuery} onCreatePatient={createPatient} canCreate={role === 'ADMIN' || role === 'RECEPTIONIST'} />}
       {section === 'Reception' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Reception patients={patients} appointments={appointments} onCreatePatient={createPatient} setSection={setSection} />}
-      {section === 'Appointments' && <Appointments appointments={appointments} patients={patients} doctors={doctors} services={services} schedules={schedules} role={role} onCreateAppointment={createAppointment} onCreateSchedule={createSchedule} />}
+      {section === 'Appointments' && <Appointments appointments={appointments} patients={patients} doctors={doctors} services={services} schedules={schedules} role={role} loading={apiLoading} loadError={apiError} onCreateAppointment={createAppointment} onCreateSchedule={createSchedule} />}
       {section === 'EMR' && (role === 'DENTIST' || role === 'ADMIN') && <MedicalRecords appointments={appointments} patients={patients} services={services} teeth={teeth} records={medicalRecords} onSave={saveMedicalRecord} />}
       {section === 'Tooth chart' && <ToothChart dentition={dentition} setDentition={setDentition} selectedTooth={selectedTooth} setSelectedTooth={setSelectedTooth} />}
       {section === 'Billing' && <Billing patients={patients} />}
@@ -529,23 +533,47 @@ function dateKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-function Appointments({ appointments, patients, doctors, services, schedules, role, onCreateAppointment, onCreateSchedule }) {
-  const [weekDate, setWeekDate] = useState(() => new Date());
+function Appointments({ appointments, patients, doctors, services, schedules, role, loading, loadError, onCreateAppointment, onCreateSchedule }) {
+  const [calendarDate, setCalendarDate] = useState(() => new Date());
+  const [calendarMode, setCalendarMode] = useState('week');
+  const [doctorFilter, setDoctorFilter] = useState('');
   const [bookingOpen, setBookingOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [booking, setBooking] = useState({ patient: '', doctor: '', service: '', date: dateKey(new Date()), time: '09:00', notes: '' });
   const [schedule, setSchedule] = useState({ doctor: '', work_date: dateKey(new Date()), start_time: '09:00', end_time: '17:00' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const monday = new Date(weekDate);
+  const monday = new Date(calendarDate);
   monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
-  const days = Array.from({ length: 7 }, (_, index) => {
-    const date = new Date(monday);
-    date.setDate(monday.getDate() + index);
+  const days = Array.from({ length: calendarMode === 'day' ? 1 : 7 }, (_, index) => {
+    const date = new Date(calendarMode === 'day' ? calendarDate : monday);
+    date.setDate(date.getDate() + index);
     return date;
   });
-  const slots = Array.from({ length: 20 }, (_, index) => {
-    const minutes = 8 * 60 + index * 30;
+  const visibleDateKeys = new Set(days.map(dateKey));
+  const visibleSchedules = schedules.filter((item) =>
+    visibleDateKeys.has(item.work_date) && (!doctorFilter || String(item.doctor) === doctorFilter)
+  );
+  const visibleAppointments = appointments.filter((item) => {
+    const start = new Date(item.appointment_date || item.start_at);
+    return !Number.isNaN(start.getTime())
+      && visibleDateKeys.has(dateKey(start))
+      && (!doctorFilter || String(item.doctor) === doctorFilter);
+  });
+  const scheduleMinutes = visibleSchedules.flatMap((item) => [
+    Number(item.start_time.slice(0, 2)) * 60 + Number(item.start_time.slice(3, 5)),
+    Number(item.end_time.slice(0, 2)) * 60 + Number(item.end_time.slice(3, 5))
+  ]);
+  const appointmentMinutes = visibleAppointments.flatMap((item) => {
+    const start = new Date(item.appointment_date || item.start_at);
+    const end = new Date(item.end_at || start);
+    return [start.getHours() * 60 + start.getMinutes(), end.getHours() * 60 + end.getMinutes()];
+  });
+  const allMinutes = [...scheduleMinutes, ...appointmentMinutes];
+  const firstSlot = Math.max(0, Math.min(8 * 60, ...allMinutes.map((minutes) => Math.floor(minutes / 30) * 30)));
+  const lastSlot = Math.min(24 * 60, Math.max(18 * 60, ...allMinutes.map((minutes) => Math.ceil(minutes / 30) * 30)));
+  const slots = Array.from({ length: Math.max(1, (lastSlot - firstSlot) / 30) }, (_, index) => {
+    const minutes = firstSlot + index * 30;
     return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
   });
   const isReceptionRole = role === 'ADMIN' || role === 'RECEPTIONIST';
@@ -595,7 +623,7 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
       ...current,
       date: dateKey(date),
       time,
-      doctor: current.doctor || String(doctors[0]?.id || ''),
+      doctor: doctorFilter || current.doctor || String(doctors[0]?.id || ''),
       patient: current.patient || String(patients[0]?.id || ''),
       service: current.service || String(services[0]?.id || '')
     }));
@@ -636,38 +664,74 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
       <div className="form-actions"><button className="primary-button" disabled={saving}>{saving ? 'Booking…' : 'Confirm booking'}</button><button className="secondary-button" type="button" onClick={() => setBookingOpen(false)}>Cancel</button></div>
     </form>}
     <div className="calendar-toolbar panel">
-      <button className="secondary-button" onClick={() => setWeekDate(new Date(weekDate.getFullYear(), weekDate.getMonth(), weekDate.getDate() - 7))}>Previous week</button>
-      <strong>{days[0].toLocaleDateString('en', { month: 'short', day: 'numeric' })} – {days[6].toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}</strong>
-      <button className="secondary-button" onClick={() => setWeekDate(new Date(weekDate.getFullYear(), weekDate.getMonth(), weekDate.getDate() + 7))}>Next week</button>
-      <input aria-label="Go to date" type="date" value={dateKey(weekDate)} onChange={(event) => { if (event.target.value) setWeekDate(new Date(`${event.target.value}T12:00:00`)); }} />
-    </div>
-    {doctors.length === 0 && <div className="form-error" role="status">No dentist profiles are available. Add clinic dentist accounts before scheduling.</div>}
-    <div className="panel timetable-panel">
-      <div className="timetable-grid">
-        <div className="timetable-head timetable-time">Time</div>
-        {days.map((date) => <div className="timetable-head" key={dateKey(date)}><strong>{date.toLocaleDateString('en', { weekday: 'short' })}</strong><span>{date.toLocaleDateString('en', { month: 'short', day: 'numeric' })}</span></div>)}
-        {slots.map((time) => <div className="timetable-row" key={time}>
-          <div className="timetable-time">{time}</div>
-          {days.map((date) => {
-            const key = dateKey(date);
-            const minute = Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
-            const shifts = schedules.filter((item) => item.work_date === key && (!booking.doctor || Number(item.doctor) === Number(booking.doctor)) && Number(item.start_time.slice(0, 2)) * 60 + Number(item.start_time.slice(3, 5)) <= minute && Number(item.end_time.slice(0, 2)) * 60 + Number(item.end_time.slice(3, 5)) > minute);
-            const events = appointments.filter((item) => {
-              const start = new Date(item.appointment_date || item.start_at);
-              const slotMinute = Math.floor(start.getMinutes() / 30) * 30;
-              return dateKey(start) === key && start.getHours() === Number(time.slice(0, 2)) && slotMinute === Number(time.slice(3));
-            });
-            return <div className={`timetable-cell ${shifts.length ? 'shift-available' : ''}`} key={`${key}-${time}`}>
-              {events.map((item) => <div className="calendar-event" key={item.id}><strong>{new Date(item.appointment_date || item.start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {item.patient_name}</strong><span>{item.service_name || item.type} / {item.dentist_name}</span><small>{item.status}</small></div>)}
-              {!events.length && isReceptionRole && shifts.length > 0 && <button aria-label={`Book ${key} at ${time}`} className="empty-slot" onClick={() => openBooking(date, time)} title="Book this available slot">+</button>}
-            </div>;
-          })}
-        </div>)}
+      <div className="calendar-navigation">
+        <button className="secondary-button" onClick={() => setCalendarDate(new Date(calendarDate.getFullYear(), calendarDate.getMonth(), calendarDate.getDate() - (calendarMode === 'day' ? 1 : 7), 12))}>Previous {calendarMode}</button>
+        <button className="secondary-button" onClick={() => setCalendarDate(new Date())}>Today</button>
+        <button className="secondary-button" onClick={() => setCalendarDate(new Date(calendarDate.getFullYear(), calendarDate.getMonth(), calendarDate.getDate() + (calendarMode === 'day' ? 1 : 7), 12))}>Next {calendarMode}</button>
       </div>
+      <strong>{calendarMode === 'day'
+        ? calendarDate.toLocaleDateString('en', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })
+        : `${days[0].toLocaleDateString('en', { month: 'short', day: 'numeric' })} – ${days[6].toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}`}</strong>
+      <label className="calendar-filter">Dentist
+        <select aria-label="Filter by dentist" value={doctorFilter} onChange={(event) => setDoctorFilter(event.target.value)}>
+          <option value="">All dentists</option>
+          {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.full_name}</option>)}
+        </select>
+      </label>
+      <div className="calendar-view-switch" role="group" aria-label="Calendar view">
+        {['day', 'week'].map((mode) => <button key={mode} type="button" className={calendarMode === mode ? 'secondary-button active' : 'secondary-button'} aria-pressed={calendarMode === mode} onClick={() => setCalendarMode(mode)}>{mode === 'day' ? 'Day' : 'Week'}</button>)}
+      </div>
+      <input aria-label="Go to date" type="date" value={dateKey(calendarDate)} onChange={(event) => { if (event.target.value) setCalendarDate(new Date(`${event.target.value}T12:00:00`)); }} />
     </div>
-    <div className="panel appointment-list-panel"><div className="panel-heading"><div><span className="eyebrow">UPCOMING VISITS</span><h3>Scheduled appointments</h3></div></div>
-      {appointments.length ? <div className="appointment-list">{[...appointments].sort((a, b) => new Date(a.appointment_date || a.start_at) - new Date(b.appointment_date || b.start_at)).map((item) => <AppointmentRow key={item.id} item={{ ...item, start_at: new Date(item.appointment_date || item.start_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }} />)}</div> : <p className="management-state">No appointments have been scheduled.</p>}
-    </div>
+    {loadError && <div className="form-error" role="alert">Could not load the calendar: {loadError}</div>}
+    {doctors.length === 0 && !loading && !loadError && <div className="management-state" role="status">No dentist profiles are available.</div>}
+    {loading ? <div className="panel management-state" role="status">Loading appointments and work shifts…</div> :
+      loadError ? <div className="panel management-state">Calendar data is unavailable. Check the connection and try again.</div> :
+      <>
+        {!visibleSchedules.length && !visibleAppointments.length && <div className="panel management-state" role="status">No work shifts or appointments for this {calendarMode}.</div>}
+        <div className="calendar-legend" aria-label="Calendar legend">
+          <span><i className="legend-shift" /> Doctor working hours</span>
+          <span><i className="legend-unavailable" /> Outside working hours</span>
+          <span><i className="legend-appointment" /> Appointment</span>
+        </div>
+        <div className="panel timetable-panel">
+          <div className={`timetable-grid ${calendarMode === 'day' ? 'day-view' : ''}`} style={{ '--calendar-day-count': days.length }}>
+            <div className="timetable-head timetable-time">Time</div>
+            {days.map((date) => <div className="timetable-head" key={dateKey(date)}><strong>{date.toLocaleDateString('en', { weekday: 'short' })}</strong><span>{date.toLocaleDateString('en', { month: 'short', day: 'numeric' })}</span></div>)}
+            {slots.map((time) => <div className="timetable-row" key={time}>
+              <div className="timetable-time">{time}</div>
+              {days.map((date) => {
+                const key = dateKey(date);
+                const minute = Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
+                const shifts = visibleSchedules.filter((item) => item.work_date === key
+                  && Number(item.start_time.slice(0, 2)) * 60 + Number(item.start_time.slice(3, 5)) <= minute
+                  && Number(item.end_time.slice(0, 2)) * 60 + Number(item.end_time.slice(3, 5)) > minute);
+                const events = visibleAppointments.filter((item) => {
+                  const start = new Date(item.appointment_date || item.start_at);
+                  return dateKey(start) === key
+                    && Math.floor((start.getHours() * 60 + start.getMinutes()) / 30) * 30 === minute;
+                });
+                return <div className={`timetable-cell ${shifts.length ? 'shift-available' : ''}`} key={`${key}-${time}`}>
+                  {events.map((item) => {
+                    const start = new Date(item.appointment_date || item.start_at);
+                    const end = item.end_at ? new Date(item.end_at) : null;
+                    const statusClass = String(item.status || 'scheduled').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+                    return <div className={`calendar-event status-${statusClass}`} key={item.id}>
+                      <strong>{start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}{end && !Number.isNaN(end.getTime()) ? `–${end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''} · {item.patient_name}</strong>
+                      <span>{item.service_name || item.type || 'Dental visit'} · {item.dentist_name}</span>
+                      <small>{item.status || 'Scheduled'}</small>
+                    </div>;
+                  })}
+                  {!events.length && isReceptionRole && shifts.length > 0 && <button aria-label={`Book ${key} at ${time}`} className="empty-slot" onClick={() => openBooking(date, time)} title="Book this available slot">+</button>}
+                </div>;
+              })}
+            </div>)}
+          </div>
+        </div>
+        <div className="panel appointment-list-panel"><div className="panel-heading"><div><span className="eyebrow">SELECTED {calendarMode.toUpperCase()}</span><h3>Appointments in this view</h3></div></div>
+          {visibleAppointments.length ? <div className="appointment-list">{[...visibleAppointments].sort((a, b) => new Date(a.appointment_date || a.start_at) - new Date(b.appointment_date || b.start_at)).map((item) => <AppointmentRow key={item.id} item={item} />)}</div> : <p className="management-state">No appointments in this {calendarMode}.</p>}
+        </div>
+      </>}
   </section>;
 }
 
