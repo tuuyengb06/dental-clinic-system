@@ -1,4 +1,5 @@
 from datetime import datetime, time, timedelta
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.test import override_settings
@@ -7,8 +8,8 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from appointments.models import Appointment as ScheduledAppointment
-from .models import ClinicUser, Doctor, InvoiceItem, Patient, Role, Service, Tooth
+from appointments.models import Appointment as ScheduledAppointment, MedicalRecord
+from .models import ClinicUser, Doctor, Invoice, InvoiceItem, Patient, Role, Service, Tooth
 
 User = get_user_model()
 
@@ -171,20 +172,15 @@ class AuthenticationAndManagementApiTests(APITestCase):
     def test_deleting_service_deactivates_it_to_preserve_references(self):
         self.authenticate("clinic-admin", "AdminPass123!")
         service = Service.objects.get(code="CHECKUP")
-        created_invoice = self.client.post(
-            "/api/v1/invoices/",
-            {
-                "patient": self.patient.id,
-                "invoice_number": "INV-TEST-001",
-                "total_amount": "250000.00",
-                "paid_amount": "0",
-                "status": "ISSUED",
-            },
-            format="json",
+        invoice = Invoice.objects.create(
+            patient=self.patient,
+            invoice_number="INV-TEST-001",
+            total_amount="250000.00",
+            paid_amount="0",
+            status=Invoice.ISSUED,
         )
-        self.assertEqual(created_invoice.status_code, status.HTTP_201_CREATED)
         InvoiceItem.objects.create(
-            invoice_id=created_invoice.data["id"],
+            invoice=invoice,
             service=service,
             description=service.name,
             quantity=1,
@@ -194,6 +190,208 @@ class AuthenticationAndManagementApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         service.refresh_from_db()
         self.assertFalse(service.is_active)
+
+    def create_medical_record(self, services):
+        appointment = ScheduledAppointment.objects.create(
+            patient=self.patient,
+            doctor=Doctor.objects.get(license_number="DMS-TEST-001"),
+            service=self.service,
+            appointment_date=timezone.now() + timedelta(days=1),
+        )
+        record = MedicalRecord.objects.create(
+            appointment=appointment,
+            diagnosis="Test diagnosis",
+            treatment_plan="Test plan",
+        )
+        record.services.set(services)
+        return record
+
+    def invoice_payload(self, record, items):
+        return {"medical_record": record.id, "items": items}
+
+    def test_invoice_for_one_prescribed_service_uses_catalog_price_and_sets_unpaid_status(self):
+        record = self.create_medical_record([self.service])
+        self.authenticate("clinic-admin", "AdminPass123!")
+
+        response = self.client.post(
+            "/api/v1/invoices/",
+            self.invoice_payload(
+                record,
+                [{"service": self.service.id, "quantity": 1, "unit_price": "1", "amount": "1"}],
+            ),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["patient"], self.patient.id)
+        self.assertEqual(response.data["medical_record"], record.id)
+        self.assertEqual(response.data["total_amount"], "250000.00")
+        self.assertEqual(response.data["paid_amount"], "0.00")
+        self.assertEqual(response.data["balance"], "250000.00")
+        self.assertEqual(response.data["status"], Invoice.ISSUED)
+        self.assertTrue(response.data["invoice_number"].startswith("INV-"))
+        self.assertEqual(len(response.data["items"]), 1)
+        self.assertEqual(response.data["items"][0]["unit_price"], "250000.00")
+        self.assertEqual(response.data["items"][0]["amount"], "250000.00")
+
+    def test_invoice_calculates_multiple_services_and_quantities_exactly(self):
+        second_service = Service.objects.create(
+            code="FILLING",
+            name="Filling",
+            price="125000.25",
+            duration_minutes=40,
+        )
+        record = self.create_medical_record([self.service, second_service])
+        self.authenticate("clinic-admin", "AdminPass123!")
+
+        response = self.client.post(
+            "/api/v1/invoices/",
+            self.invoice_payload(
+                record,
+                [
+                    {"service": self.service.id, "quantity": 2},
+                    {"service": second_service.id, "quantity": 3},
+                ],
+            ),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        amounts = [Decimal(item["amount"]) for item in response.data["items"]]
+        self.assertEqual(amounts, [Decimal("500000.00"), Decimal("375000.75")])
+        self.assertEqual(Decimal(response.data["total_amount"]), sum(amounts))
+        self.assertEqual(Decimal(response.data["total_amount"]), Decimal("875000.75"))
+
+    def test_invoice_rejects_empty_prescribed_services_and_empty_item_list(self):
+        empty_record = self.create_medical_record([])
+        self.authenticate("clinic-admin", "AdminPass123!")
+
+        empty_record_response = self.client.post(
+            "/api/v1/invoices/",
+            self.invoice_payload(empty_record, []),
+            format="json",
+        )
+        self.assertEqual(empty_record_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("medical_record", empty_record_response.data)
+
+        prescribed_record = self.create_medical_record([self.service])
+        empty_items_response = self.client.post(
+            "/api/v1/invoices/",
+            self.invoice_payload(prescribed_record, []),
+            format="json",
+        )
+        self.assertEqual(empty_items_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(Invoice.objects.count(), 0)
+
+    def test_invoice_rejects_negative_catalog_price_and_invalid_quantity(self):
+        record = self.create_medical_record([self.service])
+        self.authenticate("clinic-admin", "AdminPass123!")
+        self.service.price = "-1.00"
+        self.service.save(update_fields=["price"])
+
+        invalid_price = self.client.post(
+            "/api/v1/invoices/",
+            self.invoice_payload(record, [{"service": self.service.id, "quantity": 1}]),
+            format="json",
+        )
+        self.assertEqual(invalid_price.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("price or line total", str(invalid_price.data))
+
+        self.service.price = "250000.00"
+        self.service.save(update_fields=["price"])
+        invalid_quantity = self.client.post(
+            "/api/v1/invoices/",
+            self.invoice_payload(record, [{"service": self.service.id, "quantity": 0}]),
+            format="json",
+        )
+        self.assertEqual(invalid_quantity.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(Invoice.objects.count(), 0)
+
+        self.service.price = "9999999999.99"
+        self.service.save(update_fields=["price"])
+        overflow = self.client.post(
+            "/api/v1/invoices/",
+            self.invoice_payload(record, [{"service": self.service.id, "quantity": 2}]),
+            format="json",
+        )
+        self.assertEqual(overflow.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("supported range", str(overflow.data))
+        self.assertEqual(Invoice.objects.count(), 0)
+
+    def test_invoice_rejects_unprescribed_services_and_duplicate_service_rows(self):
+        another_service = Service.objects.create(
+            code="XRAY",
+            name="X-ray",
+            price="150000",
+            duration_minutes=15,
+        )
+        record = self.create_medical_record([self.service])
+        self.authenticate("clinic-admin", "AdminPass123!")
+
+        unprescribed = self.client.post(
+            "/api/v1/invoices/",
+            self.invoice_payload(record, [{"service": another_service.id, "quantity": 1}]),
+            format="json",
+        )
+        self.assertEqual(unprescribed.status_code, status.HTTP_400_BAD_REQUEST)
+
+        duplicate_rows = self.client.post(
+            "/api/v1/invoices/",
+            self.invoice_payload(
+                record,
+                [
+                    {"service": self.service.id, "quantity": 1},
+                    {"service": self.service.id, "quantity": 2},
+                ],
+            ),
+            format="json",
+        )
+        self.assertEqual(duplicate_rows.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(Invoice.objects.count(), 0)
+
+    def test_invoice_cannot_be_created_twice_for_same_medical_record(self):
+        record = self.create_medical_record([self.service])
+        self.authenticate("clinic-admin", "AdminPass123!")
+        payload = self.invoice_payload(record, [{"service": self.service.id, "quantity": 1}])
+
+        first = self.client.post("/api/v1/invoices/", payload, format="json")
+        second = self.client.post("/api/v1/invoices/", payload, format="json")
+
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(second.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("already exists", str(second.data["medical_record"]))
+        self.assertEqual(Invoice.objects.count(), 1)
+
+    def test_receptionist_can_see_only_billing_fields_for_available_records(self):
+        record = self.create_medical_record([self.service])
+        receptionist_role = Role.objects.create(code="RECEPTIONIST", name="Receptionist")
+        receptionist = User.objects.create_user(username="invoice-receptionist", password="Reception123!")
+        ClinicUser.objects.create(user=receptionist, role=receptionist_role)
+        self.client.force_authenticate(receptionist)
+
+        response = self.client.get("/api/v1/invoices/available-records/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id"], record.id)
+        self.assertEqual(response.data[0]["patient_name"], self.patient.full_name)
+        self.assertEqual(response.data[0]["services"][0]["price"], "250000.00")
+        self.assertNotIn("diagnosis", response.data[0])
+        created = self.client.post(
+            "/api/v1/invoices/",
+            self.invoice_payload(record, [{"service": self.service.id, "quantity": 2}]),
+            format="json",
+        )
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(created.data["total_amount"], "500000.00")
+        self.assertEqual(self.client.get("/api/v1/invoices/available-records/").data, [])
+
+    def test_dentist_cannot_access_invoice_endpoints(self):
+        self.authenticate("clinic-dentist", "DentistPass123!")
+
+        response = self.client.get("/api/v1/invoices/")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_health_check_remains_public(self):
         response = self.client.get("/api/v1/health/")
