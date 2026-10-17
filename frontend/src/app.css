@@ -44,6 +44,8 @@
 .invoice-patient-summary{display:grid;gap:4px;padding:12px;background:#f8f7f2}
 .invoice-patient-summary strong{color:var(--deep);font-size:13px}
 .invoice-patient-summary span,.invoice-payment-note{color:var(--muted);font-size:11px}
+.invoice-source-meta{margin:0;color:var(--muted);font-size:11px}
+.invoice-source-meta strong{color:var(--deep)}
 .invoice-lines{display:grid;min-width:0}
 .invoice-line{display:grid;grid-template-columns:minmax(160px,1fr) minmax(100px,.6fr) 90px minmax(120px,.7fr);align-items:center;gap:12px;padding:10px 8px;border-bottom:1px solid #eeeae1;color:var(--ink);font-size:12px}
 .invoice-line> :last-child{text-align:right}
@@ -51,6 +53,7 @@
 .invoice-line input{width:80px;padding:7px;border:1px solid var(--line);border-radius:4px;background:#fff;color:var(--ink)}
 .invoice-total{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 8px 4px;color:var(--deep);font-size:13px}
 .invoice-total strong{font-size:16px}
+.invoice-grand-total{border-top:1px solid var(--line)}
 .invoice-payment-note{margin:0}
 .invoice-table-scroll{overflow:auto}
 .invoice-table-scroll table{min-width:760px}

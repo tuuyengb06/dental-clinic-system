@@ -1122,19 +1122,21 @@ function Billing({ invoices, records, loading, onCreateInvoice }) {
         </label>
         {selectedRecord && <>
           <div className="invoice-patient-summary"><strong>{selectedRecord.patient_name}</strong><span>{selectedRecord.patient_code} · Examined {new Date(selectedRecord.appointment_date).toLocaleString()}</span></div>
+          <p className="invoice-source-meta">Prescribed services are loaded from EMR. Prices are determined and validated by the server when the invoice is created.</p>
           <div className="invoice-lines">
             <div className="invoice-line invoice-line-heading"><span>Service</span><span>Unit price</span><span>Quantity</span><span>Amount</span></div>
             {selectedRecord.services.map((service) => {
               const quantity = Number(quantities[service.id] || 1);
+              const lineTotal = Number(service.price) * quantity;
               return <div className="invoice-line" key={service.id}>
                 <strong>{service.name}</strong>
                 <span>{Number(service.price).toLocaleString('vi-VN')} ₫</span>
                 <input aria-label={`Quantity for ${service.name}`} type="number" min="1" max="32767" step="1" required value={quantities[service.id] ?? 1} onChange={(event) => setQuantities((current) => ({ ...current, [service.id]: event.target.value }))} />
-                <strong>{(Number(service.price) * quantity).toLocaleString('vi-VN')} ₫</strong>
+                <strong>{lineTotal.toLocaleString('vi-VN')} ₫</strong>
               </div>;
             })}
           </div>
-          <div className="invoice-total"><span>Total due</span><strong>{total.toLocaleString('vi-VN')} ₫</strong></div>
+          <div className="invoice-total invoice-grand-total"><span>Total due</span><strong>{total.toLocaleString('vi-VN')} ₫</strong></div>
           <p className="invoice-payment-note">New invoices are issued unpaid. Payment collection is not included in this workflow.</p>
           <div className="form-actions"><button className="primary-button" type="submit" disabled={saving || !selectedRecord.services.length}>{saving ? 'Creating invoice…' : 'Create invoice'}</button></div>
         </>}
@@ -1145,7 +1147,7 @@ function Billing({ invoices, records, loading, onCreateInvoice }) {
       {loading ? <p className="management-state" role="status">Loading invoice history…</p> : !invoices.length ? <p className="management-state">No invoices have been created yet.</p> : <div className="invoice-table-scroll"><table>
         <thead><tr><th>Invoice</th><th>Patient</th><th>Issued</th><th>Total</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead>
         <tbody>{invoices.map((invoice) => <tr key={invoice.id} className={selectedInvoiceId === String(invoice.id) ? 'invoice-row-selected' : ''} onClick={() => setSelectedInvoiceId(String(invoice.id))}>
-          <td><button type="button" className="invoice-number-button" onClick={() => setSelectedInvoiceId(String(invoice.id))}>{invoice.invoice_number}</button></td>
+          <td><button type="button" className="invoice-number-button" aria-label={`View invoice ${invoice.invoice_number}`} onClick={() => setSelectedInvoiceId(String(invoice.id))}>{invoice.invoice_number}</button></td>
           <td>{invoice.patient_name}</td><td>{new Date(invoice.issued_at).toLocaleDateString()}</td>
           <td>{Number(invoice.total_amount).toLocaleString('vi-VN')} ₫</td><td>{Number(invoice.paid_amount).toLocaleString('vi-VN')} ₫</td>
           <td>{Number(invoice.balance).toLocaleString('vi-VN')} ₫</td><td><span className={`pill invoice-status ${invoice.status.toLowerCase()}`}>{invoice.status}</span></td>
