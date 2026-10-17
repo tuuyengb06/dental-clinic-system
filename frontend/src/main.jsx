@@ -236,6 +236,14 @@ function App() {
     return created;
   }
 
+  async function payInvoiceCash(invoiceId) {
+    const paid = await apiRequest(`/invoices/${invoiceId}/pay-cash/`, {
+      tokens, onTokens: updateTokens, method: 'POST', body: { method: 'CASH' }
+    });
+    setInvoices((current) => current.map((invoice) => invoice.id === paid.id ? paid : invoice));
+    return paid;
+  }
+
   async function login(username, password) {
     const nextTokens = await apiRequest('/auth/token/', { method: 'POST', body: { username, password } });
     const currentUser = await apiRequest('/auth/me/', { tokens: nextTokens });
@@ -274,7 +282,7 @@ function App() {
       {section === 'Appointments' && <Appointments appointments={appointments} patients={patients} doctors={doctors} services={services} schedules={schedules} role={role} loading={apiLoading} loadError={apiError} onCreateAppointment={createAppointment} onCreateSchedule={createSchedule} onCancelAppointment={cancelAppointment} />}
       {section === 'EMR' && (role === 'DENTIST' || role === 'ADMIN') && <MedicalRecords appointments={appointments} patients={patients} services={services} teeth={teeth} records={medicalRecords} loading={apiLoading} loadError={apiError} onSave={saveMedicalRecord} />}
       {section === 'Tooth chart' && <ToothChart dentition={dentition} setDentition={setDentition} selectedTooth={selectedTooth} setSelectedTooth={setSelectedTooth} />}
-      {section === 'Billing' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Billing invoices={invoices} records={invoiceSources} loading={apiLoading} onCreateInvoice={createInvoice} />}
+      {section === 'Billing' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Billing invoices={invoices} records={invoiceSources} loading={apiLoading} onCreateInvoice={createInvoice} onPayCash={payInvoiceCash} />}
       {section === 'Radiographs' && <Radiographs />}
       {section === 'Services' && role === 'ADMIN' && <ServiceManagement tokens={tokens} onTokensChanged={updateTokens} />}
       {section === 'Doctors' && role === 'ADMIN' && <DoctorDirectory tokens={tokens} onTokensChanged={updateTokens} />}
@@ -1059,12 +1067,15 @@ function MedicalRecords({ appointments, patients, services, teeth, records, load
 }
 function ToothChart({ dentition, setDentition, selectedTooth, setSelectedTooth }) { const teeth = dentition === 'ADULT' ? teethAdult : teethChild; return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">CLINICAL RECORD</span><h2>Interactive tooth chart</h2></div><div className="segmented"><button className={dentition === 'ADULT' ? 'selected' : ''} onClick={() => setDentition('ADULT')}>Adult · 32</button><button className={dentition === 'CHILD' ? 'selected' : ''} onClick={() => setDentition('CHILD')}>Child · 20</button></div></div><div className="chart-layout"><div className="panel tooth-panel"><div className="chart-header"><div><strong>Nguyen Minh Anh</strong><span>DMS-0001 · {dentition === 'ADULT' ? 'Permanent dentition' : 'Primary dentition'}</span></div><span className="status confirmed">In treatment</span></div><div className="mouth-label">UPPER ARCH</div><div className={`teeth-grid ${dentition.toLowerCase()}`}>{teeth.slice(0, Math.ceil(teeth.length / 2)).map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-line" /><div className={`teeth-grid lower ${dentition.toLowerCase()}`}>{teeth.slice(Math.ceil(teeth.length / 2)).reverse().map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-label lower-label">LOWER ARCH</div><div className="chart-legend"><span><i className="dot healthy" />Healthy</span><span><i className="dot care" />Needs care</span><span><i className="dot monitor" />Monitor</span></div></div><aside className="panel tooth-detail"><span className="eyebrow">SELECTED TOOTH</span>{selectedTooth ? <><div className="tooth-number">{teeth.find((tooth) => tooth.id === selectedTooth)?.code}</div><h3>Clinical condition</h3><p>Update this tooth’s condition and add a treatment note for the patient record.</p><select defaultValue="Healthy"><option>Healthy</option><option>Needs care</option><option>Monitor</option><option>Restored</option></select><textarea placeholder="Add a clinical note..." /><button className="primary-button full">Save condition</button></> : <div className="empty-detail"><Stethoscope size={28} /><p>Select a tooth to inspect its clinical record.</p></div>}</aside></div></section>; }
 function Tooth({ tooth, selected, onClick }) { return <button onClick={onClick} className={`tooth ${tooth.state.toLowerCase().replace(' ', '-')} ${selected ? 'selected' : ''}`}><span>{tooth.code.slice(1)}</span><div className="tooth-shape" /></button>; }
-function Billing({ invoices, records, loading, onCreateInvoice }) {
+function Billing({ invoices, records, loading, onCreateInvoice, onPayCash }) {
   const [recordId, setRecordId] = useState('');
   const [quantities, setQuantities] = useState({});
   const [selectedInvoiceId, setSelectedInvoiceId] = useState('');
+  const [cashConfirmOpen, setCashConfirmOpen] = useState(false);
+  const [cashMethod, setCashMethod] = useState('CASH');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [cashError, setCashError] = useState('');
   const [success, setSuccess] = useState('');
   const selectedRecord = records.find((record) => String(record.id) === recordId);
   const selectedInvoice = invoices.find((invoice) => String(invoice.id) === selectedInvoiceId);
@@ -1103,6 +1114,23 @@ function Billing({ invoices, records, loading, onCreateInvoice }) {
       setSuccess(`Invoice ${invoice.invoice_number} created successfully.`);
     } catch (saveError) {
       setError(saveError.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function confirmCashPayment() {
+    if (!selectedInvoice || cashMethod !== 'CASH') return;
+    setSaving(true);
+    setCashError('');
+    setError('');
+    setSuccess('');
+    try {
+      const paid = await onPayCash(selectedInvoice.id);
+      setCashConfirmOpen(false);
+      setSuccess(`Cash payment of ${Number(paid.paid_amount).toLocaleString('vi-VN')} ₫ recorded.`);
+    } catch (paymentError) {
+      setCashError(paymentError.message);
     } finally {
       setSaving(false);
     }
@@ -1155,7 +1183,7 @@ function Billing({ invoices, records, loading, onCreateInvoice }) {
       </table></div>}
     </section>
     {selectedInvoice && <section className="panel invoice-detail-panel">
-      <div className="panel-heading"><div><span className="eyebrow">INVOICE DETAILS</span><h3>{selectedInvoice.invoice_number} · {selectedInvoice.patient_name}</h3></div><span className={`pill invoice-status ${selectedInvoice.status.toLowerCase()}`}>{selectedInvoice.status}</span></div>
+      <div className="panel-heading"><div><span className="eyebrow">INVOICE DETAILS</span><h3>{selectedInvoice.invoice_number} · {selectedInvoice.patient_name}</h3></div><div className="invoice-detail-actions"><span className={`pill invoice-status ${selectedInvoice.status.toLowerCase()}`}>{selectedInvoice.status}</span>{selectedInvoice.status === 'ISSUED' && Number(selectedInvoice.balance) > 0 && <button type="button" className="primary-button" onClick={() => { setCashError(''); setCashMethod('CASH'); setCashConfirmOpen(true); }}>Pay by cash</button>}</div></div>
       <div className="invoice-lines">
         <div className="invoice-line invoice-line-heading"><span>Service</span><span>Unit price</span><span>Quantity</span><span>Amount</span></div>
         {selectedInvoice.items.map((item) => <div className="invoice-line" key={item.id}>
@@ -1163,7 +1191,27 @@ function Billing({ invoices, records, loading, onCreateInvoice }) {
         </div>)}
       </div>
       <div className="invoice-total"><span>Total · Balance</span><strong>{Number(selectedInvoice.total_amount).toLocaleString('vi-VN')} ₫ · {Number(selectedInvoice.balance).toLocaleString('vi-VN')} ₫</strong></div>
+      {!!selectedInvoice.payments.length && <div className="invoice-payments">
+        <h4>Payment transactions</h4>
+        {selectedInvoice.payments.map((payment) => <div className="invoice-payment-row" key={payment.id}>
+          <strong>{Number(payment.amount).toLocaleString('vi-VN')} ₫ · {payment.method}</strong>
+          <span>{payment.status} · {new Date(payment.paid_at).toLocaleString()}</span>
+          {payment.received_by_name && <span>Received by {payment.received_by_name}</span>}
+        </div>)}
+      </div>}
     </section>}
+    {cashConfirmOpen && selectedInvoice && <div className="confirmation-backdrop" role="presentation">
+      <section className="panel cancellation-dialog cash-payment-dialog" role="dialog" aria-modal="true" aria-labelledby="cash-payment-title">
+        <h3 id="cash-payment-title">Confirm cash payment</h3>
+        <p>Confirm that you received the full balance for invoice <strong>{selectedInvoice.invoice_number}</strong>.</p>
+        <p className="cash-payment-due">Amount received: <strong>{Number(selectedInvoice.balance).toLocaleString('vi-VN')} ₫</strong></p>
+        <fieldset className="cash-method-options"><legend>Payment method</legend>
+          <label><input type="radio" name="payment-method" value="CASH" checked={cashMethod === 'CASH'} onChange={() => setCashMethod('CASH')} /> Cash</label>
+        </fieldset>
+        {cashError && <div className="form-error" role="alert">{cashError}</div>}
+        <div className="form-actions"><button type="button" className="secondary-button" disabled={saving} onClick={() => setCashConfirmOpen(false)}>Cancel</button><button type="button" className="primary-button" disabled={saving || cashMethod !== 'CASH'} onClick={confirmCashPayment}>{saving ? 'Recording payment…' : 'Confirm cash received'}</button></div>
+      </section>
+    </div>}
   </section>;
 }
 function Radiographs() { return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">IMAGING</span><h2>Radiograph gallery</h2></div><button className="primary-button"><FileImage size={17} /> Upload image</button></div><div className="upload-placeholder"><FileImage size={30} /><h3>No radiographs uploaded yet</h3><p>Attach X-ray images to a patient record from the clinical visit.</p><button className="secondary-button">Choose file</button></div></section>; }
