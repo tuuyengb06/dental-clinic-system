@@ -1,12 +1,15 @@
 import re
 
+from django.db import IntegrityError
 from django.db.models import Q
 from rest_framework import status, viewsets
+from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.http import JsonResponse
+from appointments.models import MedicalRecord
 from .models import Doctor, Patient, Tooth, WorkSchedule, Service, Invoice
 from appointments.views import (
     AppointmentViewSet,
@@ -17,7 +20,9 @@ from appointments.views import (
 from .serializers import (
     DoctorSerializer,
     DentalServiceSerializer,
+    InvoiceCreateSerializer,
     InvoiceSerializer,
+    InvoiceSourceSerializer,
     PatientSerializer,
     ToothSerializer,
     WorkScheduleSerializer,
@@ -92,10 +97,58 @@ class DentalServiceViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class IsBillingStaff(BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if user.is_superuser:
+            return True
+        clinic_profile = getattr(user, "clinic_profile", None)
+        return bool(
+            clinic_profile
+            and clinic_profile.role.code in ("ADMIN", "RECEPTIONIST")
+        )
+
+
 class InvoiceViewSet(viewsets.ModelViewSet):
-    queryset = Invoice.objects.select_related("patient").all()
-    serializer_class = InvoiceSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsBillingStaff]
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        return Invoice.objects.select_related("patient").prefetch_related(
+            "items__service"
+        ).order_by("-issued_at", "-id")
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return InvoiceCreateSerializer
+        if self.action == "available_records":
+            return InvoiceSourceSerializer
+        return InvoiceSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            invoice = serializer.save()
+        except IntegrityError as error:
+            raise ValidationError(
+                {"medical_record": "An invoice already exists for this examination record."}
+            ) from error
+        response_serializer = InvoiceSerializer(invoice, context=self.get_serializer_context())
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["get"], url_path="available-records")
+    def available_records(self, request):
+        records = MedicalRecord.objects.filter(
+            services__isnull=False,
+            invoice__isnull=True,
+        ).select_related(
+            "appointment__patient"
+        ).prefetch_related("services").distinct().order_by("-created_at", "-id")
+        serializer = self.get_serializer(records, many=True)
+        return Response(serializer.data)
 
 
 class HealthView(APIView):

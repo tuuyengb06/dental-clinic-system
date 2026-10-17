@@ -66,6 +66,8 @@ function App() {
   const [schedules, setSchedules] = useState([]);
   const [teeth, setTeeth] = useState([]);
   const [medicalRecords, setMedicalRecords] = useState([]);
+  const [invoices, setInvoices] = useState([]);
+  const [invoiceSources, setInvoiceSources] = useState([]);
   const [tokens, setTokens] = useState(null);
   const [profile, setProfile] = useState(null);
   const [authReady, setAuthReady] = useState(false);
@@ -130,6 +132,12 @@ function App() {
     const recordRequest = currentRole === 'DENTIST' || currentRole === 'ADMIN'
       ? apiRequest('/medical-records/', { tokens, onTokens: updateTokens })
       : Promise.resolve([]);
+    const billingRequest = currentRole === 'ADMIN' || currentRole === 'RECEPTIONIST'
+      ? Promise.all([
+        apiRequest('/invoices/', { tokens, onTokens: updateTokens }),
+        apiRequest('/invoices/available-records/', { tokens, onTokens: updateTokens })
+      ])
+      : Promise.resolve([[], []]);
     Promise.all([
       apiRequest('/patients/', { tokens, onTokens: updateTokens }),
       apiRequest('/appointments/', { tokens, onTokens: updateTokens }),
@@ -137,8 +145,9 @@ function App() {
       apiRequest('/services/', { tokens, onTokens: updateTokens }),
       apiRequest('/schedules/', { tokens, onTokens: updateTokens }),
       apiRequest('/teeth/', { tokens, onTokens: updateTokens }),
-      recordRequest
-    ]).then(([patientData, appointmentData, doctorData, serviceData, scheduleData, toothData, recordData]) => {
+      recordRequest,
+      billingRequest
+    ]).then(([patientData, appointmentData, doctorData, serviceData, scheduleData, toothData, recordData, billingData]) => {
       setPatients(patientData);
       setAppointments(appointmentData);
       setDoctors(doctorData);
@@ -146,6 +155,8 @@ function App() {
       setSchedules(scheduleData);
       setTeeth(toothData);
       setMedicalRecords(recordData);
+      setInvoices(billingData[0]);
+      setInvoiceSources(billingData[1]);
       setApiLive(true);
       setApiError('');
     }).catch((error) => {
@@ -216,6 +227,15 @@ function App() {
     return saved;
   }
 
+  async function createInvoice(invoice) {
+    const created = await apiRequest('/invoices/', {
+      tokens, onTokens: updateTokens, method: 'POST', body: invoice
+    });
+    setInvoices((current) => [created, ...current]);
+    setInvoiceSources((current) => current.filter((record) => record.id !== created.medical_record));
+    return created;
+  }
+
   async function login(username, password) {
     const nextTokens = await apiRequest('/auth/token/', { method: 'POST', body: { username, password } });
     const currentUser = await apiRequest('/auth/me/', { tokens: nextTokens });
@@ -254,7 +274,7 @@ function App() {
       {section === 'Appointments' && <Appointments appointments={appointments} patients={patients} doctors={doctors} services={services} schedules={schedules} role={role} loading={apiLoading} loadError={apiError} onCreateAppointment={createAppointment} onCreateSchedule={createSchedule} onCancelAppointment={cancelAppointment} />}
       {section === 'EMR' && (role === 'DENTIST' || role === 'ADMIN') && <MedicalRecords appointments={appointments} patients={patients} services={services} teeth={teeth} records={medicalRecords} loading={apiLoading} loadError={apiError} onSave={saveMedicalRecord} />}
       {section === 'Tooth chart' && <ToothChart dentition={dentition} setDentition={setDentition} selectedTooth={selectedTooth} setSelectedTooth={setSelectedTooth} />}
-      {section === 'Billing' && <Billing patients={patients} />}
+      {section === 'Billing' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Billing invoices={invoices} records={invoiceSources} loading={apiLoading} onCreateInvoice={createInvoice} />}
       {section === 'Radiographs' && <Radiographs />}
       {section === 'Services' && role === 'ADMIN' && <ServiceManagement tokens={tokens} onTokensChanged={updateTokens} />}
       {section === 'Doctors' && role === 'ADMIN' && <DoctorDirectory tokens={tokens} onTokensChanged={updateTokens} />}
@@ -1039,7 +1059,113 @@ function MedicalRecords({ appointments, patients, services, teeth, records, load
 }
 function ToothChart({ dentition, setDentition, selectedTooth, setSelectedTooth }) { const teeth = dentition === 'ADULT' ? teethAdult : teethChild; return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">CLINICAL RECORD</span><h2>Interactive tooth chart</h2></div><div className="segmented"><button className={dentition === 'ADULT' ? 'selected' : ''} onClick={() => setDentition('ADULT')}>Adult · 32</button><button className={dentition === 'CHILD' ? 'selected' : ''} onClick={() => setDentition('CHILD')}>Child · 20</button></div></div><div className="chart-layout"><div className="panel tooth-panel"><div className="chart-header"><div><strong>Nguyen Minh Anh</strong><span>DMS-0001 · {dentition === 'ADULT' ? 'Permanent dentition' : 'Primary dentition'}</span></div><span className="status confirmed">In treatment</span></div><div className="mouth-label">UPPER ARCH</div><div className={`teeth-grid ${dentition.toLowerCase()}`}>{teeth.slice(0, Math.ceil(teeth.length / 2)).map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-line" /><div className={`teeth-grid lower ${dentition.toLowerCase()}`}>{teeth.slice(Math.ceil(teeth.length / 2)).reverse().map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-label lower-label">LOWER ARCH</div><div className="chart-legend"><span><i className="dot healthy" />Healthy</span><span><i className="dot care" />Needs care</span><span><i className="dot monitor" />Monitor</span></div></div><aside className="panel tooth-detail"><span className="eyebrow">SELECTED TOOTH</span>{selectedTooth ? <><div className="tooth-number">{teeth.find((tooth) => tooth.id === selectedTooth)?.code}</div><h3>Clinical condition</h3><p>Update this tooth’s condition and add a treatment note for the patient record.</p><select defaultValue="Healthy"><option>Healthy</option><option>Needs care</option><option>Monitor</option><option>Restored</option></select><textarea placeholder="Add a clinical note..." /><button className="primary-button full">Save condition</button></> : <div className="empty-detail"><Stethoscope size={28} /><p>Select a tooth to inspect its clinical record.</p></div>}</aside></div></section>; }
 function Tooth({ tooth, selected, onClick }) { return <button onClick={onClick} className={`tooth ${tooth.state.toLowerCase().replace(' ', '-')} ${selected ? 'selected' : ''}`}><span>{tooth.code.slice(1)}</span><div className="tooth-shape" /></button>; }
-function Billing({ patients }) { return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">FINANCE</span><h2>Billing & installment plans</h2></div><button className="primary-button"><CircleDollarSign size={17} /> New invoice</button></div><div className="metric-grid compact"><Metric label="Outstanding" value="₫42.8m" detail="Across 18 invoices" accent="gold" icon={CircleDollarSign} /><Metric label="Due this week" value="₫8.4m" detail="6 installments" accent="coral" icon={CalendarDays} /><Metric label="Collected today" value="₫5.2m" detail="11 payments" accent="sage" icon={ShieldCheck} /></div><div className="panel table-panel"><table><thead><tr><th>Invoice</th><th>Patient</th><th>Total</th><th>Paid</th><th>Status</th></tr></thead><tbody>{patients.slice(0, 3).map((p, i) => <tr key={p.id}><td><code>INV-000{i + 1}</code></td><td><strong>{p.full_name}</strong></td><td>₫{['3,500,000', '1,200,000', '850,000'][i]}</td><td>₫{['1,500,000', '1,200,000', '350,000'][i]}</td><td><span className={`status ${i === 1 ? 'paid' : 'scheduled'}`}>{i === 1 ? 'Paid' : 'Installment'}</span></td></tr>)}</tbody></table></div></section>; }
+function Billing({ invoices, records, loading, onCreateInvoice }) {
+  const [recordId, setRecordId] = useState('');
+  const [quantities, setQuantities] = useState({});
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const selectedRecord = records.find((record) => String(record.id) === recordId);
+  const selectedInvoice = invoices.find((invoice) => String(invoice.id) === selectedInvoiceId);
+  const total = selectedRecord?.services.reduce((sum, service) => {
+    const quantity = Number(quantities[service.id] || 1);
+    return sum + Number(service.price) * quantity;
+  }, 0) || 0;
+
+  useEffect(() => {
+    if (records.length && !records.some((record) => String(record.id) === recordId)) {
+      setRecordId(String(records[0].id));
+    }
+  }, [records, recordId]);
+
+  useEffect(() => {
+    if (selectedRecord) {
+      setQuantities(Object.fromEntries(selectedRecord.services.map((service) => [service.id, 1])));
+    }
+  }, [selectedRecord?.id]);
+
+  async function createInvoice(event) {
+    event.preventDefault();
+    if (!selectedRecord) return;
+    setSaving(true);
+    setError('');
+    setSuccess('');
+    try {
+      const invoice = await onCreateInvoice({
+        medical_record: selectedRecord.id,
+        items: selectedRecord.services.map((service) => ({
+          service: service.id,
+          quantity: Number(quantities[service.id] || 1)
+        }))
+      });
+      setSelectedInvoiceId(String(invoice.id));
+      setSuccess(`Invoice ${invoice.invoice_number} created successfully.`);
+    } catch (saveError) {
+      setError(saveError.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <section className="page-section management-page">
+    <div className="section-toolbar"><div><span className="eyebrow">FINANCE</span><h2>Invoices</h2></div></div>
+    {error && <div className="form-error" role="alert">{error}</div>}
+    {success && <div className="form-success" role="status">{success}</div>}
+    <section className="panel invoice-create-panel">
+      <div className="panel-heading"><div><span className="eyebrow">FROM PRESCRIBED SERVICES</span><h3>Create invoice</h3></div></div>
+      {loading ? <p className="management-state" role="status">Loading invoices and prescribed services…</p> : !records.length ? <p className="management-state">No examination records with uninvoiced prescribed services are available.</p> : <form className="invoice-form" onSubmit={createInvoice}>
+        <label>Examination record
+          <select required value={recordId} onChange={(event) => { setRecordId(event.target.value); setSuccess(''); }}>
+            {records.map((record) => <option key={record.id} value={record.id}>{record.patient_name} · {record.patient_code} · {new Date(record.appointment_date).toLocaleString()}</option>)}
+          </select>
+        </label>
+        {selectedRecord && <>
+          <div className="invoice-patient-summary"><strong>{selectedRecord.patient_name}</strong><span>{selectedRecord.patient_code} · Examined {new Date(selectedRecord.appointment_date).toLocaleString()}</span></div>
+          <p className="invoice-source-meta">Prescribed services are loaded from EMR. Prices are determined and validated by the server when the invoice is created.</p>
+          <div className="invoice-lines">
+            <div className="invoice-line invoice-line-heading"><span>Service</span><span>Unit price</span><span>Quantity</span><span>Amount</span></div>
+            {selectedRecord.services.map((service) => {
+              const quantity = Number(quantities[service.id] || 1);
+              const lineTotal = Number(service.price) * quantity;
+              return <div className="invoice-line" key={service.id}>
+                <strong>{service.name}</strong>
+                <span>{Number(service.price).toLocaleString('vi-VN')} ₫</span>
+                <input aria-label={`Quantity for ${service.name}`} type="number" min="1" max="32767" step="1" required value={quantities[service.id] ?? 1} onChange={(event) => setQuantities((current) => ({ ...current, [service.id]: event.target.value }))} />
+                <strong>{lineTotal.toLocaleString('vi-VN')} ₫</strong>
+              </div>;
+            })}
+          </div>
+          <div className="invoice-total invoice-grand-total"><span>Total due</span><strong>{total.toLocaleString('vi-VN')} ₫</strong></div>
+          <p className="invoice-payment-note">New invoices are issued unpaid. Payment collection is not included in this workflow.</p>
+          <div className="form-actions"><button className="primary-button" type="submit" disabled={saving || !selectedRecord.services.length}>{saving ? 'Creating invoice…' : 'Create invoice'}</button></div>
+        </>}
+      </form>}
+    </section>
+    <section className="panel table-panel management-table invoice-history-panel">
+      <div className="panel-heading"><div><span className="eyebrow">BILLING HISTORY</span><h3>Invoices ({invoices.length})</h3></div></div>
+      {loading ? <p className="management-state" role="status">Loading invoice history…</p> : !invoices.length ? <p className="management-state">No invoices have been created yet.</p> : <div className="invoice-table-scroll"><table>
+        <thead><tr><th>Invoice</th><th>Patient</th><th>Issued</th><th>Total</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead>
+        <tbody>{invoices.map((invoice) => <tr key={invoice.id} className={selectedInvoiceId === String(invoice.id) ? 'invoice-row-selected' : ''} onClick={() => setSelectedInvoiceId(String(invoice.id))}>
+          <td><button type="button" className="invoice-number-button" aria-label={`View invoice ${invoice.invoice_number}`} onClick={() => setSelectedInvoiceId(String(invoice.id))}>{invoice.invoice_number}</button></td>
+          <td>{invoice.patient_name}</td><td>{new Date(invoice.issued_at).toLocaleDateString()}</td>
+          <td>{Number(invoice.total_amount).toLocaleString('vi-VN')} ₫</td><td>{Number(invoice.paid_amount).toLocaleString('vi-VN')} ₫</td>
+          <td>{Number(invoice.balance).toLocaleString('vi-VN')} ₫</td><td><span className={`pill invoice-status ${invoice.status.toLowerCase()}`}>{invoice.status}</span></td>
+        </tr>)}</tbody>
+      </table></div>}
+    </section>
+    {selectedInvoice && <section className="panel invoice-detail-panel">
+      <div className="panel-heading"><div><span className="eyebrow">INVOICE DETAILS</span><h3>{selectedInvoice.invoice_number} · {selectedInvoice.patient_name}</h3></div><span className={`pill invoice-status ${selectedInvoice.status.toLowerCase()}`}>{selectedInvoice.status}</span></div>
+      <div className="invoice-lines">
+        <div className="invoice-line invoice-line-heading"><span>Service</span><span>Unit price</span><span>Quantity</span><span>Amount</span></div>
+        {selectedInvoice.items.map((item) => <div className="invoice-line" key={item.id}>
+          <strong>{item.description}</strong><span>{Number(item.unit_price).toLocaleString('vi-VN')} ₫</span><span>{item.quantity}</span><strong>{Number(item.amount).toLocaleString('vi-VN')} ₫</strong>
+        </div>)}
+      </div>
+      <div className="invoice-total"><span>Total · Balance</span><strong>{Number(selectedInvoice.total_amount).toLocaleString('vi-VN')} ₫ · {Number(selectedInvoice.balance).toLocaleString('vi-VN')} ₫</strong></div>
+    </section>}
+  </section>;
+}
 function Radiographs() { return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">IMAGING</span><h2>Radiograph gallery</h2></div><button className="primary-button"><FileImage size={17} /> Upload image</button></div><div className="upload-placeholder"><FileImage size={30} /><h3>No radiographs uploaded yet</h3><p>Attach X-ray images to a patient record from the clinical visit.</p><button className="secondary-button">Choose file</button></div></section>; }
 
 createRoot(document.getElementById('root')).render(<App />);

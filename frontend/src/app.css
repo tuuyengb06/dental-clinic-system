@@ -35,6 +35,35 @@
 .management-table{margin-top:8px}
 .management-table .table-description{display:block;max-width:320px;margin-top:4px;color:var(--muted);white-space:normal;font-size:11px}
 .management-state{padding:20px;color:var(--muted);font-size:13px}
+.invoice-create-panel,.invoice-history-panel,.invoice-detail-panel{padding:20px;margin-bottom:16px}
+.invoice-create-panel .panel-heading,.invoice-history-panel .panel-heading,.invoice-detail-panel .panel-heading{margin-bottom:14px}
+.invoice-create-panel .panel-heading h3,.invoice-history-panel .panel-heading h3,.invoice-detail-panel .panel-heading h3{margin:5px 0 0;color:var(--deep);font:600 19px Fraunces,Georgia,serif}
+.invoice-form{display:grid;gap:14px}
+.invoice-form>label{display:grid;gap:7px;color:var(--deep);font-size:12px;font-weight:700}
+.invoice-form select{width:100%;padding:10px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink);font-size:13px}
+.invoice-patient-summary{display:grid;gap:4px;padding:12px;background:#f8f7f2}
+.invoice-patient-summary strong{color:var(--deep);font-size:13px}
+.invoice-patient-summary span,.invoice-payment-note{color:var(--muted);font-size:11px}
+.invoice-source-meta{margin:0;color:var(--muted);font-size:11px}
+.invoice-source-meta strong{color:var(--deep)}
+.invoice-lines{display:grid;min-width:0}
+.invoice-line{display:grid;grid-template-columns:minmax(160px,1fr) minmax(100px,.6fr) 90px minmax(120px,.7fr);align-items:center;gap:12px;padding:10px 8px;border-bottom:1px solid #eeeae1;color:var(--ink);font-size:12px}
+.invoice-line> :last-child{text-align:right}
+.invoice-line-heading{color:var(--muted);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.invoice-line input{width:80px;padding:7px;border:1px solid var(--line);border-radius:4px;background:#fff;color:var(--ink)}
+.invoice-total{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 8px 4px;color:var(--deep);font-size:13px}
+.invoice-total strong{font-size:16px}
+.invoice-grand-total{border-top:1px solid var(--line)}
+.invoice-payment-note{margin:0}
+.invoice-table-scroll{overflow:auto}
+.invoice-table-scroll table{min-width:760px}
+.invoice-table-scroll tbody tr{cursor:pointer}
+.invoice-row-selected{background:#f0f5ef}
+.invoice-number-button{padding:0;background:none;color:var(--green);font-weight:700;text-decoration:underline;text-underline-offset:2px}
+.invoice-status{white-space:nowrap}
+.invoice-status.issued{background:#fff0dc;color:#875e1e}
+.invoice-status.partially_paid{background:#e8eff4;color:#42677e}
+.invoice-status.paid{background:#e1efe6;color:#28664f}
 .pill.inactive{background:#f1eeea;color:#827970}
 .danger-button{color:#b34d3d}
 .cancel-appointment-button{padding:6px 9px;color:#a34c3d;font-size:10px;white-space:nowrap}
@@ -165,3 +194,4 @@
 @media(max-width:850px){.reception-results-layout{grid-template-columns:1fr}}
 @media(max-width:560px){.reception-search{padding:15px}.reception-search-controls{flex-wrap:wrap}.reception-search-controls input{flex-basis:calc(100% - 32px)}.reception-search-controls .primary-button{width:100%;justify-content:center}.reception-profile-grid{grid-template-columns:1fr}.reception-profile-grid .profile-wide{grid-column:auto}.reception-visit-history>div{flex-direction:column;gap:4px}}
 @media(max-width:560px){.login-card{padding:27px 22px}.topbar-actions .user-card>div:nth-child(2){display:none}.topbar-actions .user-card .secondary-button{font-size:10px;padding:7px}}
+@media(max-width:700px){.invoice-line{grid-template-columns:minmax(120px,1fr) minmax(85px,.7fr) 72px minmax(100px,.7fr);gap:7px;padding:9px 4px;font-size:10px}.invoice-line input{width:68px}.invoice-create-panel,.invoice-history-panel,.invoice-detail-panel{padding:15px}}

@@ -80,7 +80,9 @@ Chạy `python manage.py migrate` để tạo schema từ migration. Sau đó ch
 - `GET/POST /api/v1/schedules/` (xem/đặt ca làm theo bác sĩ, ngày và giờ; không cho phép ca chồng nhau)
 - `GET /api/v1/teeth/` (danh mục răng để lập hồ sơ bệnh án)
 - `GET/POST/PATCH /api/v1/medical-records/` (bác sĩ lập/cập nhật chẩn đoán, hướng điều trị, răng và dịch vụ chỉ định; mỗi hồ sơ gắn với một lịch hẹn)
-- `GET/POST /api/v1/invoices/`
+- `GET /api/v1/invoices/` (lịch sử hóa đơn, chỉ Admin/Lễ tân)
+- `GET /api/v1/invoices/available-records/` (hồ sơ có dịch vụ được chỉ định nhưng chưa lập hóa đơn, chỉ trả thông tin cần thiết cho thu ngân)
+- `POST /api/v1/invoices/` (tạo một hóa đơn cho hồ sơ khám với mọi dịch vụ chỉ định và số lượng; backend lấy đơn giá danh mục, tự tính thành tiền/tổng tiền, phát hành trạng thái `ISSUED` chưa thanh toán; không cho lập trùng hóa đơn cho một hồ sơ)
 - `GET/POST /api/v1/services/` (`POST/PATCH/DELETE` chỉ dành cho ADMIN; DELETE sẽ ngừng dịch vụ)
 - `GET /api/v1/doctors/`
 - `GET /api/v1/health/` (public health check; các API nghiệp vụ khác cần JWT)
@@ -92,6 +94,8 @@ Màn hình lịch hẹn hỗ trợ xem theo ngày/tuần, chuyển khoảng th�
 Luồng đặt lịch trên giao diện dành cho lễ tân/Admin, gửi `patient`, `doctor`, `service`, `appointment_date` và lý do khám trong `notes` tới `POST /api/v1/appointments/`. Backend xác thực giờ làm, thời lượng dịch vụ và xung đột lịch; giao diện chỉ xác nhận thành công sau khi API tạo lịch, sau đó chuyển tới ngày hẹn để thấy lịch mới. API hiện yêu cầu tài khoản nhân viên đã đăng nhập để tạo lịch, nên chưa hỗ trợ bệnh nhân tự đặt lịch.
 
 Tại màn hình lịch, lễ tân/Admin có thể yêu cầu hủy lịch Pending hoặc Confirmed sau khi xác nhận trong hộp thoại. API trả bản ghi cập nhật; giao diện chỉ đổi trạng thái sau phản hồi thành công và giữ thông báo lỗi nếu API từ chối hoặc mất kết nối. Các trạng thái được phép hủy là quy ước hiện tại, cần được nhóm trưởng xác nhận.
+
+Tại màn hình `Billing`, Admin/Lễ tân chọn hồ sơ khám có dịch vụ đã chỉ định, nhập số lượng và xem tổng tạm tính trước khi tạo hóa đơn. Backend chỉ chấp nhận đầy đủ danh sách dịch vụ của hồ sơ, lấy giá hiện tại từ danh mục thay vì tin giá/tổng do client gửi, lưu giá mô tả tại thời điểm lập hóa đơn, và giới hạn một hóa đơn cho mỗi hồ sơ khám. Hóa đơn mới có trạng thái `ISSUED`, số đã thanh toán bằng 0; không bao gồm thao tác thu tiền.
 
 ## 6. Build kiểm tra
 
@@ -120,4 +124,4 @@ python manage.py check
 
 ## Phạm vi MVP
 
-Đã có giao diện tiếp nhận tra cứu hồ sơ theo mã bệnh nhân, họ tên hoặc số điện thoại, hiển thị thông tin định danh, ngày sinh, kiểu răng, dị ứng, tiền sử bệnh và các lịch hẹn hiện có. API tra cứu trả lỗi đầu vào rõ ràng cho truy vấn trống hoặc ký tự không hợp lệ. EMR lưu chẩn đoán, hướng điều trị dạng ghi chú, răng được chọn và danh sách dịch vụ qua `/api/v1/medical-records/`; API chưa cung cấp luồng TreatmentPlan/TreatmentItem riêng để lưu số lượng hoặc gắn riêng từng dịch vụ với từng răng. Thanh toán hóa đơn và quản lý ảnh radiograph vẫn ngoài phạm vi.
+Đã có giao diện tiếp nhận tra cứu hồ sơ theo mã bệnh nhân, họ tên hoặc số điện thoại, hiển thị thông tin định danh, ngày sinh, kiểu răng, dị ứng, tiền sử bệnh và các lịch hẹn hiện có. API tra cứu trả lỗi đầu vào rõ ràng cho truy vấn trống hoặc ký tự không hợp lệ. EMR lưu chẩn đoán, hướng điều trị dạng ghi chú, răng được chọn và danh sách dịch vụ qua `/api/v1/medical-records/`; API chưa cung cấp luồng TreatmentPlan/TreatmentItem riêng để lưu số lượng hoặc gắn riêng từng dịch vụ với từng răng. Hóa đơn được tạo từ các dịch vụ chỉ định lưu trên hồ sơ khám, hỗ trợ đơn giá/số lượng/thành tiền và trạng thái chưa thanh toán; thu tiền mặt, QR/chuyển khoản, chatbot AI, ảnh radiograph và dashboard doanh thu vẫn ngoài phạm vi.

@@ -1,5 +1,11 @@
+import uuid
+from decimal import Decimal
+
+from django.db import transaction
+from django.utils import timezone
 from rest_framework import serializers
-from .models import Doctor, Patient, Tooth, WorkSchedule, Service, Invoice
+from appointments.models import MedicalRecord
+from .models import Doctor, Invoice, InvoiceItem, Patient, Service, Tooth, WorkSchedule
 
 class DoctorSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
@@ -64,13 +70,149 @@ class ToothSerializer(serializers.ModelSerializer):
         fields = ["id", "code", "dentition_type", "display_order"]
 
 
+class InvoiceItemSerializer(serializers.ModelSerializer):
+    service_name = serializers.CharField(source="service.name", read_only=True, allow_null=True)
+
+    class Meta:
+        model = InvoiceItem
+        fields = ["id", "service", "service_name", "description", "quantity", "unit_price", "amount"]
+        read_only_fields = fields
+
+
+class InvoiceServiceSourceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Service
+        fields = ["id", "name", "price"]
+
+
+class InvoiceSourceSerializer(serializers.ModelSerializer):
+    appointment = serializers.IntegerField(source="appointment_id", read_only=True)
+    appointment_date = serializers.DateTimeField(source="appointment.appointment_date", read_only=True)
+    patient = serializers.IntegerField(source="appointment.patient_id", read_only=True)
+    patient_name = serializers.CharField(source="appointment.patient.full_name", read_only=True)
+    patient_code = serializers.CharField(source="appointment.patient.patient_code", read_only=True)
+    services = InvoiceServiceSourceSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = MedicalRecord
+        fields = ["id", "appointment", "appointment_date", "patient", "patient_name", "patient_code", "services"]
+
+
+class InvoiceItemInputSerializer(serializers.Serializer):
+    service = serializers.PrimaryKeyRelatedField(queryset=Service.objects.all())
+    quantity = serializers.IntegerField(min_value=1, max_value=32767)
+
+
+class InvoiceCreateSerializer(serializers.Serializer):
+    medical_record = serializers.PrimaryKeyRelatedField(queryset=MedicalRecord.objects.all())
+    items = InvoiceItemInputSerializer(many=True)
+
+    def validate(self, attrs):
+        medical_record = attrs["medical_record"]
+        requested_items = attrs["items"]
+        requested_ids = [item["service"].id for item in requested_items]
+        if len(requested_ids) != len(set(requested_ids)):
+            raise serializers.ValidationError({"items": "Each prescribed service may appear only once."})
+
+        prescribed_services = {
+            service.id: service for service in medical_record.services.all()
+        }
+        if not prescribed_services:
+            raise serializers.ValidationError(
+                {"medical_record": "This examination record has no prescribed services to invoice."}
+            )
+        if set(requested_ids) != set(prescribed_services):
+            raise serializers.ValidationError(
+                {"items": "Include every service prescribed on the examination record exactly once."}
+            )
+        if Invoice.objects.filter(medical_record=medical_record).exists():
+            raise serializers.ValidationError(
+                {"medical_record": "An invoice already exists for this examination record."}
+            )
+
+        maximum_amount = Decimal("9999999999.99")
+        total = Decimal("0")
+        for item in requested_items:
+            unit_price = item["service"].price
+            line_total = unit_price * item["quantity"]
+            if unit_price < 0 or line_total > maximum_amount:
+                raise serializers.ValidationError(
+                    {"items": "A service price or line total is outside the supported range."}
+                )
+            total += line_total
+        if total > maximum_amount:
+            raise serializers.ValidationError(
+                {"items": "The invoice total is outside the supported range."}
+            )
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        medical_record = MedicalRecord.objects.select_for_update().select_related(
+            "appointment__patient"
+        ).get(pk=validated_data["medical_record"].pk)
+        prescribed_services = {
+            service.id: service for service in medical_record.services.all()
+        }
+        requested_items = validated_data["items"]
+        requested_ids = [item["service"].id for item in requested_items]
+        if (
+            len(requested_ids) != len(set(requested_ids))
+            or set(requested_ids) != set(prescribed_services)
+        ):
+            raise serializers.ValidationError(
+                {"items": "The prescribed services changed. Reload the examination record and try again."}
+            )
+
+        maximum_amount = Decimal("9999999999.99")
+        total = Decimal("0")
+        invoice_items = []
+        for item in requested_items:
+            service = prescribed_services[item["service"].id]
+            line_total = service.price * item["quantity"]
+            if service.price < 0 or line_total > maximum_amount:
+                raise serializers.ValidationError(
+                    {"items": "A service price or line total is outside the supported range."}
+                )
+            total += line_total
+            invoice_items.append((service, item["quantity"], line_total))
+        if total > maximum_amount:
+            raise serializers.ValidationError(
+                {"items": "The invoice total is outside the supported range."}
+            )
+
+        invoice = Invoice.objects.create(
+            medical_record=medical_record,
+            patient=medical_record.appointment.patient,
+            invoice_number=f"INV-{timezone.localdate():%Y%m%d}-{uuid.uuid4().hex[:8].upper()}",
+            total_amount=Decimal("0"),
+            paid_amount=Decimal("0"),
+            status=Invoice.ISSUED,
+        )
+        for service, quantity, line_total in invoice_items:
+            InvoiceItem.objects.create(
+                invoice=invoice,
+                service=service,
+                description=service.name,
+                quantity=quantity,
+                unit_price=service.price,
+                amount=line_total,
+            )
+        invoice.total_amount = total
+        invoice.save(update_fields=["total_amount"])
+        return invoice
+
+
 class InvoiceSerializer(serializers.ModelSerializer):
     balance = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    patient_name = serializers.CharField(source="patient.full_name", read_only=True)
+    medical_record = serializers.IntegerField(source="medical_record_id", read_only=True, allow_null=True)
+    items = InvoiceItemSerializer(many=True, read_only=True)
 
     class Meta:
         model = Invoice
         fields = [
-            "id", "patient", "invoice_number", "total_amount", "paid_amount",
-            "balance", "status", "issued_at",
+            "id", "patient", "patient_name", "medical_record", "invoice_number",
+            "total_amount", "paid_amount", "balance", "status", "issued_at", "items",
         ]
-        read_only_fields = ["id", "issued_at"]
+        read_only_fields = fields

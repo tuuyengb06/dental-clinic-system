@@ -154,6 +154,13 @@ class Invoice(models.Model):
     PARTIAL = "PARTIALLY_PAID"
     PAID = "PAID"
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name="invoices")
+    medical_record = models.OneToOneField(
+        "appointments.MedicalRecord",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="invoice",
+    )
     invoice_number = models.CharField(max_length=30, unique=True)
     total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     paid_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
