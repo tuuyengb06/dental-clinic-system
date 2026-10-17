@@ -1,7 +1,9 @@
 from datetime import datetime, time, timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.db import DatabaseError, IntegrityError
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -9,7 +11,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from appointments.models import Appointment as ScheduledAppointment, MedicalRecord
-from .models import ClinicUser, Doctor, Invoice, InvoiceItem, Patient, Role, Service, Tooth
+from .models import ClinicUser, Doctor, Invoice, InvoiceItem, Patient, Payment, Role, Service, Tooth
 
 User = get_user_model()
 
@@ -392,6 +394,161 @@ class AuthenticationAndManagementApiTests(APITestCase):
         response = self.client.get("/api/v1/invoices/")
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def create_issued_invoice(
+        self,
+        total="250000.00",
+        paid="0.00",
+        invoice_status=Invoice.ISSUED,
+    ):
+        return Invoice.objects.create(
+            patient=self.patient,
+            invoice_number=f"INV-PAY-TEST-{Invoice.objects.count() + 1:03d}",
+            total_amount=total,
+            paid_amount=paid,
+            status=invoice_status,
+        )
+
+    def pay_cash(self, invoice_id, method=Payment.CASH):
+        return self.client.post(
+            f"/api/v1/invoices/{invoice_id}/pay-cash/",
+            {"method": method},
+            format="json",
+        )
+
+    def test_receptionist_can_pay_full_invoice_in_cash(self):
+        receptionist_role = Role.objects.create(code="RECEPTIONIST", name="Receptionist")
+        receptionist = User.objects.create_user(username="cash-receptionist", password="Reception123!")
+        receptionist_profile = ClinicUser.objects.create(user=receptionist, role=receptionist_role)
+        invoice = self.create_issued_invoice(total="250000.75")
+        self.client.force_authenticate(receptionist)
+
+        response = self.pay_cash(invoice.id)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], Invoice.PAID)
+        self.assertEqual(response.data["paid_amount"], "250000.75")
+        self.assertEqual(response.data["balance"], "0.00")
+        self.assertEqual(len(response.data["payments"]), 1)
+        payment_data = response.data["payments"][0]
+        self.assertEqual(payment_data["amount"], "250000.75")
+        self.assertEqual(payment_data["method"], Payment.CASH)
+        self.assertEqual(payment_data["status"], Payment.COMPLETED)
+        self.assertEqual(payment_data["received_by_name"], receptionist.get_username())
+        self.assertTrue(payment_data["paid_at"])
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, Invoice.PAID)
+        self.assertEqual(invoice.paid_amount, invoice.total_amount)
+        payment = Payment.objects.get(invoice=invoice)
+        self.assertEqual(payment.received_by, receptionist_profile)
+
+    def test_paid_invoice_rejects_duplicate_cash_payment(self):
+        invoice = self.create_issued_invoice()
+        self.authenticate("clinic-admin", "AdminPass123!")
+
+        first = self.pay_cash(invoice.id)
+        duplicate = self.pay_cash(invoice.id)
+
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self.assertEqual(duplicate.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("already been paid", str(duplicate.data["status"]))
+        self.assertEqual(Payment.objects.filter(invoice=invoice).count(), 1)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, Invoice.PAID)
+
+    def test_cash_payment_rejects_missing_invoice(self):
+        self.authenticate("clinic-admin", "AdminPass123!")
+
+        response = self.pay_cash(99999)
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(Payment.objects.count(), 0)
+
+    def test_cash_payment_rejects_zero_invalid_and_nonissued_invoices(self):
+        zero_invoice = self.create_issued_invoice(total="0.00")
+        invalid_balance_invoice = self.create_issued_invoice(total="250000.00", paid="1.00")
+        draft_invoice = self.create_issued_invoice(total="250000.00", invoice_status=Invoice.DRAFT)
+        self.authenticate("clinic-admin", "AdminPass123!")
+
+        for invoice in (zero_invoice, invalid_balance_invoice, draft_invoice):
+            with self.subTest(invoice=invoice.invoice_number):
+                response = self.pay_cash(invoice.id)
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        self.assertEqual(Payment.objects.count(), 0)
+        for invoice in (zero_invoice, invalid_balance_invoice, draft_invoice):
+            invoice.refresh_from_db()
+            expected_status = (
+                Invoice.DRAFT if invoice == draft_invoice else Invoice.ISSUED
+            )
+            self.assertEqual(invoice.status, expected_status)
+
+    def test_cash_payment_rejects_non_cash_method(self):
+        invoice = self.create_issued_invoice()
+        self.authenticate("clinic-admin", "AdminPass123!")
+
+        response = self.pay_cash(invoice.id, method=Payment.CARD)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(Payment.objects.count(), 0)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, Invoice.ISSUED)
+
+    def test_cash_payment_rejects_client_supplied_amount(self):
+        invoice = self.create_issued_invoice()
+        self.authenticate("clinic-admin", "AdminPass123!")
+
+        response = self.client.post(
+            f"/api/v1/invoices/{invoice.id}/pay-cash/",
+            {"method": Payment.CASH, "amount": "-1.00"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("calculated by the server", str(response.data))
+        self.assertEqual(Payment.objects.count(), 0)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, Invoice.ISSUED)
+
+    def test_payment_database_error_does_not_update_invoice(self):
+        invoice = self.create_issued_invoice()
+        self.authenticate("clinic-admin", "AdminPass123!")
+
+        with patch("clinic.views.Payment.objects.create", side_effect=DatabaseError("write failed")):
+            response = self.pay_cash(invoice.id)
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertIn("No changes were applied", response.data["detail"])
+        self.assertEqual(Payment.objects.count(), 0)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, Invoice.ISSUED)
+        self.assertEqual(invoice.paid_amount, Decimal("0.00"))
+
+    def test_unrelated_payment_integrity_error_is_reported_as_save_failure(self):
+        invoice = self.create_issued_invoice()
+        self.authenticate("clinic-admin", "AdminPass123!")
+
+        with patch(
+            "clinic.views.Payment.objects.create",
+            side_effect=IntegrityError("unrelated constraint failure"),
+        ):
+            response = self.pay_cash(invoice.id)
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertIn("No changes were applied", response.data["detail"])
+        self.assertEqual(Payment.objects.count(), 0)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, Invoice.ISSUED)
+        self.assertEqual(invoice.paid_amount, Decimal("0.00"))
+
+    def test_dentist_cannot_record_cash_payment(self):
+        invoice = self.create_issued_invoice()
+        self.authenticate("clinic-dentist", "DentistPass123!")
+
+        response = self.pay_cash(invoice.id)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(Payment.objects.count(), 0)
 
     def test_health_check_remains_public(self):
         response = self.client.get("/api/v1/health/")

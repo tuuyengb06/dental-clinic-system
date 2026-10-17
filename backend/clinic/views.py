@@ -1,16 +1,20 @@
+import logging
 import re
+from decimal import Decimal
 
-from django.db import IntegrityError
 from django.db.models import Q
+from django.db import DatabaseError, IntegrityError, transaction
+from django.shortcuts import get_object_or_404
+from django.http import JsonResponse
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from django.http import JsonResponse
+
 from appointments.models import MedicalRecord
-from .models import Doctor, Patient, Tooth, WorkSchedule, Service, Invoice
+from .models import Doctor, Invoice, Patient, Payment, Service, Tooth, WorkSchedule
 from appointments.views import (
     AppointmentViewSet,
     IsAppointmentStaff,
@@ -23,10 +27,14 @@ from .serializers import (
     InvoiceCreateSerializer,
     InvoiceSerializer,
     InvoiceSourceSerializer,
+    CashPaymentRequestSerializer,
     PatientSerializer,
+    PaymentSerializer,
     ToothSerializer,
     WorkScheduleSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class IsClinicAdminOrReadOnly(BasePermission):
@@ -125,6 +133,8 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             return InvoiceCreateSerializer
         if self.action == "available_records":
             return InvoiceSourceSerializer
+        if self.action == "pay_cash":
+            return CashPaymentRequestSerializer
         return InvoiceSerializer
 
     def create(self, request, *args, **kwargs):
@@ -149,6 +159,67 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         ).prefetch_related("services").distinct().order_by("-created_at", "-id")
         serializer = self.get_serializer(records, many=True)
         return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="pay-cash")
+    def pay_cash(self, request, pk=None):
+        request_serializer = self.get_serializer(data=request.data)
+        request_serializer.is_valid(raise_exception=True)
+
+        try:
+            with transaction.atomic():
+                invoice = get_object_or_404(
+                    self.filter_queryset(self.get_queryset()).select_for_update(),
+                    pk=pk,
+                )
+                if invoice.status == Invoice.PAID or invoice.payments.filter(
+                    status=Payment.COMPLETED
+                ).exists():
+                    raise ValidationError({"status": "This invoice has already been paid."})
+                if (
+                    invoice.status != Invoice.ISSUED
+                    or invoice.total_amount < Decimal("0.01")
+                    or invoice.paid_amount != 0
+                    or invoice.balance != invoice.total_amount
+                ):
+                    raise ValidationError(
+                        {"status": "Only valid, unpaid issued invoices can be paid."}
+                    )
+
+                payment = Payment.objects.create(
+                    invoice=invoice,
+                    amount=invoice.balance,
+                    method=Payment.CASH,
+                    status=Payment.COMPLETED,
+                    received_by=getattr(request.user, "clinic_profile", None),
+                )
+                invoice.paid_amount = payment.amount
+                invoice.status = Invoice.PAID
+                invoice.save(update_fields=["paid_amount", "status"])
+        except IntegrityError as error:
+            if Payment.objects.filter(
+                invoice_id=pk,
+                status=Payment.COMPLETED,
+            ).exists():
+                raise ValidationError(
+                    {"status": "This invoice already has a completed payment."}
+                ) from error
+            logger.exception("Cash payment integrity error for invoice %s", pk)
+            return Response(
+                {"detail": "The cash payment could not be saved. No changes were applied."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        except DatabaseError:
+            logger.exception("Cash payment could not be saved for invoice %s", pk)
+            return Response(
+                {"detail": "The cash payment could not be saved. No changes were applied."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        serializer = InvoiceSerializer(
+            invoice,
+            context=self.get_serializer_context(),
+        )
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class HealthView(APIView):

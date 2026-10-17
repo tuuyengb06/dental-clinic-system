@@ -190,8 +190,19 @@ class Payment(models.Model):
     CARD = "CARD"
     BANK_TRANSFER = "BANK_TRANSFER"
     METHOD_CHOICES = [(CASH, "Cash"), (CARD, "Card"), (BANK_TRANSFER, "Bank transfer")]
+    COMPLETED = "COMPLETED"
+    STATUS_CHOICES = [(COMPLETED, "Completed")]
     invoice = models.ForeignKey(Invoice, on_delete=models.PROTECT, related_name="payments")
     amount = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
     method = models.CharField(max_length=20, choices=METHOD_CHOICES, default=CASH)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=COMPLETED)
     paid_at = models.DateTimeField(auto_now_add=True)
     received_by = models.ForeignKey(ClinicUser, on_delete=models.PROTECT, null=True, blank=True, related_name="payments_received")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["invoice"],
+                name="unique_payment_per_invoice",
+            )
+        ]

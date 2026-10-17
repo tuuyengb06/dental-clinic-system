@@ -64,6 +64,20 @@
 .invoice-status.issued{background:#fff0dc;color:#875e1e}
 .invoice-status.partially_paid{background:#e8eff4;color:#42677e}
 .invoice-status.paid{background:#e1efe6;color:#28664f}
+.invoice-detail-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.invoice-payments{display:grid;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.invoice-payments h4{margin:0;color:var(--deep);font-size:12px}
+.invoice-payment-row{display:grid;gap:4px;padding:10px;background:#f8f7f2}
+.invoice-payment-row strong{color:var(--deep);font-size:12px}
+.invoice-payment-row span{color:var(--muted);font-size:10px}
+.cash-payment-dialog{display:grid;gap:10px}
+.cash-payment-dialog>p{margin:0;color:var(--muted);font-size:12px;line-height:1.6}
+.cash-payment-dialog .cash-payment-due{padding:12px;background:#f8f7f2;color:var(--deep)}
+.cash-payment-due strong{font-size:16px}
+.cash-method-options{border:1px solid var(--line);padding:12px}
+.cash-method-options legend{padding:0 5px;color:var(--deep);font-size:11px;font-weight:700}
+.cash-method-options label{display:flex;align-items:center;gap:8px;color:var(--ink);font-size:12px}
+.cash-payment-dialog .form-actions{justify-content:flex-end;flex-wrap:wrap}
 .pill.inactive{background:#f1eeea;color:#827970}
 .danger-button{color:#b34d3d}
 .cancel-appointment-button{padding:6px 9px;color:#a34c3d;font-size:10px;white-space:nowrap}

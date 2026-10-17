@@ -1,11 +1,12 @@
 import uuid
+from collections.abc import Mapping
 from decimal import Decimal
 
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 from appointments.models import MedicalRecord
-from .models import Doctor, Invoice, InvoiceItem, Patient, Service, Tooth, WorkSchedule
+from .models import Doctor, Invoice, InvoiceItem, Patient, Payment, Service, Tooth, WorkSchedule
 
 class DoctorSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
@@ -77,6 +78,22 @@ class InvoiceItemSerializer(serializers.ModelSerializer):
         model = InvoiceItem
         fields = ["id", "service", "service_name", "description", "quantity", "unit_price", "amount"]
         read_only_fields = fields
+
+
+class PaymentSerializer(serializers.ModelSerializer):
+    received_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Payment
+        fields = ["id", "amount", "method", "status", "paid_at", "received_by_name"]
+        read_only_fields = fields
+
+    def get_received_by_name(self, payment):
+        clinic_user = payment.received_by
+        if not clinic_user:
+            return None
+        user = clinic_user.user
+        return user.get_full_name() or user.username
 
 
 class InvoiceServiceSourceSerializer(serializers.ModelSerializer):
@@ -203,16 +220,29 @@ class InvoiceCreateSerializer(serializers.Serializer):
         return invoice
 
 
+class CashPaymentRequestSerializer(serializers.Serializer):
+    method = serializers.ChoiceField(choices=[Payment.CASH])
+
+    def to_internal_value(self, data):
+        if isinstance(data, Mapping) and set(data) - set(self.fields):
+            raise serializers.ValidationError(
+                {"non_field_errors": "Payment amount and invoice totals are calculated by the server."}
+            )
+        return super().to_internal_value(data)
+
+
 class InvoiceSerializer(serializers.ModelSerializer):
     balance = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     patient_name = serializers.CharField(source="patient.full_name", read_only=True)
     medical_record = serializers.IntegerField(source="medical_record_id", read_only=True, allow_null=True)
     items = InvoiceItemSerializer(many=True, read_only=True)
+    payments = PaymentSerializer(many=True, read_only=True)
 
     class Meta:
         model = Invoice
         fields = [
             "id", "patient", "patient_name", "medical_record", "invoice_number",
             "total_amount", "paid_amount", "balance", "status", "issued_at", "items",
+            "payments",
         ]
         read_only_fields = fields
