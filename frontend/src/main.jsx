@@ -244,6 +244,14 @@ function App() {
     return paid;
   }
 
+  async function createInvoiceQr(invoiceId) {
+    const result = await apiRequest(`/invoices/${invoiceId}/pay-qr/`, {
+      tokens, onTokens: updateTokens, method: 'POST'
+    });
+    setInvoices((current) => current.map((invoice) => invoice.id === result.invoice.id ? result.invoice : invoice));
+    return result;
+  }
+
   async function login(username, password) {
     const nextTokens = await apiRequest('/auth/token/', { method: 'POST', body: { username, password } });
     const currentUser = await apiRequest('/auth/me/', { tokens: nextTokens });
@@ -282,7 +290,7 @@ function App() {
       {section === 'Appointments' && <Appointments appointments={appointments} patients={patients} doctors={doctors} services={services} schedules={schedules} role={role} loading={apiLoading} loadError={apiError} onCreateAppointment={createAppointment} onCreateSchedule={createSchedule} onCancelAppointment={cancelAppointment} />}
       {section === 'EMR' && (role === 'DENTIST' || role === 'ADMIN') && <MedicalRecords appointments={appointments} patients={patients} services={services} teeth={teeth} records={medicalRecords} loading={apiLoading} loadError={apiError} onSave={saveMedicalRecord} />}
       {section === 'Tooth chart' && <ToothChart dentition={dentition} setDentition={setDentition} selectedTooth={selectedTooth} setSelectedTooth={setSelectedTooth} />}
-      {section === 'Billing' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Billing invoices={invoices} records={invoiceSources} loading={apiLoading} onCreateInvoice={createInvoice} onPayCash={payInvoiceCash} />}
+      {section === 'Billing' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Billing invoices={invoices} records={invoiceSources} loading={apiLoading} onCreateInvoice={createInvoice} onPayCash={payInvoiceCash} onCreateQr={createInvoiceQr} />}
       {section === 'Radiographs' && <Radiographs />}
       {section === 'Services' && role === 'ADMIN' && <ServiceManagement tokens={tokens} onTokensChanged={updateTokens} />}
       {section === 'Doctors' && role === 'ADMIN' && <DoctorDirectory tokens={tokens} onTokensChanged={updateTokens} />}
@@ -1067,18 +1075,23 @@ function MedicalRecords({ appointments, patients, services, teeth, records, load
 }
 function ToothChart({ dentition, setDentition, selectedTooth, setSelectedTooth }) { const teeth = dentition === 'ADULT' ? teethAdult : teethChild; return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">CLINICAL RECORD</span><h2>Interactive tooth chart</h2></div><div className="segmented"><button className={dentition === 'ADULT' ? 'selected' : ''} onClick={() => setDentition('ADULT')}>Adult · 32</button><button className={dentition === 'CHILD' ? 'selected' : ''} onClick={() => setDentition('CHILD')}>Child · 20</button></div></div><div className="chart-layout"><div className="panel tooth-panel"><div className="chart-header"><div><strong>Nguyen Minh Anh</strong><span>DMS-0001 · {dentition === 'ADULT' ? 'Permanent dentition' : 'Primary dentition'}</span></div><span className="status confirmed">In treatment</span></div><div className="mouth-label">UPPER ARCH</div><div className={`teeth-grid ${dentition.toLowerCase()}`}>{teeth.slice(0, Math.ceil(teeth.length / 2)).map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-line" /><div className={`teeth-grid lower ${dentition.toLowerCase()}`}>{teeth.slice(Math.ceil(teeth.length / 2)).reverse().map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-label lower-label">LOWER ARCH</div><div className="chart-legend"><span><i className="dot healthy" />Healthy</span><span><i className="dot care" />Needs care</span><span><i className="dot monitor" />Monitor</span></div></div><aside className="panel tooth-detail"><span className="eyebrow">SELECTED TOOTH</span>{selectedTooth ? <><div className="tooth-number">{teeth.find((tooth) => tooth.id === selectedTooth)?.code}</div><h3>Clinical condition</h3><p>Update this tooth’s condition and add a treatment note for the patient record.</p><select defaultValue="Healthy"><option>Healthy</option><option>Needs care</option><option>Monitor</option><option>Restored</option></select><textarea placeholder="Add a clinical note..." /><button className="primary-button full">Save condition</button></> : <div className="empty-detail"><Stethoscope size={28} /><p>Select a tooth to inspect its clinical record.</p></div>}</aside></div></section>; }
 function Tooth({ tooth, selected, onClick }) { return <button onClick={onClick} className={`tooth ${tooth.state.toLowerCase().replace(' ', '-')} ${selected ? 'selected' : ''}`}><span>{tooth.code.slice(1)}</span><div className="tooth-shape" /></button>; }
-function Billing({ invoices, records, loading, onCreateInvoice, onPayCash }) {
+function Billing({ invoices, records, loading, onCreateInvoice, onPayCash, onCreateQr }) {
   const [recordId, setRecordId] = useState('');
   const [quantities, setQuantities] = useState({});
   const [selectedInvoiceId, setSelectedInvoiceId] = useState('');
   const [cashConfirmOpen, setCashConfirmOpen] = useState(false);
+  const [qrDialogOpen, setQrDialogOpen] = useState(false);
+  const [qrTransfer, setQrTransfer] = useState(null);
+  const [qrImageError, setQrImageError] = useState(false);
   const [cashMethod, setCashMethod] = useState('CASH');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [cashError, setCashError] = useState('');
+  const [qrError, setQrError] = useState('');
   const [success, setSuccess] = useState('');
   const selectedRecord = records.find((record) => String(record.id) === recordId);
   const selectedInvoice = invoices.find((invoice) => String(invoice.id) === selectedInvoiceId);
+  const hasPendingQr = selectedInvoice?.payments?.some((payment) => payment.method === 'BANK_TRANSFER' && payment.status === 'PENDING') || false;
   const total = selectedRecord?.services.reduce((sum, service) => {
     const quantity = Number(quantities[service.id] || 1);
     return sum + Number(service.price) * quantity;
@@ -1136,6 +1149,25 @@ function Billing({ invoices, records, loading, onCreateInvoice, onPayCash }) {
     }
   }
 
+  async function showQrPayment() {
+    if (!selectedInvoice) return;
+    setSaving(true);
+    setQrError('');
+    setError('');
+    setSuccess('');
+    try {
+      const result = await onCreateQr(selectedInvoice.id);
+      setQrTransfer(result.transfer);
+      setQrImageError(false);
+      setQrDialogOpen(true);
+      setSuccess('Transfer QR is ready. The invoice remains unpaid until a bank transaction is verified.');
+    } catch (paymentError) {
+      setQrError(paymentError.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return <section className="page-section management-page">
     <div className="section-toolbar"><div><span className="eyebrow">FINANCE</span><h2>Invoices</h2></div></div>
     {error && <div className="form-error" role="alert">{error}</div>}
@@ -1165,7 +1197,7 @@ function Billing({ invoices, records, loading, onCreateInvoice, onPayCash }) {
             })}
           </div>
           <div className="invoice-total invoice-grand-total"><span>Total due</span><strong>{total.toLocaleString('vi-VN')} ₫</strong></div>
-          <p className="invoice-payment-note">New invoices are issued unpaid. Payment collection is not included in this workflow.</p>
+          <p className="invoice-payment-note">New invoices are issued unpaid. Cash and QR transfer options are available from invoice details.</p>
           <div className="form-actions"><button className="primary-button" type="submit" disabled={saving || !selectedRecord.services.length}>{saving ? 'Creating invoice…' : 'Create invoice'}</button></div>
         </>}
       </form>}
@@ -1183,7 +1215,9 @@ function Billing({ invoices, records, loading, onCreateInvoice, onPayCash }) {
       </table></div>}
     </section>
     {selectedInvoice && <section className="panel invoice-detail-panel">
-      <div className="panel-heading"><div><span className="eyebrow">INVOICE DETAILS</span><h3>{selectedInvoice.invoice_number} · {selectedInvoice.patient_name}</h3></div><div className="invoice-detail-actions"><span className={`pill invoice-status ${selectedInvoice.status.toLowerCase()}`}>{selectedInvoice.status}</span>{selectedInvoice.status === 'ISSUED' && Number(selectedInvoice.balance) > 0 && <button type="button" className="primary-button" onClick={() => { setCashError(''); setCashMethod('CASH'); setCashConfirmOpen(true); }}>Pay by cash</button>}</div></div>
+      <div className="panel-heading"><div><span className="eyebrow">INVOICE DETAILS</span><h3>{selectedInvoice.invoice_number} · {selectedInvoice.patient_name}</h3></div><div className="invoice-detail-actions"><span className={`pill invoice-status ${selectedInvoice.status.toLowerCase()}`}>{selectedInvoice.status}</span>{selectedInvoice.status === 'ISSUED' && Number(selectedInvoice.balance) > 0 && <><button type="button" className="primary-button" disabled={saving || hasPendingQr} title={hasPendingQr ? 'A bank transfer is pending; do not record another payment.' : undefined} onClick={() => { setCashError(''); setCashMethod('CASH'); setCashConfirmOpen(true); }}>Pay by cash</button><button type="button" className="secondary-button" disabled={saving} onClick={showQrPayment}>{hasPendingQr ? 'Show transfer QR' : 'Pay by QR'}</button></>}</div></div>
+      {hasPendingQr && <div className="qr-pending-note" role="status">Bank transfer pending confirmation. The invoice is not paid yet; do not treat this QR or a patient's transfer claim as payment confirmation.</div>}
+      {qrError && <div className="form-error" role="alert">{qrError}</div>}
       <div className="invoice-lines">
         <div className="invoice-line invoice-line-heading"><span>Service</span><span>Unit price</span><span>Quantity</span><span>Amount</span></div>
         {selectedInvoice.items.map((item) => <div className="invoice-line" key={item.id}>
@@ -1195,11 +1229,30 @@ function Billing({ invoices, records, loading, onCreateInvoice, onPayCash }) {
         <h4>Payment transactions</h4>
         {selectedInvoice.payments.map((payment) => <div className="invoice-payment-row" key={payment.id}>
           <strong>{Number(payment.amount).toLocaleString('vi-VN')} ₫ · {payment.method}</strong>
-          <span>{payment.status} · {new Date(payment.paid_at).toLocaleString()}</span>
+          <span>{payment.status === 'COMPLETED' && payment.paid_at ? `Paid ${new Date(payment.paid_at).toLocaleString()}` : `Created ${new Date(payment.created_at).toLocaleString()} · ${payment.status === 'PENDING' ? 'Awaiting verification' : payment.status}`}</span>
           {payment.received_by_name && <span>Received by {payment.received_by_name}</span>}
         </div>)}
       </div>}
     </section>}
+    {qrDialogOpen && qrTransfer && <div className="confirmation-backdrop" role="presentation">
+      <section className="panel cancellation-dialog qr-payment-dialog" role="dialog" aria-modal="true" aria-labelledby="qr-payment-title">
+        <h3 id="qr-payment-title">Bank transfer QR</h3>
+        <p>Scan this code to transfer the exact amount. The invoice will stay <strong>unpaid</strong> until a bank transaction is verified.</p>
+        <div className="qr-image-frame">
+          {qrImageError ? <p role="alert">The QR image could not be loaded. Use the bank details below to make the transfer.</p> : <img src={qrTransfer.qr_url} alt={`VietQR for invoice ${qrTransfer.description}`} onError={() => setQrImageError(true)} />}
+        </div>
+        <dl className="qr-transfer-details">
+          <div><dt>Amount</dt><dd>{Number(qrTransfer.amount).toLocaleString('vi-VN')} ₫</dd></div>
+          <div><dt>Bank</dt><dd>{qrTransfer.bank_id}</dd></div>
+          <div><dt>Account number</dt><dd>{qrTransfer.account_number}</dd></div>
+          <div><dt>Account name</dt><dd>{qrTransfer.account_name}</dd></div>
+          <div><dt>Transfer content</dt><dd>{qrTransfer.description}</dd></div>
+          <div><dt>Status</dt><dd>Pending verification</dd></div>
+        </dl>
+        <p className="qr-pending-note">A QR code or a patient's report does not confirm receipt. Automatic bank verification is not configured yet.</p>
+        <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setQrDialogOpen(false)}>Close</button></div>
+      </section>
+    </div>}
     {cashConfirmOpen && selectedInvoice && <div className="confirmation-backdrop" role="presentation">
       <section className="panel cancellation-dialog cash-payment-dialog" role="dialog" aria-modal="true" aria-labelledby="cash-payment-title">
         <h3 id="cash-payment-title">Confirm cash payment</h3>

@@ -1,6 +1,7 @@
 from datetime import datetime, time, timedelta
 from decimal import Decimal
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 from django.contrib.auth import get_user_model
 from django.db import DatabaseError, IntegrityError
@@ -416,6 +417,13 @@ class AuthenticationAndManagementApiTests(APITestCase):
             format="json",
         )
 
+    def pay_qr(self, invoice_id, data=None):
+        return self.client.post(
+            f"/api/v1/invoices/{invoice_id}/pay-qr/",
+            data or {},
+            format="json",
+        )
+
     def test_receptionist_can_pay_full_invoice_in_cash(self):
         receptionist_role = Role.objects.create(code="RECEPTIONIST", name="Receptionist")
         receptionist = User.objects.create_user(username="cash-receptionist", password="Reception123!")
@@ -549,6 +557,176 @@ class AuthenticationAndManagementApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(Payment.objects.count(), 0)
+
+    @override_settings(
+        VIETQR_BANK_ID="MB",
+        VIETQR_ACCOUNT_NUMBER="0123456789",
+        VIETQR_ACCOUNT_NAME="LOTUS DENTAL",
+    )
+    def test_receptionist_can_create_vietqr_and_invoice_stays_unpaid(self):
+        receptionist_role = Role.objects.create(code="RECEPTIONIST", name="Receptionist")
+        receptionist = User.objects.create_user(
+            username="qr-receptionist",
+            password="ReceptionPass123!",
+        )
+        ClinicUser.objects.create(user=receptionist, role=receptionist_role)
+        invoice = self.create_issued_invoice(total="250000.00")
+        self.client.force_authenticate(receptionist)
+
+        response = self.pay_qr(invoice.id)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["invoice"]["status"], Invoice.ISSUED)
+        self.assertEqual(response.data["invoice"]["paid_amount"], "0.00")
+        self.assertEqual(len(response.data["invoice"]["payments"]), 1)
+        self.assertEqual(response.data["transfer"]["amount"], "250000.00")
+        self.assertEqual(response.data["transfer"]["description"], invoice.invoice_number)
+        self.assertEqual(response.data["transfer"]["status"], Payment.PENDING)
+        parsed_qr = urlparse(response.data["transfer"]["qr_url"])
+        self.assertEqual(parsed_qr.netloc, "img.vietqr.io")
+        self.assertIn("/image/MB-0123456789-compact2.png", parsed_qr.path)
+        self.assertEqual(
+            parse_qs(parsed_qr.query),
+            {
+                "amount": ["250000"],
+                "addInfo": [invoice.invoice_number],
+                "accountName": ["LOTUS DENTAL"],
+            },
+        )
+
+        invoice.refresh_from_db()
+        payment = Payment.objects.get(invoice=invoice)
+        self.assertEqual(payment.method, Payment.BANK_TRANSFER)
+        self.assertEqual(payment.status, Payment.PENDING)
+        self.assertEqual(payment.amount, invoice.total_amount)
+        self.assertIsNone(payment.paid_at)
+        self.assertEqual(invoice.status, Invoice.ISSUED)
+        self.assertEqual(invoice.paid_amount, Decimal("0.00"))
+
+    @override_settings(
+        VIETQR_BANK_ID="MB",
+        VIETQR_ACCOUNT_NUMBER="0123456789",
+        VIETQR_ACCOUNT_NAME="LOTUS DENTAL",
+    )
+    def test_repeated_qr_request_reuses_pending_transaction(self):
+        invoice = self.create_issued_invoice()
+        self.authenticate("clinic-admin", "AdminPass123!")
+
+        first = self.pay_qr(invoice.id)
+        with self.settings(
+            VIETQR_BANK_ID="VCB",
+            VIETQR_ACCOUNT_NUMBER="9876543210",
+            VIETQR_ACCOUNT_NAME="CHANGED ACCOUNT",
+        ):
+            second = self.pay_qr(invoice.id)
+
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertTrue(second.data["reused"])
+        self.assertEqual(first.data["transfer"], second.data["transfer"])
+        self.assertEqual(Payment.objects.filter(invoice=invoice).count(), 1)
+        payment = Payment.objects.get(invoice=invoice)
+        self.assertEqual(payment.bank_id, "MB")
+        self.assertEqual(payment.bank_account_number, "0123456789")
+        self.assertEqual(payment.bank_account_name, "LOTUS DENTAL")
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, Invoice.ISSUED)
+        self.assertEqual(invoice.paid_amount, Decimal("0.00"))
+
+    def test_qr_payment_requires_valid_vietqr_configuration(self):
+        invoice = self.create_issued_invoice()
+        self.authenticate("clinic-admin", "AdminPass123!")
+
+        with self.settings(
+            VIETQR_BANK_ID="MB",
+            VIETQR_ACCOUNT_NUMBER="invalid-account",
+            VIETQR_ACCOUNT_NAME="LOTUS DENTAL",
+        ):
+            response = self.pay_qr(invoice.id)
+
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertIn("VietQR is not configured", response.data["detail"])
+        self.assertEqual(Payment.objects.count(), 0)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, Invoice.ISSUED)
+
+    @override_settings(
+        VIETQR_BANK_ID="MB",
+        VIETQR_ACCOUNT_NUMBER="0123456789",
+        VIETQR_ACCOUNT_NAME="LOTUS DENTAL",
+    )
+    def test_qr_payment_rejects_fractional_amount_and_client_transfer_data(self):
+        invoice = self.create_issued_invoice(total="250000.50")
+        self.authenticate("clinic-admin", "AdminPass123!")
+
+        fractional_amount = self.pay_qr(invoice.id)
+        injected_amount = self.pay_qr(invoice.id, {"amount": "1"})
+
+        self.assertEqual(fractional_amount.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("whole number of VND", str(fractional_amount.data))
+        self.assertEqual(injected_amount.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("generated by the server", str(injected_amount.data))
+        self.assertEqual(Payment.objects.count(), 0)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, Invoice.ISSUED)
+
+    @override_settings(
+        VIETQR_BANK_ID="MB",
+        VIETQR_ACCOUNT_NUMBER="0123456789",
+        VIETQR_ACCOUNT_NAME="LOTUS DENTAL",
+    )
+    def test_qr_payment_rejects_missing_or_already_paid_invoice(self):
+        paid_invoice = self.create_issued_invoice()
+        self.authenticate("clinic-admin", "AdminPass123!")
+        self.assertEqual(self.pay_cash(paid_invoice.id).status_code, status.HTTP_200_OK)
+
+        missing = self.pay_qr(99999)
+        paid = self.pay_qr(paid_invoice.id)
+
+        self.assertEqual(missing.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(paid.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(Payment.objects.filter(invoice=paid_invoice).count(), 1)
+        paid_invoice.refresh_from_db()
+        self.assertEqual(paid_invoice.status, Invoice.PAID)
+
+    @override_settings(
+        VIETQR_BANK_ID="MB",
+        VIETQR_ACCOUNT_NUMBER="0123456789",
+        VIETQR_ACCOUNT_NAME="LOTUS DENTAL",
+    )
+    def test_cash_payment_cannot_override_pending_qr_transfer(self):
+        invoice = self.create_issued_invoice()
+        self.authenticate("clinic-admin", "AdminPass123!")
+        qr_response = self.pay_qr(invoice.id)
+
+        cash_response = self.pay_cash(invoice.id)
+
+        self.assertEqual(qr_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(cash_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("already pending", str(cash_response.data["status"]))
+        self.assertEqual(Payment.objects.filter(invoice=invoice).count(), 1)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, Invoice.ISSUED)
+        self.assertEqual(invoice.paid_amount, Decimal("0.00"))
+
+    @override_settings(
+        VIETQR_BANK_ID="MB",
+        VIETQR_ACCOUNT_NUMBER="0123456789",
+        VIETQR_ACCOUNT_NAME="LOTUS DENTAL",
+    )
+    def test_qr_payment_database_error_does_not_change_invoice(self):
+        invoice = self.create_issued_invoice()
+        self.authenticate("clinic-admin", "AdminPass123!")
+
+        with patch("clinic.views.Payment.objects.create", side_effect=DatabaseError("write failed")):
+            response = self.pay_qr(invoice.id)
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertIn("No changes were applied", response.data["detail"])
+        self.assertEqual(Payment.objects.count(), 0)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, Invoice.ISSUED)
+        self.assertEqual(invoice.paid_amount, Decimal("0.00"))
 
     def test_health_check_remains_public(self):
         response = self.client.get("/api/v1/health/")
