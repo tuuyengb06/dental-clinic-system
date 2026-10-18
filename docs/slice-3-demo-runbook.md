@@ -3,7 +3,7 @@
 ## Phạm vi và an toàn dữ liệu
 
 - Chỉ dùng database development/demo và dữ liệu synthetic do `python manage.py seed_dental_data` tạo. Không chạy lệnh seed trên database phòng khám hoặc database có dữ liệu cần giữ.
-- Seed tạo sẵn tài khoản `admin`, `doctor1`, `doctor2`, `receptionist1`; bệnh nhân `DMS-0001`–`DMS-0005`; dịch vụ cơ bản; một lịch tương lai; một lượt khám synthetic đã hoàn tất có EMR/ngày tái khám; và hóa đơn `DEMO-INV-001` đang `ISSUED`. Số điện thoại hiển thị dạng `09XX XXX 001` để dễ nhận biết là dữ liệu giả và không thể gọi/SMS tới người thật.
+- Seed tạo sẵn tài khoản `admin`, `doctor1`, `doctor2`, `receptionist1`; bệnh nhân `DMS-0001`–`DMS-0005`; dịch vụ cơ bản; một lịch tương lai; một lượt khám synthetic đã hoàn tất có EMR/ngày tái khám; và hóa đơn `DEMO-INV-001` đang `ISSUED`. Số điện thoại hiển thị dạng `09 35XX X001`, theo cách nhóm số của mẫu 09 nhưng có `X` để nhận biết là giả và không thể gọi/SMS tới người thật.
 - Consent AI và SMS mặc định **false**. Chỉ trên bệnh nhân synthetic, người phụ trách có thể ghi nhận consent demo riêng trước khi minh họa các luồng AI. Không dùng thao tác này để giả consent của bệnh nhân thật.
 - Số giả chứa `X`, không vượt qua kiểm tra định dạng di động Việt Nam trong sender Twilio; tuyệt đối không thay bằng số thật trong database seed hoặc bật consent SMS cho dữ liệu seed.
 - Summary gửi nội dung lâm sàng synthetic đã qua bước lọc định danh tới Gemini. Chỉ chạy khi đã được phê duyệt dùng provider và cấu hình API key cục bộ.

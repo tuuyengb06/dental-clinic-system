@@ -152,14 +152,20 @@ class DemoDataSeedTests(TestCase):
         self.assertGreater(record.follow_up_date, timezone.localdate())
         self.assertFalse(patient.ai_processing_consent)
         self.assertFalse(patient.sms_reminder_consent)
-        self.assertEqual(patient.phone, "09XX XXX 001")
+        self.assertEqual(patient.phone, "09 35XX X001")
         self.assertEqual(
             set(Patient.objects.values_list("phone", flat=True)),
-            {f"09XX XXX {index:03}" for index in range(1, 6)},
+            {
+                "09 35XX X001",
+                "09 54XX X002",
+                "09 89XX X003",
+                "09 35XX X004",
+                "09 54XX X005",
+            },
         )
         self.assertEqual(
             ClinicUser.objects.get(user__username="doctor1").phone,
-            "09XX XXX 902",
+            "09 54XX X902",
         )
 
     def test_seed_is_idempotent_for_linked_demo_records(self):

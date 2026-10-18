@@ -50,10 +50,10 @@ class Command(BaseCommand):
         }
 
         staff_specs = [
-            ("admin", "DMS", "Administrator", "ADMIN", "09XX XXX 901", ""),
-            ("doctor1", "Le Thu", "Ha", "DENTIST", "09XX XXX 902", "DMS-DOC-001"),
-            ("doctor2", "Pham", "Quoc", "DENTIST", "09XX XXX 903", "DMS-DOC-002"),
-            ("receptionist1", "Nguyen", "Lan", "RECEPTIONIST", "09XX XXX 904", ""),
+            ("admin", "DMS", "Administrator", "ADMIN", "09 35XX X901", ""),
+            ("doctor1", "Le Thu", "Ha", "DENTIST", "09 54XX X902", "DMS-DOC-001"),
+            ("doctor2", "Pham", "Quoc", "DENTIST", "09 89XX X903", "DMS-DOC-002"),
+            ("receptionist1", "Nguyen", "Lan", "RECEPTIONIST", "09 35XX X904", ""),
         ]
         staff = {}
         admin_password = os.environ.get("DMS_SEED_ADMIN_PASSWORD")
@@ -108,11 +108,11 @@ class Command(BaseCommand):
             )
 
         patient_specs = [
-            ("DMS-0001", "Synthetic Demo Patient One", "09XX XXX 001", Patient.ADULT, "Penicillin"),
-            ("DMS-0002", "Synthetic Demo Patient Two", "09XX XXX 002", Patient.CHILD, ""),
-            ("DMS-0003", "Synthetic Demo Patient Three", "09XX XXX 003", Patient.ADULT, ""),
-            ("DMS-0004", "Synthetic Demo Patient Four", "09XX XXX 004", Patient.ADULT, ""),
-            ("DMS-0005", "Synthetic Demo Patient Five", "09XX XXX 005", Patient.CHILD, ""),
+            ("DMS-0001", "Synthetic Demo Patient One", "09 35XX X001", Patient.ADULT, "Penicillin"),
+            ("DMS-0002", "Synthetic Demo Patient Two", "09 54XX X002", Patient.CHILD, ""),
+            ("DMS-0003", "Synthetic Demo Patient Three", "09 89XX X003", Patient.ADULT, ""),
+            ("DMS-0004", "Synthetic Demo Patient Four", "09 35XX X004", Patient.ADULT, ""),
+            ("DMS-0005", "Synthetic Demo Patient Five", "09 54XX X005", Patient.CHILD, ""),
         ]
         patients = {}
         for code, name, phone, dentition, allergies in patient_specs:

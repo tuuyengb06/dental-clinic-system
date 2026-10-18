@@ -108,7 +108,7 @@ Chạy `python manage.py migrate` để tạo schema từ migration. Sau đó ch
 - 1 tài khoản quản trị, 2 bác sĩ và 1 lễ tân (các tài khoản demo không có mật khẩu sử dụng được mặc định).
 - 5 bệnh nhân, danh mục dịch vụ nha khoa cơ bản, lịch hẹn, kế hoạch điều trị và hóa đơn mẫu.
 
-Số điện thoại trong dữ liệu demo dùng dạng `09XX XXX nnn`: nhìn giống thông tin mẫu nhưng có `X` để phân biệt rõ số giả, không thể gọi hoặc gửi SMS tới người thật.
+Số điện thoại trong dữ liệu demo dùng dạng `09 35XX X001`: theo cách nhóm số của mẫu 09 nhưng có `X` để phân biệt rõ số giả, không thể gọi hoặc gửi SMS tới người thật.
 
 Để cấp cùng một mật khẩu mạnh cho các tài khoản demo, đặt `DMS_SEED_DEMO_PASSWORD` cục bộ trước khi seed; biến này không được commit. Nếu không đặt, tài khoản mới được tạo sẽ không có mật khẩu đăng nhập và có thể dùng `python manage.py changepassword admin` (tương tự `doctor1`, `doctor2`, `receptionist1`). `DMS_SEED_ADMIN_PASSWORD` vẫn có thể đặt riêng mật khẩu Admin. Nếu database đã có tài khoản demo `dms_admin`, lệnh seed sẽ đổi tên tài khoản đó thành `admin`.
 

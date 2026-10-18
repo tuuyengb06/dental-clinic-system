@@ -275,7 +275,7 @@ class TwilioSMSServiceTests(TestCase):
     def test_sms_rejects_invalid_phone_without_calling_provider(self, post):
         from .sms_services import SMSServiceError, send_sms
 
-        for phone in ("not-a-phone", "09XX XXX 001"):
+        for phone in ("not-a-phone", "09 35XX X001"):
             with self.subTest(phone=phone), self.assertRaises(SMSServiceError):
                 send_sms(phone, "Mời bạn tái khám.")
 
