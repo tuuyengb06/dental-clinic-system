@@ -17,7 +17,16 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from appointments.models import MedicalRecord
-from .models import Doctor, Invoice, Patient, Payment, Service, Tooth, WorkSchedule
+from .models import (
+    BankTransferVerification,
+    Doctor,
+    Invoice,
+    Patient,
+    Payment,
+    Service,
+    Tooth,
+    WorkSchedule,
+)
 from appointments.views import (
     AppointmentViewSet,
     IsAppointmentStaff,
@@ -31,6 +40,7 @@ from .serializers import (
     InvoiceSerializer,
     InvoiceSourceSerializer,
     CashPaymentRequestSerializer,
+    ManualQrReconciliationSerializer,
     PatientSerializer,
     PaymentSerializer,
     ToothSerializer,
@@ -130,6 +140,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         return Invoice.objects.select_related("patient").prefetch_related(
             "items__service",
             "payments__received_by__user",
+            "payments__verification__verified_by",
         ).order_by("-issued_at", "-id")
 
     def get_serializer_class(self):
@@ -139,6 +150,8 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             return InvoiceSourceSerializer
         if self.action == "pay_cash":
             return CashPaymentRequestSerializer
+        if self.action == "reconcile_qr":
+            return ManualQrReconciliationSerializer
         return InvoiceSerializer
 
     def create(self, request, *args, **kwargs):
@@ -354,6 +367,78 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             {"invoice": serialized_invoice, "transfer": transfer, "reused": reused},
             status=status.HTTP_200_OK if reused else status.HTTP_201_CREATED,
         )
+
+    @action(detail=True, methods=["post"], url_path="reconcile-qr")
+    def reconcile_qr(self, request, pk=None):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        bank_reference = serializer.validated_data["bank_reference"]
+        verified_amount = serializer.validated_data["verified_amount"]
+
+        try:
+            with transaction.atomic():
+                invoice = get_object_or_404(
+                    self.filter_queryset(self.get_queryset()).select_for_update(),
+                    pk=pk,
+                )
+                if invoice.status != Invoice.ISSUED or invoice.paid_amount != 0:
+                    raise ValidationError(
+                        {"status": "Only unpaid issued invoices can be reconciled."}
+                    )
+                payment = get_object_or_404(
+                    Payment.objects.select_for_update(),
+                    invoice=invoice,
+                    method=Payment.BANK_TRANSFER,
+                    status=Payment.PENDING,
+                )
+                if payment.amount != invoice.balance or verified_amount != payment.amount:
+                    raise ValidationError(
+                        {"verified_amount": "The verified bank amount must exactly match the pending invoice transfer."}
+                    )
+                if BankTransferVerification.objects.filter(reference=bank_reference).exists():
+                    raise ValidationError(
+                        {"bank_reference": "This bank transaction reference has already been recorded."}
+                    )
+
+                BankTransferVerification.objects.create(
+                    payment=payment,
+                    reference=bank_reference,
+                    verified_by=request.user,
+                )
+                payment.status = Payment.COMPLETED
+                payment.paid_at = timezone.now()
+                payment.save(
+                    update_fields=[
+                        "status",
+                        "paid_at",
+                    ]
+                )
+                invoice.paid_amount = payment.amount
+                invoice.status = Invoice.PAID
+                invoice.save(update_fields=["paid_amount", "status"])
+        except IntegrityError as error:
+            if BankTransferVerification.objects.filter(reference=bank_reference).exists():
+                raise ValidationError(
+                    {"bank_reference": "This bank transaction reference has already been recorded."}
+                ) from error
+            logger.exception("QR reconciliation could not be saved for invoice %s", pk)
+            return Response(
+                {"detail": "The transfer reconciliation could not be saved. No changes were applied."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        except DatabaseError:
+            logger.exception("QR reconciliation could not be saved for invoice %s", pk)
+            return Response(
+                {"detail": "The transfer reconciliation could not be saved. No changes were applied."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        invoice = self.get_queryset().get(pk=invoice.pk)
+        response_serializer = InvoiceSerializer(
+            invoice,
+            context=self.get_serializer_context(),
+        )
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
 
 
 class HealthView(APIView):

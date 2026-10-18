@@ -12,7 +12,18 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from appointments.models import Appointment as ScheduledAppointment, MedicalRecord
-from .models import ClinicUser, Doctor, Invoice, InvoiceItem, Patient, Payment, Role, Service, Tooth
+from .models import (
+    BankTransferVerification,
+    ClinicUser,
+    Doctor,
+    Invoice,
+    InvoiceItem,
+    Patient,
+    Payment,
+    Role,
+    Service,
+    Tooth,
+)
 
 User = get_user_model()
 
@@ -424,6 +435,28 @@ class AuthenticationAndManagementApiTests(APITestCase):
             format="json",
         )
 
+    def reconcile_qr(self, invoice_id, reference="BANK-TXN-001", amount="250000.00", verified=True):
+        return self.client.post(
+            f"/api/v1/invoices/{invoice_id}/reconcile-qr/",
+            {
+                "bank_reference": reference,
+                "verified_amount": amount,
+                "verified": verified,
+            },
+            format="json",
+        )
+
+    def create_pending_qr_payment(self, invoice):
+        return Payment.objects.create(
+            invoice=invoice,
+            amount=invoice.total_amount,
+            method=Payment.BANK_TRANSFER,
+            status=Payment.PENDING,
+            bank_id="MB",
+            bank_account_number="0123456789",
+            bank_account_name="LOTUS DENTAL",
+        )
+
     def test_receptionist_can_pay_full_invoice_in_cash(self):
         receptionist_role = Role.objects.create(code="RECEPTIONIST", name="Receptionist")
         receptionist = User.objects.create_user(username="cash-receptionist", password="Reception123!")
@@ -706,6 +739,109 @@ class AuthenticationAndManagementApiTests(APITestCase):
         self.assertIn("already pending", str(cash_response.data["status"]))
         self.assertEqual(Payment.objects.filter(invoice=invoice).count(), 1)
         invoice.refresh_from_db()
+        self.assertEqual(invoice.status, Invoice.ISSUED)
+        self.assertEqual(invoice.paid_amount, Decimal("0.00"))
+
+    def test_admin_can_reconcile_matching_qr_transfer_with_auditable_reference(self):
+        receptionist_role = Role.objects.create(code="RECEPTIONIST", name="Receptionist")
+        receptionist = User.objects.create_user(
+            username="qr-verifier",
+            password="ReceptionPass123!",
+        )
+        ClinicUser.objects.create(user=receptionist, role=receptionist_role)
+        invoice = self.create_issued_invoice()
+        payment = self.create_pending_qr_payment(invoice)
+        self.client.force_authenticate(receptionist)
+
+        response = self.reconcile_qr(invoice.id)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], Invoice.PAID)
+        self.assertEqual(response.data["paid_amount"], "250000.00")
+        payment_data = response.data["payments"][0]
+        self.assertEqual(payment_data["status"], Payment.COMPLETED)
+        self.assertEqual(payment_data["bank_reference"], "BANK-TXN-001")
+        self.assertEqual(payment_data["verified_by_name"], "qr-verifier")
+        self.assertTrue(payment_data["verified_at"])
+        self.assertTrue(payment_data["paid_at"])
+        verification = BankTransferVerification.objects.get(payment=payment)
+        self.assertEqual(verification.reference, "BANK-TXN-001")
+        self.assertEqual(verification.verified_by, receptionist)
+        payment.refresh_from_db()
+        invoice.refresh_from_db()
+        self.assertEqual(payment.status, Payment.COMPLETED)
+        self.assertEqual(invoice.status, Invoice.PAID)
+        self.assertEqual(invoice.paid_amount, payment.amount)
+
+    def test_qr_reconciliation_requires_staff_confirmation_and_exact_amount(self):
+        invoice = self.create_issued_invoice()
+        self.create_pending_qr_payment(invoice)
+        self.client.force_authenticate(self.admin)
+
+        unverified = self.reconcile_qr(invoice.id, verified=False)
+        incorrect_amount = self.reconcile_qr(
+            invoice.id,
+            reference="BANK-TXN-WRONG-AMOUNT",
+            amount="249999.00",
+        )
+        blank_reference = self.reconcile_qr(invoice.id, reference="   ")
+
+        self.assertEqual(unverified.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(incorrect_amount.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(blank_reference.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(BankTransferVerification.objects.count(), 0)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, Invoice.ISSUED)
+        self.assertEqual(invoice.paid_amount, Decimal("0.00"))
+        self.assertEqual(Payment.objects.get(invoice=invoice).status, Payment.PENDING)
+
+    def test_qr_reconciliation_rejects_duplicate_reference_and_missing_pending_payment(self):
+        first_invoice = self.create_issued_invoice()
+        second_invoice = self.create_issued_invoice()
+        self.create_pending_qr_payment(first_invoice)
+        self.create_pending_qr_payment(second_invoice)
+        self.client.force_authenticate(self.admin)
+
+        first = self.reconcile_qr(first_invoice.id, reference="BANK-TXN-DUPLICATE")
+        duplicate = self.reconcile_qr(second_invoice.id, reference="BANK-TXN-DUPLICATE")
+        missing = self.reconcile_qr(99999, reference="BANK-TXN-MISSING")
+
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self.assertEqual(duplicate.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("already been recorded", str(duplicate.data["bank_reference"]))
+        self.assertEqual(missing.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(BankTransferVerification.objects.count(), 1)
+        second_invoice.refresh_from_db()
+        self.assertEqual(second_invoice.status, Invoice.ISSUED)
+
+    def test_dentist_cannot_reconcile_qr_transfer(self):
+        invoice = self.create_issued_invoice()
+        self.create_pending_qr_payment(invoice)
+        self.authenticate("clinic-dentist", "DentistPass123!")
+
+        response = self.reconcile_qr(invoice.id)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(BankTransferVerification.objects.count(), 0)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, Invoice.ISSUED)
+
+    def test_qr_reconciliation_database_error_rolls_back_all_changes(self):
+        invoice = self.create_issued_invoice()
+        payment = self.create_pending_qr_payment(invoice)
+        self.client.force_authenticate(self.admin)
+
+        with patch(
+            "clinic.views.BankTransferVerification.objects.create",
+            side_effect=DatabaseError("write failed"),
+        ):
+            response = self.reconcile_qr(invoice.id)
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(BankTransferVerification.objects.count(), 0)
+        payment.refresh_from_db()
+        invoice.refresh_from_db()
+        self.assertEqual(payment.status, Payment.PENDING)
         self.assertEqual(invoice.status, Invoice.ISSUED)
         self.assertEqual(invoice.paid_amount, Decimal("0.00"))
 

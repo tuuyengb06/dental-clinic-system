@@ -133,6 +133,11 @@
 .dashboard-empty-chart{display:grid;place-items:center;min-height:160px;margin:0;color:var(--muted);font-size:13px}
 .dashboard-definition{margin:0 0 18px;color:var(--muted);font-size:11px;line-height:1.7}
 .dashboard-definition code{color:var(--deep);font-weight:700}
+.qr-reconciliation-form{display:grid;gap:12px;margin-top:15px}
+.qr-reconciliation-form>label{display:grid;gap:6px;color:var(--deep);font-size:12px;font-weight:700}
+.qr-reconciliation-form input[type="text"],.qr-reconciliation-form input:not([type]){width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink);font:inherit}
+.qr-reconciliation-form .qr-verification-check{display:flex;align-items:flex-start;gap:8px;color:var(--muted);font-weight:500;line-height:1.5}
+.qr-reconciliation-form .qr-verification-check input{margin-top:3px}
 .pill.inactive{background:#f1eeea;color:#827970}
 .danger-button{color:#b34d3d}
 .cancel-appointment-button{padding:6px 9px;color:#a34c3d;font-size:10px;white-space:nowrap}

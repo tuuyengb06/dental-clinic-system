@@ -60,6 +60,13 @@ class ChatbotApiTests(TestCase):
         self.assertIn("250,000 ₫", response.data["answer"])
         self.assertNotIn(inactive_service.name, response.data["answer"])
 
+    def test_chatbot_understands_common_price_question_without_diacritics(self):
+        response = self.chat("Dental check-up bao nhieu tien?")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["intent"], "price")
+        self.assertIn("250,000 ₫", response.data["answer"])
+
     def test_chatbot_lists_catalog_if_service_name_is_not_recognized(self):
         response = self.chat("Giá dịch vụ không có trong danh mục là bao nhiêu?")
 
@@ -105,6 +112,22 @@ class ChatbotApiTests(TestCase):
         self.assertNotIn("Private medical note", response.data["answer"])
         self.assertIn("liên hệ lễ tân", response.data["answer"])
 
+    def test_chatbot_accepts_future_day_and_month_without_year(self):
+        work_date = timezone.localdate() + timedelta(days=10)
+        WorkSchedule.objects.create(
+            doctor=self.doctor,
+            work_date=work_date,
+            start_time=time(9, 0),
+            end_time=time(10, 0),
+        )
+
+        response = self.chat(
+            f"Lịch Dental check-up ngày {work_date:%d/%m} còn giờ nào?"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["intent"], "availability")
+        self.assertIn("09:00", response.data["answer"])
     def test_chatbot_asks_for_service_and_date_instead_of_guessing(self):
         response = self.chat("Bác sĩ còn lịch trống không?")
 

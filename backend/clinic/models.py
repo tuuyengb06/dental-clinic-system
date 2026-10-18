@@ -214,3 +214,18 @@ class Payment(models.Model):
                 name="unique_payment_per_invoice",
             )
         ]
+
+
+class BankTransferVerification(models.Model):
+    payment = models.OneToOneField(
+        Payment,
+        on_delete=models.PROTECT,
+        related_name="verification",
+    )
+    reference = models.CharField(max_length=100, unique=True)
+    verified_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="verified_qr_payments",
+    )
+    verified_at = models.DateTimeField(auto_now_add=True)
