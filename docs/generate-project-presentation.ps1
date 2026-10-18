@@ -78,7 +78,7 @@ function Add-Slide($Presentation, [string]$Section, [string]$Title, [string]$Sub
     [void](Add-Text $slide 44 91 865 27 $Subtitle 11 $script:Palette.Muted)
     [void](Add-Shape $slide 42 511 876 1 $script:Palette.Line)
     [void](Add-Text $slide 43 517 700 15 "DMS  •  Dental Management System" 8 $script:Palette.Muted)
-    [void](Add-Text $slide 857 516 61 16 ("{0:00} / 12" -f $Presentation.Slides.Count) 9 $script:Palette.Muted $false 3)
+    [void](Add-Text $slide 857 516 61 16 ("{0:00} / 13" -f $Presentation.Slides.Count) 9 $script:Palette.Muted $false 3)
     return $slide
 }
 
@@ -106,7 +106,7 @@ try {
     [void](Add-Text $slide 424 420 477 19 "Giao diện thật · dữ liệu demo" 9 $Palette.Muted $false 3)
     [void](Add-Shape $slide 42 511 876 1 $Palette.Line)
     [void](Add-Text $slide 43 517 700 15 "DMS  •  Dental Management System" 8 $Palette.Muted)
-    [void](Add-Text $slide 857 516 61 16 "01 / 12" 9 $Palette.Muted $false 3)
+    [void](Add-Text $slide 857 516 61 16 "01 / 13" 9 $Palette.Muted $false 3)
 
     $slide = Add-Slide $presentation "01 / Bối cảnh" "Từ thao tác rời rạc tới quy trình phối hợp" "Dự án số hóa vận hành phòng khám và tạo dữ liệu nhất quán giữa các vai trò."
     Add-Card $slide 46 151 270 112 "Thách thức" "Lịch, thông tin khám và thu phí cần phối hợp giữa lễ tân, bác sĩ và quản trị." $Palette.Coral
@@ -147,14 +147,36 @@ try {
     Add-Card $slide 349 316 262 116 "Chatbot hiện hành" "Quy tắc + truy vấn dịch vụ/lịch trong cơ sở dữ liệu." $Palette.Green
     Add-Card $slide 648 316 262 116 "AI tương lai" "Chưa kết nối dịch vụ AI, API tóm tắt EMR hoặc job nhắc tái khám." $Palette.Coral
 
-    $slide = Add-Slide $presentation "04 / Đặt lịch" "Kiểm tra lịch trước khi xác nhận đặt hẹn" "API kiểm tra ca làm, thời lượng dịch vụ và lịch bị trùng."
+    $slide = Add-Slide $presentation "04 / Thiết kế dữ liệu" "Các thực thể chính nối thành chuỗi nghiệp vụ" "Sơ đồ rút gọn theo model hiện hành; các trường chỉ liệt kê để minh họa."
+    Add-Card $slide 50 184 170 100 "PATIENT" "patient_code · full_name · phone" $Palette.Green
+    Add-Card $slide 280 184 170 100 "APPOINTMENT" "patient · doctor · service · time" $Palette.Gold
+    Add-Card $slide 510 184 170 100 "MEDICAL RECORD" "appointment · diagnosis · plan" $Palette.Green
+    Add-Card $slide 740 184 170 100 "INVOICE" "patient · medical_record · total/status" $Palette.Coral
+    [void](Add-Shape $slide 220 232 60 3 $Palette.Gold)
+    [void](Add-Shape $slide 450 232 60 3 $Palette.Gold)
+    [void](Add-Shape $slide 680 232 60 3 $Palette.Gold)
+    [void](Add-Text $slide 223 207 54 15 "1:N" 9 $Palette.Green $true 2)
+    [void](Add-Text $slide 453 207 54 15 "1:0..1" 9 $Palette.Green $true 2)
+    [void](Add-Text $slide 683 207 54 15 "0..1:0..1" 8 $Palette.Green $true 2)
+    [void](Add-Shape $slide 825 284 3 30 $Palette.Gold)
+    [void](Add-Shape $slide 474 314 352 3 $Palette.Gold)
+    [void](Add-Shape $slide 474 314 3 26 $Palette.Gold)
+    [void](Add-Shape $slide 824 314 3 26 $Palette.Gold)
+    Add-Card $slide 385 340 180 88 "INVOICE ITEM" "service · quantity · unit_price · amount" $Palette.Gold
+    Add-Card $slide 735 340 180 88 "PAYMENT" "invoice · amount · method · status" $Palette.Coral
+    [void](Add-Text $slide 475 320 55 14 "1:N" 9 $Palette.Green $true 2)
+    [void](Add-Text $slide 825 320 55 14 "1:N" 9 $Palette.Green $true 2)
+    Add-Chip $slide 48 369 300 "EMR ↔ dịch vụ / răng: quan hệ nhiều-nhiều" $Palette.Mint $Palette.Green
+    [void](Add-Text $slide 48 405 300 43 "Invoice liên kết bệnh nhân; InvoiceItem lưu đơn giá/số lượng lúc lập." 10 $Palette.Muted)
+
+    $slide = Add-Slide $presentation "05 / Đặt lịch" "Kiểm tra lịch trước khi xác nhận đặt hẹn" "API kiểm tra ca làm, thời lượng dịch vụ và lịch bị trùng."
     Add-Image $slide (Join-Path $assets "03-booking-dialog.png") 43 141 558 349
     [void](Add-Text $slide 47 494 548 14 "Giao diện thật · dữ liệu demo" 8 $Palette.Muted $false 3)
     Add-Card $slide 636 153 274 89 "Nhập thông tin" "Bệnh nhân, bác sĩ, dịch vụ, ngày, giờ và lý do khám." $Palette.Green
     Add-Card $slide 636 261 274 89 "Kiểm tra" "Đúng ca làm, đủ thời lượng, không xung đột lịch." $Palette.Gold
     Add-Card $slide 636 369 274 89 "Kết quả" "Chỉ báo thành công khi API tạo lịch." $Palette.Green
 
-    $slide = Add-Slide $presentation "05 / Khám bệnh" "Hồ sơ bệnh án điện tử (EMR) gắn với lịch hẹn" "Bác sĩ ghi nhận nội dung khám và dịch vụ được chỉ định."
+    $slide = Add-Slide $presentation "06 / Khám bệnh" "Hồ sơ bệnh án điện tử (EMR) gắn với lịch hẹn" "Bác sĩ ghi nhận nội dung khám và dịch vụ được chỉ định."
     Add-Image $slide (Join-Path $assets "04-emr.png") 43 141 558 349
     [void](Add-Text $slide 47 494 548 14 "Giao diện EMR thật · hồ sơ demo" 8 $Palette.Muted $false 3)
     Add-Card $slide 636 153 274 89 "Liên kết" "Mỗi EMR gắn một-một với lịch hẹn." $Palette.Green
@@ -163,21 +185,21 @@ try {
     Add-Chip $slide 650 382 161 "AI SUMMARY · ĐỀ XUẤT" $Palette.White $Palette.Green
     [void](Add-Text $slide 650 415 245 34 "AI tóm tắt EMR chưa được triển khai." 11 $Palette.Muted)
 
-    $slide = Add-Slide $presentation "06 / Thanh toán" "Tính tiền từ dịch vụ, lưu trạng thái giao dịch" "Hóa đơn giữ đơn giá tại thời điểm phát hành; giao dịch có phương thức và trạng thái."
+    $slide = Add-Slide $presentation "07 / Thanh toán" "Tính tiền từ dịch vụ, lưu trạng thái giao dịch" "Hóa đơn giữ đơn giá tại thời điểm phát hành; giao dịch có phương thức và trạng thái."
     Add-Image $slide (Join-Path $assets "05-cash-payment-confirmation.png") 43 141 558 349
     [void](Add-Text $slide 47 494 548 14 "Hộp thoại thật · hóa đơn demo" 8 $Palette.Muted $false 3)
     Add-Card $slide 636 153 274 89 "Tiền mặt" "Xác nhận đủ số dư; ghi giao dịch COMPLETED." $Palette.Green
     Add-Card $slide 636 261 274 89 "QR" "Tạo QR chỉ tạo giao dịch PENDING, chưa đồng nghĩa đã nhận tiền." $Palette.Gold
     Add-Card $slide 636 369 274 89 "Đối soát" "Nhân viên khớp tiền + mã tham chiếu, lưu người xác minh." $Palette.Coral
 
-    $slide = Add-Slide $presentation "07 / Chatbot" "Tra cứu theo dữ liệu; không tự bịa câu trả lời" "Ví dụ thật: giá dịch vụ lấy từ danh mục đang hoạt động."
+    $slide = Add-Slide $presentation "08 / Chatbot" "Tra cứu theo dữ liệu; không tự bịa câu trả lời" "Ví dụ thật: giá dịch vụ lấy từ danh mục đang hoạt động."
     Add-Image $slide (Join-Path $assets "06-chatbot-price.png") 43 141 558 349
     [void](Add-Text $slide 47 494 548 14 "Chatbot với dữ liệu demo · ảnh thật" 8 $Palette.Muted $false 3)
     [void](Add-Shape $slide 636 153 274 304 $Palette.White $true)
     Add-Chip $slide 652 170 235 "THEO QUY TẮC · KHÔNG GỌI LLM" $Palette.Mint $Palette.Green
     [void](Add-Text $slide 653 211 238 219 ("HỖ TRỢ${nl}• Tra giá dịch vụ hoạt động${nl}• Gợi ý giờ theo lịch hiện có${nl}${nl}GIỚI HẠN${nl}• Không chẩn đoán / xem EMR${nl}• Không đặt hoặc giữ lịch${nl}• Câu hỏi khác → liên hệ lễ tân") 12 $Palette.Ink)
 
-    $slide = Add-Slide $presentation "08 / Định hướng AI" "Hai luồng AI là đề xuất, chưa triển khai" "Chưa có API, dịch vụ AI, lịch chạy nền hay kênh nhắc trong source hiện tại."
+    $slide = Add-Slide $presentation "09 / Định hướng AI" "Hai luồng AI là đề xuất, chưa triển khai" "Chưa có API, dịch vụ AI, lịch chạy nền hay kênh nhắc trong source hiện tại."
     [void](Add-Shape $slide 47 151 419 295 $Palette.White $true)
     Add-Chip $slide 66 168 186 "TÓM TẮT EMR · ĐỀ XUẤT" $Palette.Mint $Palette.Green
     [void](Add-Text $slide 70 211 373 212 ("Bác sĩ chọn hồ sơ${nl}↓${nl}API kiểm tra quyền, giảm thiểu dữ liệu${nl}↓${nl}AI tạo bản nháp${nl}↓${nl}Bác sĩ rà soát / chỉnh sửa${nl}↓${nl}Chỉ lưu khi được duyệt") 12 $Palette.Ink)
@@ -186,7 +208,7 @@ try {
     [void](Add-Text $slide 516 211 373 212 ("Xác nhận ngày + đồng thuận${nl}↓${nl}AI soạn nháp không chẩn đoán${nl}↓${nl}Nhân viên / bác sĩ duyệt${nl}↓${nl}Lưu lịch gửi + audit${nl}↓${nl}Job nền gửi, lưu kết quả") 12 $Palette.Ink)
     Add-Chip $slide 327 462 306 "CHƯA CÓ API · DỊCH VỤ AI · LỊCH NỀN" $Palette.White $Palette.Coral
 
-    $slide = Add-Slide $presentation "09 / An toàn" "AI hỗ trợ hành chính, không thay bác sĩ" "Phân biệt biện pháp hiện có với điều kiện cần có trước khi triển khai AI tương lai."
+    $slide = Add-Slide $presentation "10 / An toàn" "AI hỗ trợ hành chính, không thay bác sĩ" "Phân biệt biện pháp hiện có với điều kiện cần có trước khi triển khai AI tương lai."
     [void](Add-Shape $slide 48 151 416 304 $Palette.Mint $true)
     [void](Add-Text $slide 69 172 370 25 "ĐANG CÓ" 14 $Palette.Green $true)
     [void](Add-Text $slide 69 212 370 222 ("• API nghiệp vụ phân quyền theo vai trò${nl}• Chatbot không cần dữ liệu bệnh nhân${nl}• Trả lời dựa trên danh mục / lịch${nl}• Thiếu dữ liệu: báo rõ, hướng lễ tân${nl}• QR chỉ cập nhật sau đối soát") 13 $Palette.Ink)
@@ -195,7 +217,7 @@ try {
     [void](Add-Text $slide 518 212 370 222 ("• Duyệt quyền và sự đồng thuận${nl}• Giảm thiểu dữ liệu gửi đi${nl}• Bác sĩ / nhân viên duyệt bản nháp${nl}• Lưu nguồn, phiên bản, nhật ký kiểm toán${nl}• Lỗi: báo rõ, chuyển người phụ trách") 13 $Palette.Ink)
     [void](Add-Text $slide 52 471 853 18 "Hiện tại chưa gửi hồ sơ bệnh án tới nhà cung cấp AI." 10 $Palette.Green $true 2)
 
-    $slide = Add-Slide $presentation "10 / Demo" "Một tình huống xuyên suốt hệ thống" "Kịch bản gợi ý 3 phút; dùng dữ liệu demo, không cần giao dịch ngân hàng thật."
+    $slide = Add-Slide $presentation "11 / Demo" "Một tình huống xuyên suốt hệ thống" "Kịch bản gợi ý 3 phút; dùng dữ liệu demo, không cần giao dịch ngân hàng thật."
     $steps = @(
         @("01", "ĐẶT HẸN", "Chọn bệnh nhân, dịch vụ, bác sĩ và giờ hợp lệ."),
         @("02", "GHI EMR", "Bác sĩ lưu ghi nhận khám và dịch vụ chỉ định."),
@@ -209,12 +231,12 @@ try {
         [void](Add-Text $slide ($x + 17) 232 166 22 $steps[$i][1] 11 $Palette.Green $true)
         [void](Add-Text $slide ($x + 17) 267 166 60 $steps[$i][2] 11 $Palette.Muted)
     }
-    [void](Add-Text $slide 55 376 849 68 "Không trình diễn AI tóm tắt EMR hoặc gửi nhắc tái khám như chức năng đã có. Trình bày đó là đề xuất ở trang 9." 14 $Palette.Ink $true 2)
+    [void](Add-Text $slide 55 376 849 68 "Không trình diễn AI tóm tắt EMR hoặc gửi nhắc tái khám như chức năng đã có. Trình bày đó là đề xuất ở trang 10." 14 $Palette.Ink $true 2)
 
-    $slide = Add-Slide $presentation "11 / Chạy thử" "Kịch bản trình bày 10 phút — nhóm chốt người nói" "Phân vai gợi ý; thay bằng tên thành viên sau khi thống nhất."
-    Add-Card $slide 49 158 267 174 "THÀNH VIÊN A · 3 PHÚT" "Bài toán, mục tiêu, phạm vi, kiến trúc (trang 1–4). Người trình bày: ________" $Palette.Green
-    Add-Card $slide 346 158 267 174 "THÀNH VIÊN B · 3 PHÚT" "Đặt lịch, khám, EMR; dẫn demo (trang 5–6, 11). Người trình bày: ________" $Palette.Gold
-    Add-Card $slide 643 158 267 174 "THÀNH VIÊN C · 4 PHÚT" "Thanh toán, chatbot, an toàn AI (trang 7–10, 12). Người trình bày: ________" $Palette.Coral
+    $slide = Add-Slide $presentation "12 / Chạy thử" "Kịch bản trình bày 10 phút — nhóm chốt người nói" "Phân vai gợi ý; thay bằng tên thành viên sau khi thống nhất."
+    Add-Card $slide 49 158 267 174 "THÀNH VIÊN A · 3 PHÚT" "Bài toán, phạm vi, kiến trúc và dữ liệu (trang 1–5). Người trình bày: ________" $Palette.Green
+    Add-Card $slide 346 158 267 174 "THÀNH VIÊN B · 3 PHÚT" "Đặt lịch, khám, EMR; dẫn demo (trang 6–7, 12). Người trình bày: ________" $Palette.Gold
+    Add-Card $slide 643 158 267 174 "THÀNH VIÊN C · 4 PHÚT" "Thanh toán, chatbot, an toàn AI (trang 8–11, 13). Người trình bày: ________" $Palette.Coral
     [void](Add-Shape $slide 51 362 858 94 $Palette.Dark $true)
     [void](Add-Text $slide 74 384 812 48 "Tập dượt: 1 phút chuyển cảnh + 3 phút demo + 6 phút nội dung. Rà chính tả, thuật ngữ, hình ảnh, cỡ chữ và thời lượng." 13 $Palette.White $false 2)
 
