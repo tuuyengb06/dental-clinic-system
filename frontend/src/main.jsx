@@ -285,7 +285,9 @@ function App() {
     <main className="main-content">
       <header className="topbar"><button className="icon-button menu-button" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><div><span className="eyebrow">Tuesday, 08 September 2026</span><h1>{section === 'Overview' ? `Good morning, ${profile.display_name}` : section}</h1></div><div className="topbar-actions"><span className={`api-status ${apiLive ? 'live' : ''}`}><span />{apiLive ? 'Live API' : 'Connecting'}</span><button className="icon-button"><Activity size={19} /></button><div className="user-card"><div className="avatar">{profile.display_name.split(' ').map((part) => part[0]).slice(-2).join('')}</div><div><strong>{profile.display_name}</strong><span>{role}</span></div><button className="secondary-button" onClick={logout}>Log out</button></div></div></header>
       {apiError && section !== 'Appointments' && <div className="api-error" role="alert">{apiError}</div>}
-      {section === 'Overview' && <Overview appointments={appointments} patients={patients} setSection={setSection} />}
+      {section === 'Overview' && (role === 'ADMIN'
+        ? <RevenueDashboard tokens={tokens} onTokensChanged={updateTokens} />
+        : <Overview appointments={appointments} patients={patients} setSection={setSection} />)}
       {section === 'Patients' && <Patients patients={visiblePatients} query={query} setQuery={setQuery} onCreatePatient={createPatient} canCreate={role === 'ADMIN' || role === 'RECEPTIONIST'} />}
       {section === 'Reception' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Reception tokens={tokens} onTokensChanged={updateTokens} appointments={appointments} setSection={setSection} />}
       {section === 'Appointments' && <Appointments appointments={appointments} patients={patients} doctors={doctors} services={services} schedules={schedules} role={role} loading={apiLoading} loadError={apiError} onCreateAppointment={createAppointment} onCreateSchedule={createSchedule} onCancelAppointment={cancelAppointment} />}
@@ -550,6 +552,118 @@ function Overview({ appointments, patients, setSection }) { return <>
   <div className="content-grid"><section className="panel schedule-panel"><div className="panel-heading"><div><span className="eyebrow">APPOINTMENTS</span><h3>Today’s schedule</h3></div><button className="text-button" onClick={() => setSection('Appointments')}>View calendar <span>→</span></button></div><div className="appointment-list">{appointments.map((item) => <AppointmentRow key={item.id} item={item} />)}</div></section><section className="panel focus-panel"><div className="panel-heading"><div><span className="eyebrow">CLINIC FOCUS</span><h3>At a glance</h3></div><ShieldCheck size={19} color="#1d6857" /></div><div className="focus-stat"><span className="focus-icon green"><UserRound size={18} /></span><div><strong>{patients.length} patient records</strong><span>Digitized and searchable</span></div></div><div className="focus-stat"><span className="focus-icon peach"><Stethoscope size={18} /></span><div><strong>2 care alerts</strong><span>Need dentist review</span></div></div><div className="alert-box"><strong>Medication check</strong><p>One prescription needs allergy confirmation before signing.</p><button onClick={() => setSection('Patients')}>Review record →</button></div></section></div>
 </>; }
 function Metric({ label, value, detail, accent, icon: Icon }) { return <div className={`metric-card ${accent}`}><div className="metric-icon"><Icon size={18} /></div><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>; }
+
+function localDateInputValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatDashboardPeriod(period, groupBy) {
+  if (groupBy === 'month') {
+    const [year, month] = period.split('-');
+    return `${month}/${year}`;
+  }
+  const [, month, day] = period.split('-');
+  return `${day}/${month}`;
+}
+
+function RevenueDashboard({ tokens, onTokensChanged }) {
+  const today = localDateInputValue(new Date());
+  const [startDate, setStartDate] = useState(`${today.slice(0, 7)}-01`);
+  const [endDate, setEndDate] = useState(today);
+  const [requestedGroup, setRequestedGroup] = useState('auto');
+  const [dashboard, setDashboard] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!startDate || !endDate) return undefined;
+    if (endDate < startDate) {
+      setDashboard(null);
+      setError('Ngày kết thúc phải từ ngày bắt đầu trở đi.');
+      return undefined;
+    }
+
+    let active = true;
+    const query = new URLSearchParams({
+      start_date: startDate,
+      end_date: endDate,
+      group_by: requestedGroup
+    });
+    setLoading(true);
+    setError('');
+    setDashboard(null);
+    apiRequest(`/dashboard/analytics/?${query.toString()}`, { tokens, onTokens: onTokensChanged })
+      .then((result) => {
+        if (active) setDashboard(result);
+      })
+      .catch((requestError) => {
+        if (active) setError(requestError.message || 'Không tải được thống kê. Vui lòng thử lại.');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
+  }, [startDate, endDate, requestedGroup, tokens, onTokensChanged]);
+
+  const revenue = Number(dashboard?.total_revenue || 0);
+  const visits = Number(dashboard?.total_visits || 0);
+  const series = dashboard?.series || [];
+
+  return <section className="page-section management-page revenue-dashboard">
+    <div className="section-toolbar">
+      <div><span className="eyebrow">FINANCE & CLINICAL ACTIVITY</span><h2>Revenue and visits</h2></div>
+      <span className="dashboard-timezone">Asia/Ho_Chi_Minh</span>
+    </div>
+    <section className="panel dashboard-filter-panel" aria-label="Statistics date filters">
+      <label>From<input type="date" value={startDate} max={endDate || today} onChange={(event) => setStartDate(event.target.value)} /></label>
+      <label>To<input type="date" value={endDate} min={startDate} max={today} onChange={(event) => setEndDate(event.target.value)} /></label>
+      <label>Chart interval<select value={requestedGroup} onChange={(event) => setRequestedGroup(event.target.value)}>
+        <option value="auto">Automatic</option>
+        <option value="day">Daily</option>
+        <option value="month">Monthly</option>
+      </select></label>
+      {dashboard && <p className="dashboard-filter-summary">{dashboard.group_by === 'day' ? 'Daily' : 'Monthly'} totals · both selected dates included</p>}
+    </section>
+    {error && <div className="form-error" role="alert">{error}</div>}
+    {loading && <p className="management-state" role="status">Loading revenue and visit statistics…</p>}
+    <section className="metric-grid dashboard-metrics" aria-label="Statistics summary" aria-busy={loading}>
+      <Metric label="Revenue from paid invoices" value={`${revenue.toLocaleString('vi-VN', { maximumFractionDigits: 2 })} ₫`} detail="Paid invoice total, grouped by issue date" accent="sage" icon={CircleDollarSign} />
+      <Metric label="Completed visits" value={visits.toLocaleString('vi-VN')} detail="Completed appointments, grouped by appointment date" accent="blue" icon={CalendarDays} />
+    </section>
+    {!loading && !error && dashboard && <>
+      <TrendChart title="Revenue by period" series={series} valueKey="revenue" groupBy={dashboard.group_by} formatValue={(value) => `${Number(value).toLocaleString('vi-VN', { maximumFractionDigits: 2 })} ₫`} color="revenue" />
+      <TrendChart title="Completed visits by period" series={series} valueKey="visits" groupBy={dashboard.group_by} formatValue={(value) => Number(value).toLocaleString('vi-VN')} color="visits" />
+      <p className="dashboard-definition">Revenue counts each <code>PAID</code> invoice’s total once using its issue date; pending transfers and unpaid invoices are excluded. Visits count <code>Completed</code> appointments, not invoices. Empty dates/periods are shown as zero.</p>
+    </>}
+  </section>;
+}
+
+function TrendChart({ title, series, valueKey, groupBy, formatValue, color }) {
+  const values = series.map((point) => Number(point[valueKey]));
+  const maximum = Math.max(...values, 0);
+  const labelEvery = series.length > 24 ? Math.ceil(series.length / 12) : 1;
+
+  return <section className="panel dashboard-chart-panel">
+    <div className="panel-heading"><div><span className="eyebrow">{valueKey === 'revenue' ? 'IN VND' : 'APPOINTMENTS'}</span><h3>{title}</h3></div></div>
+    {!series.length ? <p className="management-state">No periods are available for this date range.</p> : maximum === 0
+      ? <p className="dashboard-empty-chart">No {valueKey === 'revenue' ? 'revenue' : 'completed visits'} in this period.</p>
+      : <div className="dashboard-chart-scroll"><div className="dashboard-bars" role="img" aria-label={`${title} from ${formatDashboardPeriod(series[0].period, groupBy)} to ${formatDashboardPeriod(series.at(-1).period, groupBy)}`}>
+        {series.map((point, index) => {
+          const value = Number(point[valueKey]);
+          const height = maximum ? (value / maximum) * 100 : 0;
+          return <div className="dashboard-bar-column" key={point.period} title={`${formatDashboardPeriod(point.period, groupBy)}: ${formatValue(value)}`}>
+            <span className="dashboard-bar-value">{formatValue(value)}</span>
+            <div className="dashboard-bar-track"><div className={`dashboard-bar ${color}`} style={{ height: `${height}%` }} /></div>
+            {(index % labelEvery === 0 || index === series.length - 1) && <span className="dashboard-bar-label">{formatDashboardPeriod(point.period, groupBy)}</span>}
+          </div>;
+        })}
+      </div></div>}
+  </section>;
+}
+
 function AppointmentRow({ item, canCancel = false, onCancel, cancelling = false }) {
   const appointmentDate = item.appointment_date || item.start_at;
   const time = appointmentDate && appointmentDate.includes('T')
