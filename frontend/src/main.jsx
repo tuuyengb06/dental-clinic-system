@@ -22,6 +22,18 @@ const navigationByRole = {
   ]
 };
 
+const sections = [...new Set(Object.values(navigationByRole).flat().map(([name]) => name))];
+
+function sectionPath(section) {
+  if (section === 'Overview') return '/';
+  return `/${section.toLowerCase().replace(/\s+/g, '-')}`;
+}
+
+function sectionFromPath(pathname) {
+  const normalizedPath = pathname.replace(/\/+$/, '') || '/';
+  return sections.find((name) => sectionPath(name) === normalizedPath) || 'Overview';
+}
+
 const TOKEN_STORAGE_KEY = 'dms.auth.tokens';
 
 async function apiRequest(path, { tokens, onTokens, method = 'GET', body } = {}) {
@@ -59,7 +71,7 @@ async function apiRequest(path, { tokens, onTokens, method = 'GET', body } = {})
 }
 
 function App() {
-  const [section, setSection] = useState('Overview');
+  const [section, setCurrentSection] = useState(() => sectionFromPath(window.location.pathname));
   const [patients, setPatients] = useState([]);
   const [appointments, setAppointments] = useState([]);
   const [doctors, setDoctors] = useState([]);
@@ -80,6 +92,29 @@ function App() {
   const [apiError, setApiError] = useState('');
   const [apiLoading, setApiLoading] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const setSection = useCallback((nextSection) => {
+    const nextPath = sectionPath(nextSection);
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({}, '', nextPath);
+    }
+    setCurrentSection(nextSection);
+  }, []);
+
+  useEffect(() => {
+    function syncSectionWithLocation() {
+      setCurrentSection(sectionFromPath(window.location.pathname));
+    }
+    window.addEventListener('popstate', syncSectionWithLocation);
+    return () => window.removeEventListener('popstate', syncSectionWithLocation);
+  }, []);
+
+  useEffect(() => {
+    const canonicalPath = sectionPath(section);
+    if (window.location.pathname !== canonicalPath) {
+      window.history.replaceState({}, '', canonicalPath);
+    }
+  }, [section]);
 
   useEffect(() => {
     let active = true;

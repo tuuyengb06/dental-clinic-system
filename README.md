@@ -93,6 +93,8 @@ Máy chạy frontend/backend và người cùng nhóm cần dùng chung một m�
 
 Đăng nhập bằng username/password của tài khoản Django có hồ sơ clinic. Tài khoản quản trị demo có username `admin`; đặt mật khẩu bằng `python manage.py changepassword admin` hoặc cấu hình `DMS_SEED_ADMIN_PASSWORD` trước khi seed. Mật khẩu của tài khoản bác sĩ/lễ tân được đặt bằng `python manage.py changepassword doctor1`, `doctor2` hoặc `receptionist1`. JWT access/refresh token được lưu trong LocalStorage và tự refresh khi access token hết hạn.
 
+Mỗi mục sidebar có URL riêng, ví dụ `/patients`, `/appointments`, `/billing` và `/emr`. Có thể tải lại hoặc mở trực tiếp URL của mục; nút Back/Forward của trình duyệt cũng chuyển giữa các mục.
+
 Sidebar hiển thị mục theo role `ADMIN`, `DENTIST` hoặc `RECEPTIONIST`. Chỉ ADMIN được tạo/sửa/ngừng dịch vụ; các hồ sơ bác sĩ có thể xem trong danh mục Doctors.
 
 ## 4. Dữ liệu demo
@@ -105,6 +107,8 @@ Chạy `python manage.py migrate` để tạo schema từ migration. Sau đó ch
 - 20 mã răng trẻ em `C01` đến `C20`.
 - 1 tài khoản quản trị, 2 bác sĩ và 1 lễ tân (các tài khoản demo không có mật khẩu sử dụng được mặc định).
 - 5 bệnh nhân, danh mục dịch vụ nha khoa cơ bản, lịch hẹn, kế hoạch điều trị và hóa đơn mẫu.
+
+Số điện thoại trong dữ liệu demo dùng dạng `09XX XXX nnn`: nhìn giống thông tin mẫu nhưng có `X` để phân biệt rõ số giả, không thể gọi hoặc gửi SMS tới người thật.
 
 Để cấp cùng một mật khẩu mạnh cho các tài khoản demo, đặt `DMS_SEED_DEMO_PASSWORD` cục bộ trước khi seed; biến này không được commit. Nếu không đặt, tài khoản mới được tạo sẽ không có mật khẩu đăng nhập và có thể dùng `python manage.py changepassword admin` (tương tự `doctor1`, `doctor2`, `receptionist1`). `DMS_SEED_ADMIN_PASSWORD` vẫn có thể đặt riêng mật khẩu Admin. Nếu database đã có tài khoản demo `dms_admin`, lệnh seed sẽ đổi tên tài khoản đó thành `admin`.
 

@@ -3,9 +3,9 @@
 ## Phạm vi và an toàn dữ liệu
 
 - Chỉ dùng database development/demo và dữ liệu synthetic do `python manage.py seed_dental_data` tạo. Không chạy lệnh seed trên database phòng khám hoặc database có dữ liệu cần giữ.
-- Seed tạo sẵn tài khoản `admin`, `doctor1`, `doctor2`, `receptionist1`; bệnh nhân `DMS-0001`–`DMS-0005`; dịch vụ cơ bản; một lịch tương lai; một lượt khám synthetic đã hoàn tất có EMR/ngày tái khám; và hóa đơn `DEMO-INV-001` đang `ISSUED`. Điện thoại dùng sentinel không hợp lệ `0000000000`, không phải số nhận SMS.
+- Seed tạo sẵn tài khoản `admin`, `doctor1`, `doctor2`, `receptionist1`; bệnh nhân `DMS-0001`–`DMS-0005`; dịch vụ cơ bản; một lịch tương lai; một lượt khám synthetic đã hoàn tất có EMR/ngày tái khám; và hóa đơn `DEMO-INV-001` đang `ISSUED`. Số điện thoại hiển thị dạng `09XX XXX 001` để dễ nhận biết là dữ liệu giả và không thể gọi/SMS tới người thật.
 - Consent AI và SMS mặc định **false**. Chỉ trên bệnh nhân synthetic, người phụ trách có thể ghi nhận consent demo riêng trước khi minh họa các luồng AI. Không dùng thao tác này để giả consent của bệnh nhân thật.
-- Số sentinel `0000000000` không vượt qua kiểm tra định dạng di động Việt Nam trong sender Twilio; tuyệt đối không thay bằng số thật trong database seed.
+- Số giả chứa `X`, không vượt qua kiểm tra định dạng di động Việt Nam trong sender Twilio; tuyệt đối không thay bằng số thật trong database seed hoặc bật consent SMS cho dữ liệu seed.
 - Summary gửi nội dung lâm sàng synthetic đã qua bước lọc định danh tới Gemini. Chỉ chạy khi đã được phê duyệt dùng provider và cấu hình API key cục bộ.
 - Reminder preview gửi prompt chung không chứa tên, số điện thoại, ID bệnh nhân hay nội dung EMR tới Gemini. Preview chỉ hiển thị, không gửi SMS.
 - Không chạy `send_follow_up_reminders` không có `--dry-run` trong demo. Lệnh gửi thật có thể liên hệ nhiều bệnh nhân đã consent và phát sinh phí Twilio.
