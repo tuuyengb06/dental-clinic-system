@@ -70,9 +70,22 @@ class PatientSerializer(serializers.ModelSerializer):
         model = Patient
         fields = [
             "id", "patient_code", "full_name", "phone", "date_of_birth",
-            "dentition_type", "medical_history", "allergies", "created_at",
+            "dentition_type", "medical_history", "allergies",
+            "ai_processing_consent", "sms_reminder_consent", "created_at",
         ]
         read_only_fields = ["id", "created_at"]
+
+    def validate(self, attrs):
+        phone = attrs.get("phone", getattr(self.instance, "phone", ""))
+        sms_consent = attrs.get(
+            "sms_reminder_consent",
+            getattr(self.instance, "sms_reminder_consent", False),
+        )
+        if sms_consent and not phone.strip():
+            raise serializers.ValidationError(
+                {"sms_reminder_consent": "A phone number is required for SMS reminders."}
+            )
+        return attrs
 
 
 class ToothSerializer(serializers.ModelSerializer):

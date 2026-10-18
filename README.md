@@ -2,9 +2,9 @@
 
 MVP runnable cho phòng khám nha khoa, gồm Django REST Framework backend và React/Vite frontend.
 
-Tài liệu kiến trúc hiện trạng, ERD và hai sequence AI (được đánh dấu rõ là luồng đề xuất chưa triển khai) nằm tại [docs/architecture-and-design.md](docs/architecture-and-design.md).
+Tài liệu kiến trúc hiện trạng, ERD và sequence hai luồng AI tùy chọn (Gemini summary và Gemini/Twilio SMS) nằm tại [docs/architecture-and-design.md](docs/architecture-and-design.md).
 
-Bộ slide trình bày dự án 13 trang, có kiến trúc, ERD rút gọn, ảnh chụp giao diện demo và kịch bản phân vai gợi ý 10 phút, nằm tại [docs/project-presentation.pptx](docs/project-presentation.pptx). Hai luồng tóm tắt EMR và nhắc tái khám bằng AI được ghi rõ là đề xuất, chưa triển khai. Trên Windows có Microsoft PowerPoint, có thể tạo lại slide bằng `powershell -ExecutionPolicy Bypass -File docs/generate-project-presentation.ps1`.
+Bộ slide trình bày dự án 13 trang, có kiến trúc, ERD rút gọn, ảnh chụp giao diện demo và kịch bản phân vai gợi ý 10 phút, nằm tại [docs/project-presentation.pptx](docs/project-presentation.pptx). Slide nêu rõ hai luồng AI/SMS đã có trong source nhưng cần consent, credentials và cấu hình lịch gửi; chúng chưa được bật trong môi trường demo nếu thiếu cấu hình. Trên Windows có Microsoft PowerPoint, có thể tạo lại slide bằng `powershell -ExecutionPolicy Bypass -File docs/generate-project-presentation.ps1`.
 
 ## 1. Cài đặt yêu cầu
 
@@ -41,18 +41,41 @@ python manage.py runserver 8000
 
 Nếu chưa cấu hình đủ ba biến, API QR trả về `503` và không tạo giao dịch chờ. Ảnh QR được tải từ dịch vụ VietQR; URL chứa số tiền, mã hóa đơn và thông tin tài khoản nhận.
 
-`python manage.py migrate` là cách khởi tạo/cập nhật database được khuyến nghị và là nguồn schema chuẩn. `backend/schema.sql` chỉ là schema SQLite nền cũ gồm 13 bảng clinic ban đầu, không phải bản dump đầy đủ của toàn bộ model/migration hiện tại. Nếu cần dùng quy trình bootstrap SQL cũ trên database SQLite mới, chạy các lệnh sau trong thư mục `backend`; các migration Django tiếp theo vẫn cần chạy để thêm/cập nhật schema:
+`python manage.py migrate` là cách khởi tạo/cập nhật database được khuyến nghị và là nguồn schema chuẩn. `backend/schema.sql` là schema SQLite nền cũ, không chứa các migration mới như consent AI/SMS và theo dõi gửi nhắc. Nếu cần dùng quy trình bootstrap SQL cũ trên database SQLite mới, chạy các lệnh sau trong thư mục `backend`; migration Django sau đó sẽ bổ sung các thay đổi mới:
 
 ```powershell
 python manage.py migrate contenttypes
 python manage.py migrate auth
 python -c "import sqlite3; sqlite3.connect('db.sqlite3').executescript(open('schema.sql', encoding='utf-8').read())"
-python manage.py migrate clinic --fake
+python manage.py migrate clinic 0009 --fake
 python manage.py migrate
 python manage.py seed_dental_data
 ```
 
 Không chạy bước SQL này trên database đã có dữ liệu cần giữ; dùng migration Django thông thường để cập nhật database hiện có.
+
+## AI summary và nhắc tái khám qua SMS (tùy chọn)
+
+Tóm tắt AI dùng Gemini API; SMS dùng Twilio. Hai tích hợp mặc định tắt khi chưa có cấu hình. Không commit khóa API hoặc thông tin tài khoản vào Git.
+
+```powershell
+$env:DMS_GEMINI_API_KEY = "<Gemini API key>"
+$env:DMS_GEMINI_MODEL = "gemini-2.5-flash"
+$env:DMS_TWILIO_ACCOUNT_SID = "<Twilio account SID>"
+$env:DMS_TWILIO_AUTH_TOKEN = "<Twilio auth token>"
+$env:DMS_TWILIO_FROM_NUMBER = "<Twilio sender number>"
+```
+
+Lễ tân/Admin chỉ bật consent khi bệnh nhân đã đồng ý. Bác sĩ/Admin có thể yêu cầu tóm tắt tại hồ sơ EMR; nội dung chỉ trả về cho người dùng để rà soát, không tự ghi vào bệnh án. Backend loại bỏ tên, mã, số điện thoại, email và ngày dạng phổ biến nhận diện trực tiếp ở mức có thể trước khi gửi trường lâm sàng (chẩn đoán, kế hoạch, đơn thuốc, ghi chú, dịch vụ/răng) tới Gemini. Dữ liệu lâm sàng vẫn là dữ liệu nhạy cảm; cơ sở khám phải duyệt việc dùng nhà cung cấp và điều khoản xử lý dữ liệu trước khi cấu hình khóa thật.
+
+Ngày tái khám được bác sĩ ghi trong EMR. Mỗi ngày, chạy lệnh sau từ thư mục `backend` để kiểm tra và gửi nhắc cho bệnh nhân đã đồng ý SMS:
+
+```powershell
+python manage.py send_follow_up_reminders --dry-run
+python manage.py send_follow_up_reminders
+```
+
+Có thể đặt lệnh thứ hai trong Windows Task Scheduler, chạy mỗi ngày bằng tài khoản dịch vụ có quyền truy cập database. Chỉ bỏ `--dry-run` sau khi kiểm thử cấu hình. Lệnh tạo nội dung SMS chung bằng Gemini, không gửi bệnh án cho Gemini để viết tin nhắn; chỉ SMS có ngày tái khám được gửi tới Twilio. Twilio có thể tính phí tin nhắn và số gửi đi cần được cấu hình/duyệt tại tài khoản Twilio. Bảng `FollowUpReminder` lưu trạng thái và mã giao dịch để không gửi trùng cùng một lần tái khám. Lỗi từ chối rõ ràng có thể được thử lại; nếu kết quả từ Twilio không xác định, trạng thái `UNKNOWN` không được tự gửi lại để tránh gửi trùng và cần kiểm tra tại Twilio.
 
 ## 3. Khởi chạy frontend
 
@@ -89,6 +112,8 @@ Chạy `python manage.py migrate` để tạo schema từ migration. Sau đó ch
 - `POST /api/v1/auth/token/refresh/` (làm mới JWT)
 - `GET /api/v1/auth/me/` (hồ sơ người dùng và role, cần JWT)
 - `GET/POST /api/v1/patients/` (hồ sơ gồm ngày sinh, kiểu răng, tiền sử bệnh và dị ứng)
+- `PATCH /api/v1/patients/{id}/` (cập nhật hồ sơ và consent; Admin/Lễ tân)
+- `POST /api/v1/medical-records/{id}/ai-summary/` (tạo bản tóm tắt Gemini; bác sĩ phụ trách/Admin, cần consent)
 - `GET /api/v1/patients/?search=<mã|tên|điện thoại>` (tra cứu hồ sơ bệnh nhân; yêu cầu role Admin hoặc Receptionist)
 - `GET/POST /api/v1/appointments/` (danh sách/đặt lịch; giờ hẹn phải nằm trong ca làm của bác sĩ và không trùng lịch)
 - `POST /api/v1/appointments/{id}/cancel/` (lễ tân/Admin hủy lịch Pending hoặc Confirmed; lịch Completed hoặc đã Cancelled bị từ chối)

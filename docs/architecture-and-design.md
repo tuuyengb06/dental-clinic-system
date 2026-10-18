@@ -2,7 +2,7 @@
 
 ## 1. Mục đích và phạm vi
 
-Tài liệu này đối chiếu kiến trúc và mô hình dữ liệu với source Django/React hiện tại. Sơ đồ sequence AI ở mục 4 là **thiết kế đề xuất, chưa được triển khai**; chúng không mô tả hành vi production.
+Tài liệu này đối chiếu kiến trúc và mô hình dữ liệu với source Django/React hiện tại. Hai luồng Gemini (tóm tắt EMR và soạn lời nhắc chung) đã có trong source nhưng là tích hợp tùy chọn; cần consent, khóa nhà cung cấp và cấu hình lịch SMS trước khi hoạt động.
 
 Sơ đồ ERD tập trung vào các model nghiệp vụ do Django quản lý. Các bảng nền tảng Django như `django_migrations`, `django_content_type`, `auth_group`, quyền, session và bảng quản trị không được vẽ đầy đủ. Các trường `id` tự tăng được lược khỏi sơ đồ để dễ đọc; các cột quan hệ và trường nghiệp vụ được ghi trực tiếp.
 
@@ -19,6 +19,7 @@ flowchart LR
         Auth["authentication<br/>User, token endpoints"]
         Clinic["clinic<br/>patient, service, schedule,<br/>invoice, payment, dashboard"]
         Appt["appointments<br/>appointment, EMR"]
+        ReminderJob["Django management command<br/>send_follow_up_reminders"]
         Chat["ChatbotAPIView<br/>phân loại từ khóa + truy vấn ORM"]
         API --> Auth
         API --> Clinic
@@ -29,19 +30,23 @@ flowchart LR
     DB[(Cơ sở dữ liệu<br/>SQLite mặc định<br/>SQL Server tùy cấu hình)]
     QR["img.vietqr.io<br/>dịch vụ tạo ảnh QR"]
     Bank["Tài khoản ngân hàng nhận<br/>ngoài hệ thống"]
-    AI["Nhà cung cấp AI/LLM<br/>chưa tích hợp"]
-    Notify["Scheduler + SMS/email<br/>chưa triển khai"]
+    AI["Google Gemini API<br/>tóm tắt EMR + lời nhắc chung<br/>tùy chọn"]
+    Scheduler["Windows Task Scheduler<br/>gọi management command mỗi ngày"]
+    Notify["Twilio SMS<br/>tùy chọn"]
 
     UI -->|"REST/JSON; JWT cho API nghiệp vụ"| API
     UI -. "Development: Vite proxy /api" .-> API
+    ReminderJob --> DB
     Auth --> DB
     Clinic --> DB
     Appt --> DB
     Chat -->|"giá dịch vụ, bác sĩ,<br/>ca làm, lịch hẹn"| DB
     UI -->|"Tải ảnh QR từ URL chứa thông tin chuyển khoản"| QR
     QR -. "QR hướng người chuyển tới tài khoản đã cấu hình" .-> Bank
-    Chat -. "Không gọi trong code hiện tại" .-> AI
-    Notify -. "Không có job hoặc tích hợp gửi" .-> UI
+    Appt -->|"EMR có consent; dữ liệu giảm định danh"| AI
+    Scheduler --> ReminderJob
+    ReminderJob -->|"Chỉ prompt chung, không có dữ liệu bệnh nhân"| AI
+    ReminderJob -->|"Số điện thoại + ngày/lời mời"| Notify
 ```
 
 ### Thành phần đang chạy
@@ -54,14 +59,19 @@ flowchart LR
 | `clinic` | Người dùng phòng khám, bác sĩ, bệnh nhân, răng, dịch vụ, ca làm, lập hóa đơn, thanh toán và analytics. | `backend/clinic/models.py`, `backend/clinic/views.py`, `backend/clinic/dashboard.py` |
 | `appointments` | Lịch hẹn đang được dùng trong API và hồ sơ khám EMR. | `backend/appointments/models.py`, `backend/appointments/views.py` |
 | Chatbot | Phân loại quy tắc giá/lịch, đọc dữ liệu từ ORM; không dùng LLM, không đọc hồ sơ bệnh án để trả lời. | `backend/appointments/chatbot.py` |
+| Tóm tắt EMR | Endpoint bác sĩ/Admin có phân quyền và giới hạn tần suất; chỉ chạy khi bệnh nhân có consent và Gemini được cấu hình. Trả bản nháp, không ghi đè hồ sơ. | `backend/appointments/views.py`, `backend/appointments/ai_services.py` |
+| Nhắc tái khám | Management command đọc ngày tái khám và consent, tạo nội dung chung bằng Gemini rồi gửi qua Twilio; lịch chạy OS được cấu hình riêng. | `backend/appointments/management/commands/send_follow_up_reminders.py`, `backend/appointments/sms_services.py` |
 | Database | SQLite mặc định; có thể chọn SQL Server qua biến môi trường `DMS_DB_ENGINE=mssql`. | `backend/dms/settings.py` |
 | Tạo ảnh VietQR | Frontend tải ảnh từ `img.vietqr.io` với mã ngân hàng, số tài khoản, tên chủ tài khoản, số tiền và nội dung chuyển khoản trong URL. Không xác minh giao dịch. | `backend/clinic/views.py`, `frontend/src/main.jsx` |
 
-### Ranh giới hiện trạng và phần chưa có
+### Ranh giới hiện trạng và điều kiện kích hoạt
 
 - Không có dịch vụ AI/LLM bên ngoài trong đường chạy chatbot.
-- Chưa có API hay tác vụ nền tóm tắt EMR bằng AI.
-- Chưa có trường ngày tái khám, hàng đợi nhắc hẹn hoặc tích hợp gửi SMS/email trong model/API hiện tại.
+- Tóm tắt EMR gọi Gemini qua `POST /api/v1/medical-records/{id}/ai-summary/`; chỉ đọc hồ sơ đã lưu, cần `ai_processing_consent`, giới hạn 10 yêu cầu/giờ và trả kết quả chưa được lưu.
+- Trước khi gửi trường lâm sàng, backend loại bỏ các định danh nhận diện trực tiếp được phát hiện (tên/mã/điện thoại của bệnh nhân, email, ngày phổ biến). Đây là lọc theo mẫu, không bảo đảm dữ liệu được ẩn danh hoàn toàn; cần consent và duyệt chính sách xử lý dữ liệu của nhà cung cấp.
+- Ngày tái khám được lưu trong `appointments.MedicalRecord.follow_up_date`; `Patient.sms_reminder_consent` và số điện thoại là điều kiện gửi. `FollowUpReminder` lưu trạng thái/mã Twilio và có unique key theo hồ sơ + ngày.
+- Lệnh `python manage.py send_follow_up_reminders` cần được Windows Task Scheduler hoặc scheduler ngoài gọi hằng ngày; repository không tự đăng ký tác vụ hệ điều hành và tích hợp không hoạt động nếu thiếu biến môi trường Gemini/Twilio.
+- Nội dung gửi SMS là lời mời chung có ngày tái khám, không gửi bệnh án tới Gemini. Lỗi gửi xác định được đánh dấu `FAILED`; kết quả Twilio không xác định thành `UNKNOWN` và không tự gửi lại.
 - Luồng QR chỉ tạo QR và ghi nhận trạng thái chờ; đối soát hiện là thao tác nhân viên, không phải webhook ngân hàng.
 - VietQR là dịch vụ ngoài dùng để dựng ảnh QR, không phải ngân hàng, cổng nhận tiền hay nguồn xác minh giao dịch.
 - `backend/docker-compose.yml` hiện khai báo PostgreSQL và biến môi trường `DB_*`, trong khi `settings.py` chỉ cấu hình SQLite hoặc SQL Server qua `DMS_DB_*`; không nên xem compose đó là cấu hình triển khai đang hoạt động nếu chưa đồng bộ.
@@ -122,6 +132,8 @@ erDiagram
         string dentition_type
         string medical_history
         string allergies
+        bool ai_processing_consent
+        bool sms_reminder_consent
         datetime created_at
     }
     TOOTH {
@@ -171,7 +183,19 @@ erDiagram
         string treatment_plan
         string prescription
         string notes
+        date follow_up_date
         datetime created_at
+    }
+    FOLLOW_UP_REMINDER {
+        int id PK
+        int medical_record_id FK
+        date scheduled_for
+        string status
+        string provider_reference
+        string error_message
+        datetime created_at
+        datetime updated_at
+        datetime sent_at
     }
     MEDICAL_RECORD_TOOTH {
         int id PK
@@ -270,6 +294,7 @@ erDiagram
     SERVICE o|--o{ APPOINTMENT : selected
     DOCTOR ||--o{ WORK_SCHEDULE : works
     APPOINTMENT ||--o| MEDICAL_RECORD : "has EMR"
+    MEDICAL_RECORD ||--o{ FOLLOW_UP_REMINDER : "reminder attempts"
     MEDICAL_RECORD ||--o{ MEDICAL_RECORD_TOOTH : selects
     TOOTH ||--o{ MEDICAL_RECORD_TOOTH : selected
     MEDICAL_RECORD ||--o{ MEDICAL_RECORD_SERVICE : prescribes
@@ -306,9 +331,9 @@ erDiagram
 - `BankTransferVerification` là thông tin kiểm toán cho đối soát thủ công, một-một với Payment đã được xác minh; mã tham chiếu là duy nhất.
 - Quan hệ/cột `SET_NULL`, nullable và các giá trị trạng thái phải được đọc cùng `backend/clinic/models.py` và `backend/appointments/models.py`; ERD tập trung thể hiện FK và cardinality, không mã hóa mọi `on_delete`.
 
-## 4. Sequence cho hai luồng AI — đề xuất, chưa triển khai
+## 4. Sequence cho hai luồng AI tùy chọn
 
-Các luồng sau không có endpoint/model/provider tương ứng trong code hiện tại. Chúng là thiết kế tham khảo để nhóm thảo luận, không phải cam kết về nhà cung cấp, chi phí hoặc ngày triển khai. Nếu dùng mô hình bên ngoài, phải được phê duyệt trước khi gửi dữ liệu sức khỏe ra khỏi hệ thống.
+Các luồng dưới đây mô tả source hiện tại. Gemini và Twilio chỉ được gọi khi cấu hình credential; gửi SMS cần consent và một lịch chạy OS do đơn vị vận hành tự thiết lập. Không có API webhook ngân hàng hay chatbot LLM trong các luồng này.
 
 ### 4.1 Tóm tắt hồ sơ bệnh án bằng AI
 
@@ -316,77 +341,66 @@ Các luồng sau không có endpoint/model/provider tương ứng trong code hi�
 sequenceDiagram
     autonumber
     actor Dentist as Bác sĩ
-    participant UI as React UI (đề xuất)
-    participant API as Django REST API (endpoint mới)
+    participant UI as React UI
+    participant API as Django REST API / MedicalRecordViewSet
     participant DB as Database
-    participant Guard as Kiểm tra quyền + giảm thiểu dữ liệu
-    participant AI as AI provider (chưa chọn/chưa tích hợp)
+    participant AI as Google Gemini API
 
-    Note over Dentist,AI: LUỒNG ĐỀ XUẤT - CHƯA CÓ TRONG HỆ THỐNG HIỆN TẠI
-    Dentist->>UI: Chọn EMR và yêu cầu tạo bản nháp tóm tắt
-    UI->>API: POST yêu cầu với appointment/medical-record ID (JWT)
-    API->>Guard: Xác thực JWT, role bác sĩ và quyền trên lịch được giao
-    Guard-->>API: Cho phép hoặc từ chối
-    API->>DB: Đọc EMR, lần khám và dữ liệu lâm sàng được phép
-    DB-->>API: Chẩn đoán, kế hoạch, đơn thuốc, ghi chú, răng/dịch vụ
-    API->>Guard: Loại bỏ định danh không cần thiết; áp dụng giới hạn nội dung
-    Guard->>AI: Gửi dữ liệu tối thiểu theo chính sách đã được duyệt
-    AI-->>Guard: Trả về bản nháp tóm tắt có cấu trúc
-    Guard->>Guard: Kiểm tra schema, độ dài và nội dung không hợp lệ
-    Guard-->>API: Bản nháp hoặc lỗi rõ ràng
-    API-->>UI: Trả bản nháp, không tự lưu như chẩn đoán
-    UI-->>Dentist: Hiển thị để bác sĩ rà soát/chỉnh sửa
-    Dentist->>UI: Duyệt/chỉnh sửa hoặc loại bỏ
-    UI->>API: Lưu theo hành động rõ ràng của bác sĩ
-    API->>DB: Ghi vào trường lưu trữ có provenance/AI audit (cần thiết kế thêm)
-    DB-->>API: Xác nhận lưu
-    API-->>UI: Kết quả
+    Note over Dentist,AI: Tùy chọn; cần ai_processing_consent và DMS_GEMINI_API_KEY
+    Dentist->>UI: Bấm tạo bản nháp trong EMR
+    UI->>API: POST /api/v1/medical-records/{id}/ai-summary/ (JWT, body rỗng)
+    API->>API: Xác thực vai trò Dentist/Admin
+    API->>DB: Lấy EMR theo queryset giới hạn hồ sơ bác sĩ được giao
+    DB-->>API: EMR và consent của bệnh nhân
+    API->>API: Từ chối nếu chưa có ai_processing_consent
+    API->>API: Lọc mẫu tên/mã/điện thoại, email và định dạng ngày
+    API->>AI: Gửi chẩn đoán, kế hoạch, toa, ghi chú, dịch vụ/răng đã lọc
+    AI-->>API: Văn bản tóm tắt
+    API-->>UI: Trả summary và provider=Gemini; không lưu vào DB
+    UI-->>Dentist: Hiển thị bản nháp để bác sĩ tham khảo
 ```
 
-**Cần thiết kế trước khi triển khai:** quyền truy cập hồ sơ, cơ sở pháp lý/đồng thuận, nhà cung cấp và chính sách lưu dữ liệu, trường lưu bản tóm tắt, phiên bản model/prompt, audit, xử lý lỗi và quy tắc bác sĩ chịu trách nhiệm duyệt. Không tự ghi đè `diagnosis`, `treatment_plan` hoặc `prescription`.
+Endpoint chỉ nhận body rỗng, giới hạn 10 yêu cầu/giờ và không lưu summary. Thiếu cấu hình trả HTTP 503; lỗi gọi/đọc phản hồi Gemini trả HTTP 502. Việc lọc định danh là heuristic; không đảm bảo ẩn danh hoàn toàn. Summary có thể sai hoặc bỏ sót, không phải chẩn đoán/kết luận điều trị và cần bác sĩ đánh giá độc lập. Chỉ bật sau khi phòng khám phê duyệt consent và điều khoản xử lý dữ liệu sức khỏe của Gemini.
 
 ### 4.2 Sinh tin nhắn nhắc tái khám bằng AI
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Dentist as Bác sĩ
-    actor Staff as Nhân viên phòng khám
     actor Patient as Bệnh nhân
-    participant UI as React UI (đề xuất)
-    participant API as Django REST API (endpoint mới)
-    participant Scheduler as Scheduler/queue (chưa có)
+    actor Dentist as Bác sĩ
+    participant UI as React UI
     participant DB as Database
-    participant AI as AI provider (chưa chọn/chưa tích hợp)
-    participant Notify as SMS/email provider (chưa chọn/chưa tích hợp)
+    participant Scheduler as Windows Task Scheduler
+    participant Command as Django management command
+    participant AI as Google Gemini API
+    participant SMS as Twilio SMS
 
-    Note over Dentist,Notify: LUỒNG ĐỀ XUẤT - CHƯA CÓ NGÀY TÁI KHÁM, JOB NỀN HAY KÊNH GỬI TRONG CODE
-    Dentist->>UI: Nhập ngày tái khám và hướng dẫn được phép gửi
-    UI->>API: Lưu kế hoạch theo dõi + yêu cầu tạo nhắc (JWT)
-    API->>DB: Kiểm tra lịch/EMR, quyền bác sĩ, consent và thông tin liên hệ
-    DB-->>API: Dữ liệu tối thiểu hoặc thiếu trường/consent
-    API-->>UI: Báo lỗi nếu thiếu căn cứ gửi
-    API->>AI: Yêu cầu soạn bản nháp không chẩn đoán (chỉ khi được phê duyệt)
-    AI-->>API: Nội dung nhắc tái khám dạng bản nháp
-    API-->>UI: Trả bản nháp để nhân viên/bác sĩ duyệt
-    Staff->>UI: Duyệt hoặc chỉnh sửa nội dung và thời điểm gửi
-    UI->>API: Xác nhận lịch gửi
-    API->>DB: Lưu consent, nội dung duyệt, thời gian, trạng thái và idempotency key
-    API->>Scheduler: Đưa tác vụ vào hàng đợi bền vững
-    Scheduler->>DB: Đọc tác vụ đến hạn và kiểm tra chưa gửi/hủy
-    Scheduler->>Notify: Gửi nội dung tới kênh đã xác nhận
-    Notify-->>Scheduler: Kết quả giao nhận
-    Scheduler->>DB: Lưu trạng thái, provider reference và lần thử
-    Notify-->>Patient: Nhận lời nhắc
+    Note over Dentist,SMS: Tùy chọn; cần sms_reminder_consent, DMS_GEMINI_* và DMS_TWILIO_*
+    Dentist->>UI: Nhập ngày tái khám trong EMR
+    UI->>DB: Lưu MedicalRecord.follow_up_date
+    Note over Patient,DB: Nhân viên ghi sms_reminder_consent và số điện thoại ở hồ sơ bệnh nhân
+    Scheduler->>Command: Chạy send_follow_up_reminders hằng ngày
+    Command->>DB: Tìm follow_up_date đến hạn/quá hạn, có consent
+    DB-->>Command: Các EMR và số điện thoại đủ điều kiện
+    Command->>DB: Tạo/claim FollowUpReminder duy nhất theo EMR + ngày
+    Command->>AI: Xin một câu mời chung; không gửi dữ liệu bệnh nhân
+    AI-->>Command: Câu SMS ngắn, không có thông tin lâm sàng
+    loop Mỗi hồ sơ đủ điều kiện
+        Command->>SMS: Gửi số điện thoại + ngày tái khám + lời mời chung
+        SMS-->>Command: Provider reference hoặc lỗi/kết quả không rõ
+        Command->>DB: Ghi SENT, FAILED hoặc UNKNOWN
+        SMS-->>Patient: Nhận SMS (nếu Twilio chấp nhận)
+    end
 ```
 
-**Cần thiết kế trước khi triển khai:** trường ngày tái khám (hiện chưa có), consent/opt-out, số điện thoại/email đã xác minh, lịch gửi và múi giờ, mẫu nội dung được phép, review của nhân viên, nhà cung cấp, chính sách retry/idempotency, audit và xử lý yêu cầu hủy. Nội dung nhắc không được tiết lộ chẩn đoán nhạy cảm trên màn hình khóa/thông báo.
+Command gửi lời mời chung có ngày tái khám, không đưa hồ sơ lâm sàng hay thông tin nhận diện vào prompt Gemini. `--dry-run` chỉ đếm hồ sơ đủ điều kiện, không gửi và không tạo delivery record. Delivery `FAILED` có thể được thử lại ở lần chạy sau; `UNKNOWN` không tự retry để tránh SMS trùng, cần đối chiếu trong Twilio. Trạng thái `SENDING` cũ hơn 30 phút được chuyển `UNKNOWN`. Command không tạo lịch hệ điều hành: cần tự cấu hình Task Scheduler, kiểm thử `--dry-run`, xác nhận tuyến gửi/chi phí SMS tại Twilio và chỉ sau đó mới chạy thật. Nội dung Gemini được gửi tự động, không có bước duyệt thủ công trước khi gửi.
 
 ## 5. Kiểm tra nhất quán và giới hạn tài liệu
 
 - Component diagram đã đối chiếu `INSTALLED_APPS`, URL routing, frontend Vite proxy, database settings, chatbot và VietQR URL builder.
 - ERD được đối chiếu trực tiếp với các model Django và migration; phân biệt đúng hai model Appointment khác app.
-- Hai sequence dùng participant tương lai có nhãn rõ ràng và chỉ ra thành phần/model/API còn thiếu; không trình bày AI summary hoặc reminder như chức năng hiện có.
+- Hai sequence được đối chiếu với endpoint, command, model và service thực tế; các tích hợp Gemini/Twilio được ghi rõ là tùy chọn, cần cấu hình và consent.
 - Tài liệu không thay thế migration/schema thực tế. Khi model thay đổi, cập nhật ERD cùng thay đổi model/migration và kiểm tra route/permission tương ứng.
 - Chưa có quy ước tài liệu được nhóm xác nhận; cấu trúc hiện dùng Markdown + Mermaid để version-control, review bằng diff và render trên GitHub.
 
@@ -395,5 +409,5 @@ sequenceDiagram
 - `backend/dms/settings.py`, `backend/dms/urls.py`
 - `backend/authentication/models.py`, `backend/authentication/urls.py`
 - `backend/clinic/models.py`, `backend/clinic/urls.py`, `backend/clinic/views.py`, `backend/clinic/dashboard.py`
-- `backend/appointments/models.py`, `backend/appointments/urls.py`, `backend/appointments/views.py`, `backend/appointments/chatbot.py`
+- `backend/appointments/models.py`, `backend/appointments/urls.py`, `backend/appointments/views.py`, `backend/appointments/chatbot.py`, `backend/appointments/ai_services.py`, `backend/appointments/sms_services.py`, `backend/appointments/management/commands/send_follow_up_reminders.py`
 - `frontend/src/main.jsx`, `frontend/vite.config.js`

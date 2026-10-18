@@ -101,7 +101,7 @@ try {
     [void](Add-Text $slide 48 101 355 106 "Quản lý nha khoa${nl}liền mạch, rõ ràng" 33 $Palette.Ink $true)
     [void](Add-Text $slide 50 222 340 30 "Dental Management System (DMS)" 17 $Palette.Green $true)
     [void](Add-Text $slide 50 269 330 72 "Kết nối lịch hẹn, khám bệnh, hóa đơn và tư vấn thông tin." 14 $Palette.Muted)
-    Add-Chip $slide 48 382 242 "HIỆN TRẠNG + ĐỊNH HƯỚNG AI" $Palette.White $Palette.Green
+    Add-Chip $slide 48 382 242 "NGHIỆP VỤ + AI TÙY CHỌN" $Palette.White $Palette.Green
     Add-Image $slide (Join-Path $assets "02-dashboard.png") 422 104 486 304
     [void](Add-Text $slide 424 420 477 19 "Giao diện thật · dữ liệu demo" 9 $Palette.Muted $false 3)
     [void](Add-Shape $slide 42 511 876 1 $Palette.Line)
@@ -115,8 +115,8 @@ try {
     [void](Add-Text $slide 51 294 405 22 "PHẠM VI CHỨC NĂNG" 10 $Palette.Green $true)
     [void](Add-Text $slide 53 328 390 142 ("• Bệnh nhân và lịch hẹn${nl}• EMR và dịch vụ chỉ định${nl}• Hóa đơn, tiền mặt, QR đối soát${nl}• Chatbot tra giá / khung giờ${nl}• Dashboard doanh thu / lượt khám") 14 $Palette.Ink)
     [void](Add-Shape $slide 490 303 422 145 $Palette.Mint $true)
-    [void](Add-Text $slide 513 323 374 24 "Hiện trạng và đề xuất" 15 $Palette.Ink $true)
-    [void](Add-Text $slide 513 357 370 77 "Chatbot hiện tra cứu theo quy tắc và dữ liệu hệ thống. Tóm tắt EMR, nhắc tái khám bằng AI chưa được triển khai." 13 $Palette.Muted)
+    [void](Add-Text $slide 513 323 374 24 "Hiện trạng và tích hợp tùy chọn" 15 $Palette.Ink $true)
+    [void](Add-Text $slide 513 357 370 77 "Chatbot tra cứu theo quy tắc. Tóm tắt EMR và nhắc tái khám đã có trong source; cần consent, cấu hình Gemini/Twilio và lịch gửi." 13 $Palette.Muted)
 
     $slide = Add-Slide $presentation "02 / Quy trình" "Một hành trình dữ liệu, giá trị ở mỗi bước" "Các bước nối từ tiếp nhận tới thống kê, theo đúng quyền được cấp."
     $xs = @(52, 280, 508, 736)
@@ -145,12 +145,12 @@ try {
     [void](Add-Shape $slide 648 222 46 3 $Palette.Gold)
     Add-Card $slide 50 316 262 116 "QR" "VietQR tạo ảnh; không có webhook hay xác minh ngân hàng tự động." $Palette.Gold
     Add-Card $slide 349 316 262 116 "Chatbot hiện hành" "Quy tắc + truy vấn dịch vụ/lịch trong cơ sở dữ liệu." $Palette.Green
-    Add-Card $slide 648 316 262 116 "AI tương lai" "Chưa kết nối dịch vụ AI, API tóm tắt EMR hoặc job nhắc tái khám." $Palette.Coral
+    Add-Card $slide 648 316 262 116 "AI / SMS tùy chọn" "Gemini tạo bản nháp EMR/lời nhắc chung; Twilio gửi SMS. Cần consent, credentials và Task Scheduler." $Palette.Coral
 
     $slide = Add-Slide $presentation "04 / Thiết kế dữ liệu" "Các thực thể chính nối thành chuỗi nghiệp vụ" "Sơ đồ rút gọn theo model hiện hành; các trường chỉ liệt kê để minh họa."
-    Add-Card $slide 50 184 170 100 "PATIENT" "patient_code · full_name · phone" $Palette.Green
+    Add-Card $slide 50 184 170 100 "PATIENT" "code · name · phone · AI/SMS consent" $Palette.Green
     Add-Card $slide 280 184 170 100 "APPOINTMENT" "patient · doctor · service · time" $Palette.Gold
-    Add-Card $slide 510 184 170 100 "MEDICAL RECORD" "appointment · diagnosis · plan" $Palette.Green
+    Add-Card $slide 510 184 170 100 "MEDICAL RECORD" "appointment · diagnosis · plan · follow-up date" $Palette.Green
     Add-Card $slide 740 184 170 100 "INVOICE" "patient · medical_record · total/status" $Palette.Coral
     [void](Add-Shape $slide 220 232 60 3 $Palette.Gold)
     [void](Add-Shape $slide 450 232 60 3 $Palette.Gold)
@@ -167,7 +167,7 @@ try {
     [void](Add-Text $slide 475 320 55 14 "1:N" 9 $Palette.Green $true 2)
     [void](Add-Text $slide 825 320 55 14 "1:N" 9 $Palette.Green $true 2)
     Add-Chip $slide 48 369 300 "EMR ↔ dịch vụ / răng: quan hệ nhiều-nhiều" $Palette.Mint $Palette.Green
-    [void](Add-Text $slide 48 405 300 43 "Invoice liên kết bệnh nhân; InvoiceItem lưu đơn giá/số lượng lúc lập." 10 $Palette.Muted)
+    [void](Add-Text $slide 48 405 300 43 "FollowUpReminder theo dõi trạng thái gửi duy nhất theo EMR/ngày." 10 $Palette.Muted)
 
     $slide = Add-Slide $presentation "05 / Đặt lịch" "Kiểm tra lịch trước khi xác nhận đặt hẹn" "API kiểm tra ca làm, thời lượng dịch vụ và lịch bị trùng."
     Add-Image $slide (Join-Path $assets "03-booking-dialog.png") 43 141 558 349
@@ -182,8 +182,8 @@ try {
     Add-Card $slide 636 153 274 89 "Liên kết" "Mỗi EMR gắn một-một với lịch hẹn." $Palette.Green
     Add-Card $slide 636 261 274 89 "Ghi nhận" "Chẩn đoán, hướng điều trị, răng và dịch vụ." $Palette.Gold
     [void](Add-Shape $slide 636 369 274 89 $Palette.Mint $true)
-    Add-Chip $slide 650 382 161 "AI SUMMARY · ĐỀ XUẤT" $Palette.White $Palette.Green
-    [void](Add-Text $slide 650 415 245 34 "AI tóm tắt EMR chưa được triển khai." 11 $Palette.Muted)
+    Add-Chip $slide 650 382 205 "AI SUMMARY · TÙY CHỌN" $Palette.White $Palette.Green
+    [void](Add-Text $slide 650 415 245 34 "Cần consent + Gemini key; bác sĩ rà soát bản nháp." 11 $Palette.Muted)
 
     $slide = Add-Slide $presentation "07 / Thanh toán" "Tính tiền từ dịch vụ, lưu trạng thái giao dịch" "Hóa đơn giữ đơn giá tại thời điểm phát hành; giao dịch có phương thức và trạng thái."
     Add-Image $slide (Join-Path $assets "05-cash-payment-confirmation.png") 43 141 558 349
@@ -199,23 +199,23 @@ try {
     Add-Chip $slide 652 170 235 "THEO QUY TẮC · KHÔNG GỌI LLM" $Palette.Mint $Palette.Green
     [void](Add-Text $slide 653 211 238 219 ("HỖ TRỢ${nl}• Tra giá dịch vụ hoạt động${nl}• Gợi ý giờ theo lịch hiện có${nl}${nl}GIỚI HẠN${nl}• Không chẩn đoán / xem EMR${nl}• Không đặt hoặc giữ lịch${nl}• Câu hỏi khác → liên hệ lễ tân") 12 $Palette.Ink)
 
-    $slide = Add-Slide $presentation "09 / Định hướng AI" "Hai luồng AI là đề xuất, chưa triển khai" "Chưa có API, dịch vụ AI, lịch chạy nền hay kênh nhắc trong source hiện tại."
+    $slide = Add-Slide $presentation "09 / AI tùy chọn" "Hai luồng đã có trong source, cần cấu hình" "Gemini/Twilio chưa hoạt động nếu thiếu consent, credentials và lịch Task Scheduler."
     [void](Add-Shape $slide 47 151 419 295 $Palette.White $true)
-    Add-Chip $slide 66 168 186 "TÓM TẮT EMR · ĐỀ XUẤT" $Palette.Mint $Palette.Green
-    [void](Add-Text $slide 70 211 373 212 ("Bác sĩ chọn hồ sơ${nl}↓${nl}API kiểm tra quyền, giảm thiểu dữ liệu${nl}↓${nl}AI tạo bản nháp${nl}↓${nl}Bác sĩ rà soát / chỉnh sửa${nl}↓${nl}Chỉ lưu khi được duyệt") 12 $Palette.Ink)
+    Add-Chip $slide 66 168 186 "TÓM TẮT EMR · GEMINI" $Palette.Mint $Palette.Green
+    [void](Add-Text $slide 70 211 373 212 ("Bác sĩ chọn hồ sơ + đã có consent${nl}↓${nl}API kiểm tra role / quyền hồ sơ${nl}↓${nl}Lọc định danh theo mẫu → Gemini${nl}↓${nl}Trả bản nháp cho bác sĩ rà soát${nl}↓${nl}Không tự lưu vào bệnh án") 12 $Palette.Ink)
     [void](Add-Shape $slide 493 151 419 295 $Palette.White $true)
-    Add-Chip $slide 511 168 210 "NHẮC TÁI KHÁM · ĐỀ XUẤT" $Palette.Mint $Palette.Green
-    [void](Add-Text $slide 516 211 373 212 ("Xác nhận ngày + đồng thuận${nl}↓${nl}AI soạn nháp không chẩn đoán${nl}↓${nl}Nhân viên / bác sĩ duyệt${nl}↓${nl}Lưu lịch gửi + audit${nl}↓${nl}Job nền gửi, lưu kết quả") 12 $Palette.Ink)
-    Add-Chip $slide 327 462 306 "CHƯA CÓ API · DỊCH VỤ AI · LỊCH NỀN" $Palette.White $Palette.Coral
+    Add-Chip $slide 511 168 210 "TÁI KHÁM · GEMINI + TWILIO" $Palette.Mint $Palette.Green
+    [void](Add-Text $slide 516 211 373 212 ("Ngày tái khám + SMS consent${nl}↓${nl}Task Scheduler gọi lệnh hằng ngày${nl}↓${nl}Gemini soạn lời mời chung${nl}↓${nl}Twilio gửi SMS + lưu trạng thái${nl}↓${nl}Không gửi bệnh án; UNKNOWN không retry") 12 $Palette.Ink)
+    Add-Chip $slide 327 462 306 "TÙY CHỌN · CẦN API KEYS + TASK SCHEDULER" $Palette.White $Palette.Coral
 
-    $slide = Add-Slide $presentation "10 / An toàn" "AI hỗ trợ hành chính, không thay bác sĩ" "Phân biệt biện pháp hiện có với điều kiện cần có trước khi triển khai AI tương lai."
+    $slide = Add-Slide $presentation "10 / An toàn" "AI hỗ trợ hành chính, không thay bác sĩ" "Biện pháp đang có và các điều kiện bắt buộc trước khi kích hoạt tích hợp."
     [void](Add-Shape $slide 48 151 416 304 $Palette.Mint $true)
     [void](Add-Text $slide 69 172 370 25 "ĐANG CÓ" 14 $Palette.Green $true)
-    [void](Add-Text $slide 69 212 370 222 ("• API nghiệp vụ phân quyền theo vai trò${nl}• Chatbot không cần dữ liệu bệnh nhân${nl}• Trả lời dựa trên danh mục / lịch${nl}• Thiếu dữ liệu: báo rõ, hướng lễ tân${nl}• QR chỉ cập nhật sau đối soát") 13 $Palette.Ink)
+    [void](Add-Text $slide 69 212 370 222 ("• Role + quyền hồ sơ; consent bắt buộc${nl}• Lọc định danh theo mẫu trước Gemini${nl}• Summary chỉ là bản nháp, không tự lưu${nl}• SMS chỉ là lời mời chung + ngày hẹn${nl}• Theo dõi trạng thái; UNKNOWN không retry") 13 $Palette.Ink)
     [void](Add-Shape $slide 496 151 416 304 $Palette.White $true)
-    [void](Add-Text $slide 518 172 370 25 "TRƯỚC KHI BẬT AI" 14 $Palette.Coral $true)
-    [void](Add-Text $slide 518 212 370 222 ("• Duyệt quyền và sự đồng thuận${nl}• Giảm thiểu dữ liệu gửi đi${nl}• Bác sĩ / nhân viên duyệt bản nháp${nl}• Lưu nguồn, phiên bản, nhật ký kiểm toán${nl}• Lỗi: báo rõ, chuyển người phụ trách") 13 $Palette.Ink)
-    [void](Add-Text $slide 52 471 853 18 "Hiện tại chưa gửi hồ sơ bệnh án tới nhà cung cấp AI." 10 $Palette.Green $true 2)
+    [void](Add-Text $slide 518 172 370 25 "TRƯỚC KHI KÍCH HOẠT" 14 $Palette.Coral $true)
+    [void](Add-Text $slide 518 212 370 222 ("• Phê duyệt xử lý dữ liệu sức khỏe${nl}• Cấu hình key Gemini / Twilio an toàn${nl}• Chạy dry-run và xác minh số gửi${nl}• Xác nhận tuyến SMS + chi phí Twilio${nl}• Tự cấu hình Task Scheduler; không bật sẵn") 13 $Palette.Ink)
+    [void](Add-Text $slide 52 471 853 18 "Không chẩn đoán hay quyết định điều trị bằng AI; bác sĩ chịu trách nhiệm chuyên môn." 10 $Palette.Green $true 2)
 
     $slide = Add-Slide $presentation "11 / Demo" "Một tình huống xuyên suốt hệ thống" "Kịch bản gợi ý 3 phút; dùng dữ liệu demo, không cần giao dịch ngân hàng thật."
     $steps = @(
@@ -231,7 +231,7 @@ try {
         [void](Add-Text $slide ($x + 17) 232 166 22 $steps[$i][1] 11 $Palette.Green $true)
         [void](Add-Text $slide ($x + 17) 267 166 60 $steps[$i][2] 11 $Palette.Muted)
     }
-    [void](Add-Text $slide 55 376 849 68 "Không trình diễn AI tóm tắt EMR hoặc gửi nhắc tái khám như chức năng đã có. Trình bày đó là đề xuất ở trang 10." 14 $Palette.Ink $true 2)
+    [void](Add-Text $slide 55 376 849 68 "AI/SMS đã có trong source nhưng chưa cấu hình ở môi trường demo: không khẳng định đã gọi Gemini/Twilio. Trình bày đây là tích hợp tùy chọn, cần consent và cấu hình vận hành." 14 $Palette.Ink $true 2)
 
     $slide = Add-Slide $presentation "12 / Chạy thử" "Kịch bản trình bày 10 phút — nhóm chốt người nói" "Phân vai gợi ý; thay bằng tên thành viên sau khi thống nhất."
     Add-Card $slide 49 158 267 174 "THÀNH VIÊN A · 3 PHÚT" "Bài toán, phạm vi, kiến trúc và dữ liệu (trang 1–5). Người trình bày: ________" $Palette.Green
