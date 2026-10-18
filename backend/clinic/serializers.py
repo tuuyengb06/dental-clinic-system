@@ -6,7 +6,17 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 from appointments.models import MedicalRecord
-from .models import Doctor, Invoice, InvoiceItem, Patient, Payment, Service, Tooth, WorkSchedule
+from .models import (
+    BankTransferVerification,
+    Doctor,
+    Invoice,
+    InvoiceItem,
+    Patient,
+    Payment,
+    Service,
+    Tooth,
+    WorkSchedule,
+)
 
 class DoctorSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
@@ -82,6 +92,10 @@ class InvoiceItemSerializer(serializers.ModelSerializer):
 
 class PaymentSerializer(serializers.ModelSerializer):
     received_by_name = serializers.SerializerMethodField()
+    bank_reference = serializers.SerializerMethodField()
+    verified_at = serializers.SerializerMethodField()
+    verified_by_name = serializers.SerializerMethodField()
+    cancelled_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Payment
@@ -93,6 +107,11 @@ class PaymentSerializer(serializers.ModelSerializer):
             "created_at",
             "paid_at",
             "received_by_name",
+            "bank_reference",
+            "verified_at",
+            "verified_by_name",
+            "cancelled_at",
+            "cancelled_by_name",
         ]
         read_only_fields = fields
 
@@ -102,6 +121,74 @@ class PaymentSerializer(serializers.ModelSerializer):
             return None
         user = clinic_user.user
         return user.get_full_name() or user.username
+
+    def get_verified_by_name(self, payment):
+        try:
+            user = payment.verification.verified_by
+        except BankTransferVerification.DoesNotExist:
+            return None
+        return user.get_full_name() or user.username
+
+    def get_cancelled_by_name(self, payment):
+        user = payment.cancelled_by
+        if not user:
+            return None
+        return user.get_full_name() or user.username
+
+    def get_bank_reference(self, payment):
+        try:
+            return payment.verification.reference
+        except BankTransferVerification.DoesNotExist:
+            return None
+
+    def get_verified_at(self, payment):
+        try:
+            return payment.verification.verified_at
+        except BankTransferVerification.DoesNotExist:
+            return None
+
+
+class ManualQrReconciliationSerializer(serializers.Serializer):
+    bank_reference = serializers.CharField(max_length=100, allow_blank=False, trim_whitespace=True)
+    verified_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    verified = serializers.BooleanField()
+
+    def validate_bank_reference(self, value):
+        if not value:
+            raise serializers.ValidationError("Enter the transaction reference shown by the bank.")
+        return value
+
+    def to_internal_value(self, data):
+        if isinstance(data, Mapping) and set(data) - set(self.fields):
+            raise serializers.ValidationError(
+                {"detail": "Only bank_reference, verified_amount, and verified are accepted."}
+            )
+        return super().to_internal_value(data)
+
+    def validate_verified(self, value):
+        if not value:
+            raise serializers.ValidationError(
+                "Confirm that the bank statement was checked before recording the transfer."
+            )
+        return value
+
+
+class CancelQrPaymentSerializer(serializers.Serializer):
+    checked_no_payment = serializers.BooleanField()
+
+    def to_internal_value(self, data):
+        if isinstance(data, Mapping) and set(data) - set(self.fields):
+            raise serializers.ValidationError(
+                {"detail": "Only checked_no_payment is accepted."}
+            )
+        return super().to_internal_value(data)
+
+    def validate_checked_no_payment(self, value):
+        if not value:
+            raise serializers.ValidationError(
+                "Confirm that the receiving account was checked and no transfer was received."
+            )
+        return value
 
 
 class InvoiceServiceSourceSerializer(serializers.ModelSerializer):

@@ -253,6 +253,22 @@ function App() {
     return result;
   }
 
+  async function reconcileInvoiceQr(invoiceId, verification) {
+    const invoice = await apiRequest(`/invoices/${invoiceId}/reconcile-qr/`, {
+      tokens, onTokens: updateTokens, method: 'POST', body: verification
+    });
+    setInvoices((current) => current.map((item) => item.id === invoice.id ? invoice : item));
+    return invoice;
+  }
+
+  async function cancelInvoiceQr(invoiceId) {
+    const invoice = await apiRequest(`/invoices/${invoiceId}/cancel-qr/`, {
+      tokens, onTokens: updateTokens, method: 'POST', body: { checked_no_payment: true }
+    });
+    setInvoices((current) => current.map((item) => item.id === invoice.id ? invoice : item));
+    return invoice;
+  }
+
   async function login(username, password) {
     const nextTokens = await apiRequest('/auth/token/', { method: 'POST', body: { username, password } });
     const currentUser = await apiRequest('/auth/me/', { tokens: nextTokens });
@@ -293,7 +309,7 @@ function App() {
       {section === 'Appointments' && <Appointments appointments={appointments} patients={patients} doctors={doctors} services={services} schedules={schedules} role={role} loading={apiLoading} loadError={apiError} onCreateAppointment={createAppointment} onCreateSchedule={createSchedule} onCancelAppointment={cancelAppointment} />}
       {section === 'EMR' && (role === 'DENTIST' || role === 'ADMIN') && <MedicalRecords appointments={appointments} patients={patients} services={services} teeth={teeth} records={medicalRecords} loading={apiLoading} loadError={apiError} onSave={saveMedicalRecord} />}
       {section === 'Tooth chart' && <ToothChart dentition={dentition} setDentition={setDentition} selectedTooth={selectedTooth} setSelectedTooth={setSelectedTooth} />}
-      {section === 'Billing' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Billing invoices={invoices} records={invoiceSources} loading={apiLoading} onCreateInvoice={createInvoice} onPayCash={payInvoiceCash} onCreateQr={createInvoiceQr} />}
+      {section === 'Billing' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Billing invoices={invoices} records={invoiceSources} loading={apiLoading} onCreateInvoice={createInvoice} onPayCash={payInvoiceCash} onCreateQr={createInvoiceQr} onReconcileQr={reconcileInvoiceQr} onCancelQr={cancelInvoiceQr} />}
       {section === 'Radiographs' && <Radiographs />}
       {section === 'Services' && role === 'ADMIN' && <ServiceManagement tokens={tokens} onTokensChanged={updateTokens} />}
       {section === 'Doctors' && role === 'ADMIN' && <DoctorDirectory tokens={tokens} onTokensChanged={updateTokens} />}
@@ -1262,7 +1278,7 @@ function MedicalRecords({ appointments, patients, services, teeth, records, load
 }
 function ToothChart({ dentition, setDentition, selectedTooth, setSelectedTooth }) { const teeth = dentition === 'ADULT' ? teethAdult : teethChild; return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">CLINICAL RECORD</span><h2>Interactive tooth chart</h2></div><div className="segmented"><button className={dentition === 'ADULT' ? 'selected' : ''} onClick={() => setDentition('ADULT')}>Adult · 32</button><button className={dentition === 'CHILD' ? 'selected' : ''} onClick={() => setDentition('CHILD')}>Child · 20</button></div></div><div className="chart-layout"><div className="panel tooth-panel"><div className="chart-header"><div><strong>Nguyen Minh Anh</strong><span>DMS-0001 · {dentition === 'ADULT' ? 'Permanent dentition' : 'Primary dentition'}</span></div><span className="status confirmed">In treatment</span></div><div className="mouth-label">UPPER ARCH</div><div className={`teeth-grid ${dentition.toLowerCase()}`}>{teeth.slice(0, Math.ceil(teeth.length / 2)).map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-line" /><div className={`teeth-grid lower ${dentition.toLowerCase()}`}>{teeth.slice(Math.ceil(teeth.length / 2)).reverse().map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-label lower-label">LOWER ARCH</div><div className="chart-legend"><span><i className="dot healthy" />Healthy</span><span><i className="dot care" />Needs care</span><span><i className="dot monitor" />Monitor</span></div></div><aside className="panel tooth-detail"><span className="eyebrow">SELECTED TOOTH</span>{selectedTooth ? <><div className="tooth-number">{teeth.find((tooth) => tooth.id === selectedTooth)?.code}</div><h3>Clinical condition</h3><p>Update this tooth’s condition and add a treatment note for the patient record.</p><select defaultValue="Healthy"><option>Healthy</option><option>Needs care</option><option>Monitor</option><option>Restored</option></select><textarea placeholder="Add a clinical note..." /><button className="primary-button full">Save condition</button></> : <div className="empty-detail"><Stethoscope size={28} /><p>Select a tooth to inspect its clinical record.</p></div>}</aside></div></section>; }
 function Tooth({ tooth, selected, onClick }) { return <button onClick={onClick} className={`tooth ${tooth.state.toLowerCase().replace(' ', '-')} ${selected ? 'selected' : ''}`}><span>{tooth.code.slice(1)}</span><div className="tooth-shape" /></button>; }
-function Billing({ invoices, records, loading, onCreateInvoice, onPayCash, onCreateQr }) {
+function Billing({ invoices, records, loading, onCreateInvoice, onPayCash, onCreateQr, onReconcileQr, onCancelQr }) {
   const [recordId, setRecordId] = useState('');
   const [quantities, setQuantities] = useState({});
   const [selectedInvoiceId, setSelectedInvoiceId] = useState('');
@@ -1270,6 +1286,9 @@ function Billing({ invoices, records, loading, onCreateInvoice, onPayCash, onCre
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
   const [qrTransfer, setQrTransfer] = useState(null);
   const [qrImageError, setQrImageError] = useState(false);
+  const [bankReference, setBankReference] = useState('');
+  const [qrVerified, setQrVerified] = useState(false);
+  const [qrCancellationChecked, setQrCancellationChecked] = useState(false);
   const [cashMethod, setCashMethod] = useState('CASH');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -1346,10 +1365,51 @@ function Billing({ invoices, records, loading, onCreateInvoice, onPayCash, onCre
       const result = await onCreateQr(selectedInvoice.id);
       setQrTransfer(result.transfer);
       setQrImageError(false);
+      setBankReference('');
+      setQrVerified(false);
+      setQrCancellationChecked(false);
       setQrDialogOpen(true);
       setSuccess('Transfer QR is ready. The invoice remains unpaid until a bank transaction is verified.');
     } catch (paymentError) {
       setQrError(paymentError.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function confirmQrPayment(event) {
+    event.preventDefault();
+    if (!selectedInvoice || !bankReference.trim() || !qrVerified) return;
+    setSaving(true);
+    setQrError('');
+    try {
+      const paid = await onReconcileQr(selectedInvoice.id, {
+        bank_reference: bankReference.trim(),
+        verified_amount: qrTransfer.amount,
+        verified: true
+      });
+      setQrDialogOpen(false);
+      setBankReference('');
+      setQrVerified(false);
+      setSuccess(`Bank transfer for invoice ${paid.invoice_number} was recorded as verified.`);
+    } catch (verificationError) {
+      setQrError(verificationError.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function cancelPendingQr() {
+    if (!selectedInvoice || !qrCancellationChecked) return;
+    setSaving(true);
+    setQrError('');
+    try {
+      const updatedInvoice = await onCancelQr(selectedInvoice.id);
+      setQrDialogOpen(false);
+      setQrCancellationChecked(false);
+      setSuccess(`Pending transfer for invoice ${updatedInvoice.invoice_number} was cancelled after the account check.`);
+    } catch (cancellationError) {
+      setQrError(cancellationError.message);
     } finally {
       setSaving(false);
     }
@@ -1417,6 +1477,10 @@ function Billing({ invoices, records, loading, onCreateInvoice, onPayCash, onCre
         {selectedInvoice.payments.map((payment) => <div className="invoice-payment-row" key={payment.id}>
           <strong>{Number(payment.amount).toLocaleString('vi-VN')} ₫ · {payment.method}</strong>
           <span>{payment.status === 'COMPLETED' && payment.paid_at ? `Paid ${new Date(payment.paid_at).toLocaleString()}` : `Created ${new Date(payment.created_at).toLocaleString()} · ${payment.status === 'PENDING' ? 'Awaiting verification' : payment.status}`}</span>
+          {payment.bank_reference && <span>Bank reference: {payment.bank_reference}</span>}
+          {payment.verified_at && <span>Manually verified {new Date(payment.verified_at).toLocaleString()}</span>}
+          {payment.verified_by_name && <span>Manually verified by {payment.verified_by_name}</span>}
+          {payment.cancelled_at && <span>Cancelled {new Date(payment.cancelled_at).toLocaleString()} by {payment.cancelled_by_name || 'staff'}</span>}
           {payment.received_by_name && <span>Received by {payment.received_by_name}</span>}
         </div>)}
       </div>}
@@ -1436,8 +1500,18 @@ function Billing({ invoices, records, loading, onCreateInvoice, onPayCash, onCre
           <div><dt>Transfer content</dt><dd>{qrTransfer.description}</dd></div>
           <div><dt>Status</dt><dd>Pending verification</dd></div>
         </dl>
-        <p className="qr-pending-note">A QR code or a patient's report does not confirm receipt. Automatic bank verification is not configured yet.</p>
-        <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setQrDialogOpen(false)}>Close</button></div>
+        <p className="qr-pending-note">Do not confirm from the QR code or a patient's report. Check the receiving bank account and match both the exact amount and transaction reference first. This action records a staff manual reconciliation; it does not connect to a bank or webhook.</p>
+        {qrTransfer.status === 'PENDING' && <form className="qr-reconciliation-form" onSubmit={confirmQrPayment}>
+          <label>Bank transaction reference<input type="text" required maxLength={100} value={bankReference} onChange={(event) => setBankReference(event.target.value)} /></label>
+          <label className="qr-verification-check"><input type="checkbox" checked={qrVerified} onChange={(event) => setQrVerified(event.target.checked)} /> I checked the receiving bank account and confirmed the transaction reference and amount match this invoice.</label>
+          {qrError && <div className="form-error" role="alert">{qrError}</div>}
+          <div className="form-actions"><button type="button" className="secondary-button" disabled={saving} onClick={() => setQrDialogOpen(false)}>Close</button><button type="submit" className="primary-button" disabled={saving || !bankReference.trim() || !qrVerified}>{saving ? 'Recording…' : 'Record verified transfer'}</button></div>
+        </form>}
+        {qrTransfer.status === 'PENDING' && <div className="qr-cancellation-form">
+          <label className="qr-verification-check"><input type="checkbox" checked={qrCancellationChecked} onChange={(event) => setQrCancellationChecked(event.target.checked)} /> I checked the receiving account and confirmed that this transfer has not arrived.</label>
+          <button type="button" className="secondary-button" disabled={saving || !qrCancellationChecked} onClick={cancelPendingQr}>{saving ? 'Cancelling…' : 'Cancel pending transfer'}</button>
+        </div>}
+        {qrTransfer.status !== 'PENDING' && <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setQrDialogOpen(false)}>Close</button></div>}
       </section>
     </div>}
     {cashConfirmOpen && selectedInvoice && <div className="confirmation-backdrop" role="presentation">

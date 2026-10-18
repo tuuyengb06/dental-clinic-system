@@ -192,9 +192,11 @@ class Payment(models.Model):
     METHOD_CHOICES = [(CASH, "Cash"), (CARD, "Card"), (BANK_TRANSFER, "Bank transfer")]
     PENDING = "PENDING"
     COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
     STATUS_CHOICES = [
         (PENDING, "Pending"),
         (COMPLETED, "Completed"),
+        (CANCELLED, "Cancelled"),
     ]
     invoice = models.ForeignKey(Invoice, on_delete=models.PROTECT, related_name="payments")
     amount = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
@@ -205,12 +207,41 @@ class Payment(models.Model):
     bank_account_name = models.CharField(max_length=100, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     paid_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
     received_by = models.ForeignKey(ClinicUser, on_delete=models.PROTECT, null=True, blank=True, related_name="payments_received")
+    cancelled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="cancelled_qr_payments",
+    )
 
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(
-                fields=["invoice"],
-                name="unique_payment_per_invoice",
-            )
-        ]
+
+class BankTransferVerification(models.Model):
+    payment = models.OneToOneField(
+        Payment,
+        on_delete=models.PROTECT,
+        related_name="verification",
+    )
+    reference = models.CharField(max_length=100, unique=True)
+    verified_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="verified_qr_payments",
+    )
+    verified_at = models.DateTimeField(auto_now_add=True)
+
+
+class ActiveInvoicePayment(models.Model):
+    invoice = models.OneToOneField(
+        Invoice,
+        on_delete=models.PROTECT,
+        related_name="active_payment_slot",
+    )
+    payment = models.OneToOneField(
+        Payment,
+        on_delete=models.PROTECT,
+        related_name="active_invoice_slot",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)

@@ -72,6 +72,13 @@ def _parse_requested_date(question):
             return date(year, month, day)
         except ValueError:
             return None
+    local_match_without_year = re.search(r"\b(\d{1,2})[/-](\d{1,2})\b", normalized_question)
+    if local_match_without_year:
+        day, month = (int(part) for part in local_match_without_year.groups())
+        try:
+            return date(today.year, month, day)
+        except ValueError:
+            return None
     return None
 
 
@@ -264,7 +271,10 @@ class ChatbotAPIView(APIView):
                 )
             )
             is_price = bool(
-                re.search(r"\b(gia|bao nhieu|phi|bang gia|cost|price)\b", normalized_question)
+                re.search(
+                    r"\b(gia|bao nhieu|tien|phi|bang gia|cost|price)\b",
+                    normalized_question,
+                )
             )
             if is_availability:
                 answer = _availability_answer(question, services)
