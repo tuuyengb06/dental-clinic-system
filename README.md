@@ -4,6 +4,8 @@ MVP runnable cho phòng khám nha khoa, gồm Django REST Framework backend và 
 
 Tài liệu kiến trúc hiện trạng, ERD và hai sequence AI (được đánh dấu rõ là luồng đề xuất chưa triển khai) nằm tại [docs/architecture-and-design.md](docs/architecture-and-design.md).
 
+Bộ slide trình bày dự án 12 trang, có ảnh chụp giao diện demo và kịch bản phân vai gợi ý 10 phút, nằm tại [docs/project-presentation.pptx](docs/project-presentation.pptx). Hai luồng tóm tắt EMR và nhắc tái khám bằng AI được ghi rõ là đề xuất, chưa triển khai. Trên Windows có Microsoft PowerPoint, có thể tạo lại slide bằng `powershell -ExecutionPolicy Bypass -File docs/generate-project-presentation.ps1`.
+
 ## 1. Cài đặt yêu cầu
 
 - Python 3.11 hoặc mới hơn
