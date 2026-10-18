@@ -95,6 +95,7 @@ class PaymentSerializer(serializers.ModelSerializer):
     bank_reference = serializers.SerializerMethodField()
     verified_at = serializers.SerializerMethodField()
     verified_by_name = serializers.SerializerMethodField()
+    cancelled_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Payment
@@ -109,6 +110,8 @@ class PaymentSerializer(serializers.ModelSerializer):
             "bank_reference",
             "verified_at",
             "verified_by_name",
+            "cancelled_at",
+            "cancelled_by_name",
         ]
         read_only_fields = fields
 
@@ -123,6 +126,12 @@ class PaymentSerializer(serializers.ModelSerializer):
         try:
             user = payment.verification.verified_by
         except BankTransferVerification.DoesNotExist:
+            return None
+        return user.get_full_name() or user.username
+
+    def get_cancelled_by_name(self, payment):
+        user = payment.cancelled_by
+        if not user:
             return None
         return user.get_full_name() or user.username
 
@@ -160,6 +169,24 @@ class ManualQrReconciliationSerializer(serializers.Serializer):
         if not value:
             raise serializers.ValidationError(
                 "Confirm that the bank statement was checked before recording the transfer."
+            )
+        return value
+
+
+class CancelQrPaymentSerializer(serializers.Serializer):
+    checked_no_payment = serializers.BooleanField()
+
+    def to_internal_value(self, data):
+        if isinstance(data, Mapping) and set(data) - set(self.fields):
+            raise serializers.ValidationError(
+                {"detail": "Only checked_no_payment is accepted."}
+            )
+        return super().to_internal_value(data)
+
+    def validate_checked_no_payment(self, value):
+        if not value:
+            raise serializers.ValidationError(
+                "Confirm that the receiving account was checked and no transfer was received."
             )
         return value
 

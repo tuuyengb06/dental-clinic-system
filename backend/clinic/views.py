@@ -18,6 +18,7 @@ from rest_framework.views import APIView
 
 from appointments.models import MedicalRecord
 from .models import (
+    ActiveInvoicePayment,
     BankTransferVerification,
     Doctor,
     Invoice,
@@ -40,6 +41,7 @@ from .serializers import (
     InvoiceSerializer,
     InvoiceSourceSerializer,
     CashPaymentRequestSerializer,
+    CancelQrPaymentSerializer,
     ManualQrReconciliationSerializer,
     PatientSerializer,
     PaymentSerializer,
@@ -140,6 +142,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         return Invoice.objects.select_related("patient").prefetch_related(
             "items__service",
             "payments__received_by__user",
+            "payments__cancelled_by",
             "payments__verification__verified_by",
         ).order_by("-issued_at", "-id")
 
@@ -152,6 +155,8 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             return CashPaymentRequestSerializer
         if self.action == "reconcile_qr":
             return ManualQrReconciliationSerializer
+        if self.action == "cancel_qr":
+            return CancelQrPaymentSerializer
         return InvoiceSerializer
 
     def create(self, request, *args, **kwargs):
@@ -192,9 +197,9 @@ class InvoiceViewSet(viewsets.ModelViewSet):
                     status=Payment.COMPLETED
                 ).exists():
                     raise ValidationError({"status": "This invoice has already been paid."})
-                if invoice.payments.exists():
+                if invoice.payments.filter(status=Payment.PENDING).exists():
                     raise ValidationError(
-                        {"status": "A payment is already pending or has already been recorded for this invoice."}
+                        {"status": "A payment is already pending for this invoice."}
                     )
                 if (
                     invoice.status != Invoice.ISSUED
@@ -213,6 +218,10 @@ class InvoiceViewSet(viewsets.ModelViewSet):
                     status=Payment.COMPLETED,
                     paid_at=timezone.now(),
                     received_by=getattr(request.user, "clinic_profile", None),
+                )
+                ActiveInvoicePayment.objects.create(
+                    invoice=invoice,
+                    payment=payment,
                 )
                 invoice.paid_amount = payment.amount
                 invoice.status = Invoice.PAID
@@ -281,9 +290,9 @@ class InvoiceViewSet(viewsets.ModelViewSet):
                 ).first()
                 reused = payment is not None
                 if not payment:
-                    if invoice.payments.exists():
+                    if invoice.payments.filter(status=Payment.PENDING).exists():
                         raise ValidationError(
-                            {"status": "A payment is already pending or has already been recorded for this invoice."}
+                            {"status": "Another payment is already pending for this invoice."}
                         )
                     bank_id = settings.VIETQR_BANK_ID
                     account_number = settings.VIETQR_ACCOUNT_NUMBER
@@ -306,6 +315,10 @@ class InvoiceViewSet(viewsets.ModelViewSet):
                         bank_id=bank_id,
                         bank_account_number=account_number,
                         bank_account_name=account_name,
+                    )
+                    ActiveInvoicePayment.objects.create(
+                        invoice=invoice,
+                        payment=payment,
                     )
         except IntegrityError as error:
             if Payment.objects.filter(
@@ -430,6 +443,51 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             logger.exception("QR reconciliation could not be saved for invoice %s", pk)
             return Response(
                 {"detail": "The transfer reconciliation could not be saved. No changes were applied."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        invoice = self.get_queryset().get(pk=invoice.pk)
+        response_serializer = InvoiceSerializer(
+            invoice,
+            context=self.get_serializer_context(),
+        )
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="cancel-qr")
+    def cancel_qr(self, request, pk=None):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            with transaction.atomic():
+                invoice = get_object_or_404(
+                    self.filter_queryset(self.get_queryset()).select_for_update(),
+                    pk=pk,
+                )
+                if invoice.status != Invoice.ISSUED or invoice.paid_amount != 0:
+                    raise ValidationError(
+                        {"status": "Only unpaid issued invoices can cancel a pending transfer."}
+                    )
+                payment = get_object_or_404(
+                    Payment.objects.select_for_update(),
+                    invoice=invoice,
+                    method=Payment.BANK_TRANSFER,
+                    status=Payment.PENDING,
+                )
+                payment.status = Payment.CANCELLED
+                payment.cancelled_at = timezone.now()
+                payment.cancelled_by = request.user
+                payment.save(
+                    update_fields=["status", "cancelled_at", "cancelled_by"]
+                )
+                ActiveInvoicePayment.objects.filter(
+                    invoice=invoice,
+                    payment=payment,
+                ).delete()
+        except DatabaseError:
+            logger.exception("Pending QR payment could not be cancelled for invoice %s", pk)
+            return Response(
+                {"detail": "The pending transfer could not be cancelled. No changes were applied."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 

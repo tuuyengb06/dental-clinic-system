@@ -13,6 +13,7 @@ from rest_framework.test import APITestCase
 
 from appointments.models import Appointment as ScheduledAppointment, MedicalRecord
 from .models import (
+    ActiveInvoicePayment,
     BankTransferVerification,
     ClinicUser,
     Doctor,
@@ -446,8 +447,15 @@ class AuthenticationAndManagementApiTests(APITestCase):
             format="json",
         )
 
+    def cancel_qr(self, invoice_id, checked_no_payment=True):
+        return self.client.post(
+            f"/api/v1/invoices/{invoice_id}/cancel-qr/",
+            {"checked_no_payment": checked_no_payment},
+            format="json",
+        )
+
     def create_pending_qr_payment(self, invoice):
-        return Payment.objects.create(
+        payment = Payment.objects.create(
             invoice=invoice,
             amount=invoice.total_amount,
             method=Payment.BANK_TRANSFER,
@@ -456,6 +464,8 @@ class AuthenticationAndManagementApiTests(APITestCase):
             bank_account_number="0123456789",
             bank_account_name="LOTUS DENTAL",
         )
+        ActiveInvoicePayment.objects.create(invoice=invoice, payment=payment)
+        return payment
 
     def test_receptionist_can_pay_full_invoice_in_cash(self):
         receptionist_role = Role.objects.create(code="RECEPTIONIST", name="Receptionist")
@@ -844,6 +854,100 @@ class AuthenticationAndManagementApiTests(APITestCase):
         self.assertEqual(payment.status, Payment.PENDING)
         self.assertEqual(invoice.status, Invoice.ISSUED)
         self.assertEqual(invoice.paid_amount, Decimal("0.00"))
+
+    def test_receptionist_can_cancel_pending_qr_after_checking_no_payment(self):
+        receptionist_role = Role.objects.create(code="RECEPTIONIST", name="Receptionist")
+        receptionist = User.objects.create_user(
+            username="qr-canceller",
+            password="ReceptionPass123!",
+        )
+        ClinicUser.objects.create(user=receptionist, role=receptionist_role)
+        invoice = self.create_issued_invoice()
+        payment = self.create_pending_qr_payment(invoice)
+        self.client.force_authenticate(receptionist)
+
+        response = self.cancel_qr(invoice.id)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], Invoice.ISSUED)
+        payment_data = response.data["payments"][0]
+        self.assertEqual(payment_data["status"], Payment.CANCELLED)
+        self.assertEqual(payment_data["cancelled_by_name"], "qr-canceller")
+        self.assertTrue(payment_data["cancelled_at"])
+        payment.refresh_from_db()
+        invoice.refresh_from_db()
+        self.assertEqual(payment.status, Payment.CANCELLED)
+        self.assertEqual(payment.cancelled_by, receptionist)
+        self.assertFalse(ActiveInvoicePayment.objects.filter(invoice=invoice).exists())
+        self.assertEqual(invoice.status, Invoice.ISSUED)
+        self.assertEqual(invoice.paid_amount, Decimal("0.00"))
+
+    def test_qr_cancellation_requires_staff_to_confirm_account_was_checked(self):
+        invoice = self.create_issued_invoice()
+        payment = self.create_pending_qr_payment(invoice)
+        self.client.force_authenticate(self.admin)
+
+        response = self.cancel_qr(invoice.id, checked_no_payment=False)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.PENDING)
+
+    def test_cancelled_qr_allows_cash_and_preserves_both_payment_records(self):
+        invoice = self.create_issued_invoice()
+        pending_payment = self.create_pending_qr_payment(invoice)
+        self.client.force_authenticate(self.admin)
+
+        cancelled = self.cancel_qr(invoice.id)
+        cash_payment = self.pay_cash(invoice.id)
+
+        self.assertEqual(cancelled.status_code, status.HTTP_200_OK)
+        self.assertEqual(cash_payment.status_code, status.HTTP_200_OK)
+        self.assertEqual(cash_payment.data["status"], Invoice.PAID)
+        payment_rows = Payment.objects.filter(invoice=invoice).order_by("id")
+        self.assertEqual(payment_rows.count(), 2)
+        pending_payment.refresh_from_db()
+        self.assertEqual(pending_payment.status, Payment.CANCELLED)
+        self.assertEqual(payment_rows.last().method, Payment.CASH)
+        self.assertEqual(payment_rows.last().status, Payment.COMPLETED)
+        self.assertEqual(
+            ActiveInvoicePayment.objects.get(invoice=invoice).payment_id,
+            payment_rows.last().id,
+        )
+
+    @override_settings(
+        VIETQR_BANK_ID="MB",
+        VIETQR_ACCOUNT_NUMBER="0123456789",
+        VIETQR_ACCOUNT_NAME="LOTUS DENTAL",
+    )
+    def test_cancelled_qr_allows_a_new_qr_attempt_without_losing_history(self):
+        invoice = self.create_issued_invoice()
+        old_payment = self.create_pending_qr_payment(invoice)
+        self.authenticate("clinic-admin", "AdminPass123!")
+
+        cancelled = self.cancel_qr(invoice.id)
+        retried = self.pay_qr(invoice.id)
+
+        self.assertEqual(cancelled.status_code, status.HTTP_200_OK)
+        self.assertEqual(retried.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Payment.objects.filter(invoice=invoice).count(), 2)
+        old_payment.refresh_from_db()
+        self.assertEqual(old_payment.status, Payment.CANCELLED)
+        self.assertEqual(retried.data["transfer"]["status"], Payment.PENDING)
+
+    def test_cancelled_qr_cannot_be_reconciled_as_paid(self):
+        invoice = self.create_issued_invoice()
+        payment = self.create_pending_qr_payment(invoice)
+        self.client.force_authenticate(self.admin)
+        self.cancel_qr(invoice.id)
+
+        response = self.reconcile_qr(invoice.id)
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        payment.refresh_from_db()
+        invoice.refresh_from_db()
+        self.assertEqual(payment.status, Payment.CANCELLED)
+        self.assertEqual(invoice.status, Invoice.ISSUED)
 
     @override_settings(
         VIETQR_BANK_ID="MB",
