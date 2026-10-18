@@ -2,6 +2,8 @@
 
 MVP runnable cho phòng khám nha khoa, gồm Django REST Framework backend và React/Vite frontend.
 
+Tài liệu kiến trúc hiện trạng, ERD và hai sequence AI (được đánh dấu rõ là luồng đề xuất chưa triển khai) nằm tại [docs/architecture-and-design.md](docs/architecture-and-design.md).
+
 ## 1. Cài đặt yêu cầu
 
 - Python 3.11 hoặc mới hơn
@@ -37,7 +39,7 @@ python manage.py runserver 8000
 
 Nếu chưa cấu hình đủ ba biến, API QR trả về `503` và không tạo giao dịch chờ. Ảnh QR được tải từ dịch vụ VietQR; URL chứa số tiền, mã hóa đơn và thông tin tài khoản nhận.
 
-`python manage.py migrate` là cách khởi tạo database được khuyến nghị. Schema SQLite tương ứng với 13 bảng nghiệp vụ cũng có trong `backend/schema.sql`. Nếu cần khởi tạo bảng trực tiếp từ SQL trên database mới, chạy các lệnh sau trong thư mục `backend`:
+`python manage.py migrate` là cách khởi tạo/cập nhật database được khuyến nghị và là nguồn schema chuẩn. `backend/schema.sql` chỉ là schema SQLite nền cũ gồm 13 bảng clinic ban đầu, không phải bản dump đầy đủ của toàn bộ model/migration hiện tại. Nếu cần dùng quy trình bootstrap SQL cũ trên database SQLite mới, chạy các lệnh sau trong thư mục `backend`; các migration Django tiếp theo vẫn cần chạy để thêm/cập nhật schema:
 
 ```powershell
 python manage.py migrate contenttypes
@@ -68,7 +70,7 @@ Sidebar hiển thị mục theo role `ADMIN`, `DENTIST` hoặc `RECEPTIONIST`. C
 
 ## 4. Dữ liệu demo
 
-Các migration Django tạo 13 bảng nghiệp vụ trong ứng dụng `clinic`: `Role`, `ClinicUser`, `Doctor`, `Patient`, `Appointment`, `Tooth`, `ToothCondition`, `Service`, `TreatmentPlan`, `TreatmentItem`, `Invoice`, `InvoiceItem` và `Payment`. Các bảng quản trị mặc định của Django (`auth`, `admin`, `sessions`) được tạo riêng bởi migration của Django.
+Các migration Django hiện tạo model nghiệp vụ trong `clinic` và `appointments`, gồm danh mục bệnh nhân/bác sĩ/dịch vụ, ca làm, lịch hẹn, EMR, kế hoạch điều trị, hóa đơn, giao dịch và dữ liệu đối soát QR. `clinic.Appointment`/`TreatmentPlan`/`TreatmentItem` là các model legacy; lịch và EMR của API hiện hành dùng `appointments.Appointment`/`MedicalRecord`. `backend/schema.sql` chỉ phản ánh 13 bảng clinic nền ban đầu; các thay đổi tiếp theo được quản lý bằng migration Django. Các bảng quản trị mặc định của Django (`auth`, `admin`, `sessions`) được tạo riêng bởi migration của Django.
 
 Chạy `python manage.py migrate` để tạo schema từ migration. Sau đó chạy `python manage.py seed_dental_data` để tạo:
 
