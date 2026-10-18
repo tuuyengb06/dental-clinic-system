@@ -117,6 +117,7 @@ class MedicalRecordSerializer(serializers.ModelSerializer):
             "id", "appointment", "patient_name", "appointment_date", "diagnosis",
             "treatment_plan", "prescription", "notes", "teeth", "tooth_codes",
             "services", "created_at",
+            "follow_up_date",
         ]
         read_only_fields = ["id", "created_at"]
 
@@ -129,6 +130,16 @@ class MedicalRecordSerializer(serializers.ModelSerializer):
             if appointment.status == Appointment.Status.CANCELLED:
                 raise serializers.ValidationError(
                     {"appointment": "Cancelled appointments cannot receive a medical record."}
+                )
+            follow_up_date = attrs.get(
+                "follow_up_date",
+                self.instance.follow_up_date if self.instance else None,
+            )
+            if follow_up_date and follow_up_date < timezone.localdate(
+                appointment.appointment_date
+            ):
+                raise serializers.ValidationError(
+                    {"follow_up_date": "Follow-up date cannot be before the appointment."}
                 )
             if any(tooth.dentition_type != appointment.patient.dentition_type for tooth in teeth):
                 raise serializers.ValidationError(

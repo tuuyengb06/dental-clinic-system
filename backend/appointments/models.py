@@ -30,7 +30,37 @@ class MedicalRecord(models.Model):
     notes = models.TextField(blank=True, null=True)
     teeth = models.ManyToManyField(Tooth, blank=True, related_name="medical_records")
     services = models.ManyToManyField(Service, blank=True, related_name="medical_records")
+    follow_up_date = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Hồ sơ bệnh án cho lịch hẹn #{self.appointment.id}"
+
+
+class FollowUpReminder(models.Model):
+    class Status(models.TextChoices):
+        SENDING = "SENDING", "Sending"
+        SENT = "SENT", "Sent"
+        FAILED = "FAILED", "Failed"
+        UNKNOWN = "UNKNOWN", "Unknown provider result"
+
+    medical_record = models.ForeignKey(
+        MedicalRecord,
+        on_delete=models.CASCADE,
+        related_name="follow_up_reminders",
+    )
+    scheduled_for = models.DateField()
+    status = models.CharField(max_length=10, choices=Status.choices)
+    provider_reference = models.CharField(max_length=64, blank=True)
+    error_message = models.CharField(max_length=240, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["medical_record", "scheduled_for"],
+                name="unique_follow_up_reminder_per_date",
+            )
+        ]
