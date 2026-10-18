@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Activity, CalendarDays, ChevronDown, CircleDollarSign, ClipboardPlus, FileImage, LayoutDashboard, Menu, Pencil, Plus, Search, ShieldCheck, Stethoscope, Trash2, UserRound, Users, X } from 'lucide-react';
+import { Activity, CalendarDays, ChevronDown, CircleDollarSign, ClipboardPlus, FileImage, LayoutDashboard, Menu, MessageCircle, Pencil, Plus, Search, Send, ShieldCheck, Stethoscope, Trash2, UserRound, Users, X } from 'lucide-react';
 import './styles.css';
 import './app.css';
 
 const API = import.meta.env.DEV ? '/api/v1' : (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1');
+const AI_CHAT_API = API.replace(/\/v1\/?$/, '/ai/chat');
 const teethAdult = Array.from({ length: 32 }, (_, i) => ({ id: i + 1, code: `A${String(i + 1).padStart(2, '0')}`, state: i === 6 || i === 18 ? 'Needs care' : 'Healthy' }));
 const teethChild = Array.from({ length: 20 }, (_, i) => ({ id: i + 1, code: `C${String(i + 1).padStart(2, '0')}`, state: i === 3 ? 'Monitor' : 'Healthy' }));
 const navigationByRole = {
@@ -269,8 +270,8 @@ function App() {
     setAuthError('');
   }
 
-  if (!authReady) return <div className="auth-loading">Checking your session…</div>;
-  if (!profile) return <LoginPage onLogin={login} initialError={authError} />;
+  if (!authReady) return <><div className="auth-loading">Checking your session…</div><ChatWidget /></>;
+  if (!profile) return <><LoginPage onLogin={login} initialError={authError} /><ChatWidget /></>;
 
   const visiblePatients = patients.filter((patient) => `${patient.full_name} ${patient.patient_code} ${patient.phone}`.toLowerCase().includes(query.toLowerCase()));
   const role = String(profile.role || '').toUpperCase() === 'DOCTOR' ? 'DENTIST' : String(profile.role || '').toUpperCase();
@@ -295,6 +296,78 @@ function App() {
       {section === 'Services' && role === 'ADMIN' && <ServiceManagement tokens={tokens} onTokensChanged={updateTokens} />}
       {section === 'Doctors' && role === 'ADMIN' && <DoctorDirectory tokens={tokens} onTokensChanged={updateTokens} />}
     </main>
+    <ChatWidget />
+  </div>;
+}
+
+function ChatWidget() {
+  const [open, setOpen] = useState(false);
+  const [question, setQuestion] = useState('');
+  const [messages, setMessages] = useState([
+    {
+      role: 'assistant',
+      text: 'Xin chào! Bạn có thể hỏi giá dịch vụ hoặc giờ khám còn trống. Khi hỏi lịch, vui lòng ghi ngày và tên dịch vụ.'
+    }
+  ]);
+  const [loading, setLoading] = useState(false);
+  const messagesEndRef = useRef(null);
+
+  useEffect(() => {
+    if (open) messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, loading, open]);
+
+  async function sendQuestion(event) {
+    event.preventDefault();
+    const trimmedQuestion = question.trim();
+    if (!trimmedQuestion || loading) return;
+
+    setQuestion('');
+    setMessages((current) => [...current, { role: 'user', text: trimmedQuestion }].slice(-21));
+    setLoading(true);
+    try {
+      const response = await fetch(AI_CHAT_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: trimmedQuestion })
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = payload?.answer || payload?.detail || 'Hiện chatbot chưa trả lời được. Bạn vui lòng thử lại hoặc liên hệ lễ tân.';
+        throw new Error(message);
+      }
+      setMessages((current) => [...current, { role: 'assistant', text: payload.answer }].slice(-21));
+    } catch (error) {
+      setMessages((current) => [
+        ...current,
+        { role: 'assistant', text: `${error.message || 'Không kết nối được chatbot.'} Nếu cần hỗ trợ gấp, vui lòng liên hệ lễ tân.` }
+      ].slice(-21));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return <div className="chatbot-widget">
+    {open && <section className="chatbot-panel" role="dialog" aria-modal="false" aria-labelledby="chatbot-title">
+      <header className="chatbot-header">
+        <div><strong id="chatbot-title">Tư vấn dịch vụ & lịch khám</strong><span>Dựa trên dữ liệu phòng khám</span></div>
+        <button type="button" className="chatbot-close" aria-label="Đóng chatbot" onClick={() => setOpen(false)}><X size={18} /></button>
+      </header>
+      <div className="chatbot-scope-note">Chỉ tra cứu giá và lịch hiện có; không tư vấn y tế hoặc đặt lịch trong hội thoại.</div>
+      <div className="chatbot-messages" aria-live="polite" aria-relevant="additions text">
+        {messages.map((message, index) => <div key={`${index}-${message.role}`} className={`chatbot-message ${message.role}`}><p>{message.text}</p></div>)}
+        {loading && <div className="chatbot-message assistant"><p role="status">Đang tra cứu…</p></div>}
+        <div ref={messagesEndRef} />
+      </div>
+      <form className="chatbot-form" onSubmit={sendQuestion}>
+        <label className="sr-only" htmlFor="chatbot-question">Câu hỏi</label>
+        <input id="chatbot-question" maxLength={500} value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Hỏi giá hoặc lịch khám…" disabled={loading} />
+        <button type="submit" aria-label="Gửi câu hỏi" disabled={loading || !question.trim()}><Send size={17} /></button>
+      </form>
+    </section>}
+    <button type="button" className="chatbot-launcher" aria-label={open ? 'Đóng tư vấn' : 'Mở chatbot tư vấn'} aria-expanded={open} onClick={() => setOpen((current) => !current)}>
+      {open ? <X size={21} /> : <MessageCircle size={21} />}
+      <span>{open ? 'Đóng' : 'Tư vấn'}</span>
+    </button>
   </div>;
 }
 
