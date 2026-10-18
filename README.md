@@ -8,6 +8,8 @@ Bộ slide trình bày dự án 13 trang, có kiến trúc, ERD rút gọn, ản
 
 Kịch bản demo theo vai trò, dữ liệu synthetic, kết quả mong đợi và phương án dự phòng nằm tại [docs/slice-3-demo-runbook.md](docs/slice-3-demo-runbook.md).
 
+Checklist chốt hồ sơ, tổng duyệt 10 phút, phân vai placeholder và phương án xử lý sự cố nằm tại [docs/slice-5-final-rehearsal-checklist.md](docs/slice-5-final-rehearsal-checklist.md). Đây là bộ chuẩn bị; chưa xác nhận buổi tổng duyệt nhóm hoặc video dự phòng Lát 4.
+
 ## 1. Cài đặt yêu cầu
 
 - Python 3.11 hoặc mới hơn

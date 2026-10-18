@@ -34,6 +34,19 @@ function sectionFromPath(pathname) {
   return sections.find((name) => sectionPath(name) === normalizedPath) || 'Overview';
 }
 
+function clinicDateKey(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(({ type, value: part }) => [type, part]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
 const TOKEN_STORAGE_KEY = 'dms.auth.tokens';
 
 async function apiRequest(path, { tokens, onTokens, method = 'GET', body } = {}) {
@@ -360,10 +373,10 @@ function App() {
     <aside className={`sidebar ${mobileOpen ? 'open' : ''}`}>
       <div className="brand"><div className="brand-mark">D</div><div><strong>DMS</strong><span>Dental management</span></div><button className="icon-button close-menu" onClick={() => setMobileOpen(false)}><X size={18} /></button></div>
       <div className="workspace"><span className="eyebrow">Workspace</span><button className="workspace-button">Lotus Dental Clinic <ChevronDown size={15} /></button></div>
-      <nav aria-label="Main navigation">{nav.map(([name, Icon]) => <button key={name} className={section === name ? 'nav-item active' : 'nav-item'} aria-current={section === name ? 'page' : undefined} onClick={() => { setSection(name); setMobileOpen(false); }}><Icon size={18} /><span>{name}</span>{name === 'Appointments' && <b>3</b>}</button>)}</nav>
+      <nav aria-label="Main navigation">{nav.map(([name, Icon]) => <button key={name} className={section === name ? 'nav-item active' : 'nav-item'} aria-current={section === name ? 'page' : undefined} onClick={() => { setSection(name); setMobileOpen(false); }}><Icon size={18} /><span>{name}</span>{name === 'Appointments' && <b>{appointments.length}</b>}</button>)}</nav>
     </aside>
     <main className="main-content">
-      <header className="topbar"><button className="icon-button menu-button" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><div><span className="eyebrow">Tuesday, 08 September 2026</span><h1>{section === 'Overview' ? `Good morning, ${profile.display_name}` : section}</h1></div><div className="topbar-actions"><span className={`api-status ${apiLive ? 'live' : ''}`}><span />{apiLive ? 'Live API' : 'Connecting'}</span><button className="icon-button"><Activity size={19} /></button><div className="user-card"><div className="avatar">{profile.display_name.split(' ').map((part) => part[0]).slice(-2).join('')}</div><div><strong>{profile.display_name}</strong><span>{role}</span></div><button className="secondary-button" onClick={logout}>Log out</button></div></div></header>
+      <header className="topbar"><button className="icon-button menu-button" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><div><span className="eyebrow">{new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date())}</span><h1>{section === 'Overview' ? `Good morning, ${profile.display_name}` : section}</h1></div><div className="topbar-actions"><span className={`api-status ${apiLive ? 'live' : ''}`}><span />{apiLive ? 'Live API' : 'Connecting'}</span><button className="icon-button"><Activity size={19} /></button><div className="user-card"><div className="avatar">{profile.display_name.split(' ').map((part) => part[0]).slice(-2).join('')}</div><div><strong>{profile.display_name}</strong><span>{role}</span></div><button className="secondary-button" onClick={logout}>Log out</button></div></div></header>
       {apiError && section !== 'Appointments' && <div className="api-error" role="alert">{apiError}</div>}
       {section === 'Overview' && (role === 'ADMIN'
         ? <RevenueDashboard tokens={tokens} onTokensChanged={updateTokens} />
@@ -627,11 +640,59 @@ function DoctorDirectory({ tokens, onTokensChanged }) {
   </section>;
 }
 
-function Overview({ appointments, patients, setSection }) { return <>
-  <section className="hero-band"><div><span className="eyebrow warm">TODAY AT A GLANCE</span><h2>Care that keeps moving.</h2><p>Your clinic is ready for a focused day. Three appointments are on deck.</p></div><button className="primary-button" onClick={() => setSection('Appointments')}><CalendarDays size={17} /> View schedule</button></section>
-  <section className="metric-grid"><Metric label="Today's appointments" value="12" detail="3 waiting now" accent="blue" icon={CalendarDays} /><Metric label="Active patients" value="248" detail="+18 this month" accent="sage" icon={Users} /><Metric label="Outstanding balance" value="₫42.8m" detail="7 payment plans" accent="gold" icon={CircleDollarSign} /><Metric label="Care plans" value="36" detail="8 need review" accent="coral" icon={ClipboardPlus} /></section>
-  <div className="content-grid"><section className="panel schedule-panel"><div className="panel-heading"><div><span className="eyebrow">APPOINTMENTS</span><h3>Today’s schedule</h3></div><button className="text-button" onClick={() => setSection('Appointments')}>View calendar <span>→</span></button></div><div className="appointment-list">{appointments.map((item) => <AppointmentRow key={item.id} item={item} />)}</div></section><section className="panel focus-panel"><div className="panel-heading"><div><span className="eyebrow">CLINIC FOCUS</span><h3>At a glance</h3></div><ShieldCheck size={19} color="#1d6857" /></div><div className="focus-stat"><span className="focus-icon green"><UserRound size={18} /></span><div><strong>{patients.length} patient records</strong><span>Digitized and searchable</span></div></div><div className="focus-stat"><span className="focus-icon peach"><Stethoscope size={18} /></span><div><strong>2 care alerts</strong><span>Need dentist review</span></div></div><div className="alert-box"><strong>Medication check</strong><p>One prescription needs allergy confirmation before signing.</p><button onClick={() => setSection('Patients')}>Review record →</button></div></section></div>
-</>; }
+function Overview({ appointments, patients, setSection }) {
+  const today = clinicDateKey(new Date());
+  const todayAppointments = appointments.filter((item) => clinicDateKey(item.appointment_date || item.start_at) === today);
+  const confirmedAppointments = appointments.filter((item) => String(item.status).toUpperCase() === 'CONFIRMED');
+
+  return <>
+    <section className="hero-band">
+      <div>
+        <span className="eyebrow warm">TODAY AT A GLANCE</span>
+        <h2>Care that keeps moving.</h2>
+        <p>{todayAppointments.length} appointment{todayAppointments.length === 1 ? '' : 's'} scheduled today.</p>
+      </div>
+      <button className="primary-button" onClick={() => setSection('Appointments')}><CalendarDays size={17} /> View schedule</button>
+    </section>
+    <section className="metric-grid">
+      <Metric label="Today's appointments" value={todayAppointments.length.toLocaleString('vi-VN')} detail="From the current schedule" accent="blue" icon={CalendarDays} />
+      <Metric label="Patient records" value={patients.length.toLocaleString('vi-VN')} detail="Available to this account" accent="sage" icon={Users} />
+      <Metric label="Confirmed appointments" value={confirmedAppointments.length.toLocaleString('vi-VN')} detail="Current confirmed status" accent="gold" icon={ClipboardPlus} />
+    </section>
+    <div className="content-grid">
+      <section className="panel schedule-panel">
+        <div className="panel-heading">
+          <div><span className="eyebrow">APPOINTMENTS</span><h3>Appointment schedule</h3></div>
+          <button className="text-button" onClick={() => setSection('Appointments')}>View calendar <span>→</span></button>
+        </div>
+        <div className="appointment-list">
+          {appointments.length
+            ? appointments.map((item) => <AppointmentRow key={item.id} item={item} />)
+            : <p className="management-state">No appointments are available.</p>}
+        </div>
+      </section>
+      <section className="panel focus-panel">
+        <div className="panel-heading">
+          <div><span className="eyebrow">CLINIC FOCUS</span><h3>At a glance</h3></div>
+          <ShieldCheck size={19} color="#1d6857" />
+        </div>
+        <div className="focus-stat">
+          <span className="focus-icon green"><UserRound size={18} /></span>
+          <div><strong>{patients.length} patient records</strong><span>Loaded from clinic data</span></div>
+        </div>
+        <div className="focus-stat">
+          <span className="focus-icon peach"><Stethoscope size={18} /></span>
+          <div><strong>{appointments.length} appointments</strong><span>Loaded from the current schedule</span></div>
+        </div>
+        <div className="alert-box">
+          <strong>Clinical review</strong>
+          <p>Review the patient record before making care decisions.</p>
+          <button onClick={() => setSection('Patients')}>View patients →</button>
+        </div>
+      </section>
+    </div>
+  </>;
+}
 function Metric({ label, value, detail, accent, icon: Icon }) { return <div className={`metric-card ${accent}`}><div className="metric-icon"><Icon size={18} /></div><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>; }
 
 function localDateInputValue(date) {
@@ -1221,7 +1282,7 @@ function Reception({ tokens, onTokensChanged, appointments, setSection }) {
             setError('');
           }}
           disabled={loading}
-          placeholder="e.g. DMS-0001, Nguyen Minh Anh, or phone"
+          placeholder="e.g. DMS-0001, Synthetic Demo Patient One, or phone"
           autoComplete="off"
         />
         <button className="primary-button" type="submit" disabled={loading}>{loading ? 'Searching…' : 'Search'}</button>
@@ -1461,7 +1522,56 @@ function FollowUpReminderPreview({ patients, onPreview }) {
   </section>;
 }
 
-function ToothChart({ dentition, setDentition, selectedTooth, setSelectedTooth }) { const teeth = dentition === 'ADULT' ? teethAdult : teethChild; return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">CLINICAL RECORD</span><h2>Interactive tooth chart</h2></div><div className="segmented"><button className={dentition === 'ADULT' ? 'selected' : ''} onClick={() => setDentition('ADULT')}>Adult · 32</button><button className={dentition === 'CHILD' ? 'selected' : ''} onClick={() => setDentition('CHILD')}>Child · 20</button></div></div><div className="chart-layout"><div className="panel tooth-panel"><div className="chart-header"><div><strong>Nguyen Minh Anh</strong><span>DMS-0001 · {dentition === 'ADULT' ? 'Permanent dentition' : 'Primary dentition'}</span></div><span className="status confirmed">In treatment</span></div><div className="mouth-label">UPPER ARCH</div><div className={`teeth-grid ${dentition.toLowerCase()}`}>{teeth.slice(0, Math.ceil(teeth.length / 2)).map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-line" /><div className={`teeth-grid lower ${dentition.toLowerCase()}`}>{teeth.slice(Math.ceil(teeth.length / 2)).reverse().map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-label lower-label">LOWER ARCH</div><div className="chart-legend"><span><i className="dot healthy" />Healthy</span><span><i className="dot care" />Needs care</span><span><i className="dot monitor" />Monitor</span></div></div><aside className="panel tooth-detail"><span className="eyebrow">SELECTED TOOTH</span>{selectedTooth ? <><div className="tooth-number">{teeth.find((tooth) => tooth.id === selectedTooth)?.code}</div><h3>Clinical condition</h3><p>Update this tooth’s condition and add a treatment note for the patient record.</p><select defaultValue="Healthy"><option>Healthy</option><option>Needs care</option><option>Monitor</option><option>Restored</option></select><textarea placeholder="Add a clinical note..." /><button className="primary-button full">Save condition</button></> : <div className="empty-detail"><Stethoscope size={28} /><p>Select a tooth to inspect its clinical record.</p></div>}</aside></div></section>; }
+function ToothChart({ dentition, setDentition, selectedTooth, setSelectedTooth }) {
+  const teeth = dentition === 'ADULT' ? teethAdult : teethChild;
+
+  return <section className="page-section">
+    <div className="section-toolbar">
+      <div><span className="eyebrow">CLINICAL RECORD</span><h2>Interactive tooth chart</h2></div>
+      <div className="segmented">
+        <button className={dentition === 'ADULT' ? 'selected' : ''} onClick={() => setDentition('ADULT')}>Adult · 32</button>
+        <button className={dentition === 'CHILD' ? 'selected' : ''} onClick={() => setDentition('CHILD')}>Child · 20</button>
+      </div>
+    </div>
+    <div className="chart-layout">
+      <div className="panel tooth-panel">
+        <div className="chart-header">
+          <div><strong>Synthetic Demo Patient One</strong><span>DMS-0001 · {dentition === 'ADULT' ? 'Permanent dentition' : 'Primary dentition'}</span></div>
+          <span className="status confirmed">In treatment</span>
+        </div>
+        <div className="mouth-label">UPPER ARCH</div>
+        <div className={`teeth-grid ${dentition.toLowerCase()}`}>
+          {teeth.slice(0, Math.ceil(teeth.length / 2)).map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}
+        </div>
+        <div className="mouth-line" />
+        <div className={`teeth-grid lower ${dentition.toLowerCase()}`}>
+          {teeth.slice(Math.ceil(teeth.length / 2)).reverse().map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}
+        </div>
+        <div className="mouth-label lower-label">LOWER ARCH</div>
+        <div className="chart-legend">
+          <span><i className="dot healthy" />Healthy</span>
+          <span><i className="dot care" />Needs care</span>
+          <span><i className="dot monitor" />Monitor</span>
+        </div>
+      </div>
+      <aside className="panel tooth-detail">
+        <span className="eyebrow">SELECTED TOOTH</span>
+        {selectedTooth
+          ? <>
+            <div className="tooth-number">{teeth.find((tooth) => tooth.id === selectedTooth)?.code}</div>
+            <h3>Clinical condition</h3>
+            <p>Update this tooth’s condition and add a treatment note for the patient record.</p>
+            <select defaultValue="Healthy">
+              <option>Healthy</option><option>Needs care</option><option>Monitor</option><option>Restored</option>
+            </select>
+            <textarea placeholder="Add a clinical note..." />
+            <button className="primary-button full">Save condition</button>
+          </>
+          : <div className="empty-detail"><Stethoscope size={28} /><p>Select a tooth to inspect its clinical record.</p></div>}
+      </aside>
+    </div>
+  </section>;
+}
 function Tooth({ tooth, selected, onClick }) { return <button onClick={onClick} className={`tooth ${tooth.state.toLowerCase().replace(' ', '-')} ${selected ? 'selected' : ''}`}><span>{tooth.code.slice(1)}</span><div className="tooth-shape" /></button>; }
 function Billing({ invoices, records, loading, onCreateInvoice, onPayCash, onCreateQr, onReconcileQr, onCancelQr }) {
   const [recordId, setRecordId] = useState('');
