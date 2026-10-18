@@ -39,6 +39,11 @@ else:
 VIETQR_BANK_ID = os.environ.get("DMS_VIETQR_BANK_ID", "").strip().upper()
 VIETQR_ACCOUNT_NUMBER = os.environ.get("DMS_VIETQR_ACCOUNT_NUMBER", "").strip()
 VIETQR_ACCOUNT_NAME = os.environ.get("DMS_VIETQR_ACCOUNT_NAME", "").strip()
+GEMINI_API_KEY = os.environ.get("DMS_GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.environ.get("DMS_GEMINI_MODEL", "gemini-2.5-flash").strip()
+TWILIO_ACCOUNT_SID = os.environ.get("DMS_TWILIO_ACCOUNT_SID", "").strip()
+TWILIO_AUTH_TOKEN = os.environ.get("DMS_TWILIO_AUTH_TOKEN", "").strip()
+TWILIO_FROM_NUMBER = os.environ.get("DMS_TWILIO_FROM_NUMBER", "").strip()
 
 # 2. Cấu hình các App được cài đặt trong Project
 INSTALLED_APPS = [
@@ -67,6 +72,7 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_THROTTLE_RATES': {
         'ai_chat': '30/hour',
+        'ai_summary': '10/hour',
     },
 }
 

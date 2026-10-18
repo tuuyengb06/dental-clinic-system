@@ -1,12 +1,22 @@
+import logging
+
 from django.db import transaction
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
+from rest_framework.throttling import ScopedRateThrottle
 
 from .models import Appointment, MedicalRecord
 from .serializers import AppointmentSerializer, MedicalRecordSerializer
+from .ai_services import (
+    AIServiceConfigurationError,
+    AIServiceError,
+    generate_medical_record_summary,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class IsAppointmentStaff(BasePermission):
@@ -94,3 +104,38 @@ class MedicalRecordViewSet(viewsets.ModelViewSet):
         if clinic_profile and clinic_profile.role.code == "DENTIST":
             return queryset.filter(appointment__doctor__clinic_user=clinic_profile)
         return queryset
+
+    def get_throttles(self):
+        if self.action == "ai_summary":
+            self.throttle_scope = "ai_summary"
+            return [ScopedRateThrottle()]
+        return super().get_throttles()
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="ai-summary",
+        throttle_classes=[ScopedRateThrottle],
+    )
+    def ai_summary(self, request, pk=None):
+        if request.data:
+            raise ValidationError({"detail": "No request fields are needed for an AI summary."})
+        record = self.get_object()
+        if not record.appointment.patient.ai_processing_consent:
+            raise ValidationError(
+                {"consent": "Patient consent for AI processing must be recorded first."}
+            )
+        try:
+            summary = generate_medical_record_summary(record)
+        except AIServiceConfigurationError as error:
+            return Response(
+                {"detail": str(error)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except AIServiceError as error:
+            logger.warning("Gemini medical-record summary request failed: %s", error)
+            return Response(
+                {"detail": "AI summary could not be generated. Please try again later."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        return Response({"summary": summary, "provider": "Gemini"})

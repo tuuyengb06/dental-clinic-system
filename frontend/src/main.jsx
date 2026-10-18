@@ -11,7 +11,7 @@ const teethChild = Array.from({ length: 20 }, (_, i) => ({ id: i + 1, code: `C${
 const navigationByRole = {
   ADMIN: [
     ['Overview', LayoutDashboard], ['Patients', Users], ['Appointments', CalendarDays], ['Tooth chart', Stethoscope],
-    ['Billing', CircleDollarSign], ['Radiographs', FileImage], ['Services', ClipboardPlus], ['Doctors', UserRound], ['Reception', UserRound]
+    ['Billing', CircleDollarSign], ['Radiographs', FileImage], ['Services', ClipboardPlus], ['Doctors', UserRound], ['Reception', UserRound], ['EMR', ClipboardPlus]
   ],
   DENTIST: [
     ['Overview', LayoutDashboard], ['Patients', Users], ['Appointments', CalendarDays],
@@ -191,6 +191,17 @@ function App() {
     return createdPatient;
   }
 
+  async function updatePatient(patientId, updates) {
+    const updated = await apiRequest(`/patients/${patientId}/`, {
+      tokens,
+      onTokens: updateTokens,
+      method: 'PATCH',
+      body: updates
+    });
+    setPatients((current) => current.map((patient) => patient.id === updated.id ? updated : patient));
+    return updated;
+  }
+
   async function createAppointment(appointment) {
     const created = await apiRequest('/appointments/', {
       tokens, onTokens: updateTokens, method: 'POST', body: appointment
@@ -269,6 +280,15 @@ function App() {
     return invoice;
   }
 
+  async function generateAiSummary(recordId) {
+    return apiRequest(`/medical-records/${recordId}/ai-summary/`, {
+      tokens,
+      onTokens: updateTokens,
+      method: 'POST',
+      body: {}
+    });
+  }
+
   async function login(username, password) {
     const nextTokens = await apiRequest('/auth/token/', { method: 'POST', body: { username, password } });
     const currentUser = await apiRequest('/auth/me/', { tokens: nextTokens });
@@ -304,10 +324,10 @@ function App() {
       {section === 'Overview' && (role === 'ADMIN'
         ? <RevenueDashboard tokens={tokens} onTokensChanged={updateTokens} />
         : <Overview appointments={appointments} patients={patients} setSection={setSection} />)}
-      {section === 'Patients' && <Patients patients={visiblePatients} query={query} setQuery={setQuery} onCreatePatient={createPatient} canCreate={role === 'ADMIN' || role === 'RECEPTIONIST'} />}
+      {section === 'Patients' && <Patients patients={visiblePatients} query={query} setQuery={setQuery} onCreatePatient={createPatient} onUpdatePatient={updatePatient} canCreate={role === 'ADMIN' || role === 'RECEPTIONIST'} />}
       {section === 'Reception' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Reception tokens={tokens} onTokensChanged={updateTokens} appointments={appointments} setSection={setSection} />}
       {section === 'Appointments' && <Appointments appointments={appointments} patients={patients} doctors={doctors} services={services} schedules={schedules} role={role} loading={apiLoading} loadError={apiError} onCreateAppointment={createAppointment} onCreateSchedule={createSchedule} onCancelAppointment={cancelAppointment} />}
-      {section === 'EMR' && (role === 'DENTIST' || role === 'ADMIN') && <MedicalRecords appointments={appointments} patients={patients} services={services} teeth={teeth} records={medicalRecords} loading={apiLoading} loadError={apiError} onSave={saveMedicalRecord} />}
+      {section === 'EMR' && (role === 'DENTIST' || role === 'ADMIN') && <MedicalRecords appointments={appointments} patients={patients} services={services} teeth={teeth} records={medicalRecords} loading={apiLoading} loadError={apiError} onSave={saveMedicalRecord} onGenerateSummary={generateAiSummary} />}
       {section === 'Tooth chart' && <ToothChart dentition={dentition} setDentition={setDentition} selectedTooth={selectedTooth} setSelectedTooth={setSelectedTooth} />}
       {section === 'Billing' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Billing invoices={invoices} records={invoiceSources} loading={apiLoading} onCreateInvoice={createInvoice} onPayCash={payInvoiceCash} onCreateQr={createInvoiceQr} onReconcileQr={reconcileInvoiceQr} onCancelQr={cancelInvoiceQr} />}
       {section === 'Radiographs' && <Radiographs />}
@@ -701,15 +721,26 @@ const emptyPatient = {
   date_of_birth: '',
   dentition_type: 'ADULT',
   medical_history: '',
-  allergies: ''
+  allergies: '',
+  ai_processing_consent: false,
+  sms_reminder_consent: false
 };
 
-function Patients({ patients, query, setQuery, onCreatePatient, canCreate }) {
+function Patients({ patients, query, setQuery, onCreatePatient, onUpdatePatient, canCreate }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyPatient);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [consentForm, setConsentForm] = useState({ ai_processing_consent: false, sms_reminder_consent: false });
+  const [consentSaving, setConsentSaving] = useState(false);
+
+  useEffect(() => {
+    setConsentForm({
+      ai_processing_consent: Boolean(selectedPatient?.ai_processing_consent),
+      sms_reminder_consent: Boolean(selectedPatient?.sms_reminder_consent)
+    });
+  }, [selectedPatient?.id, selectedPatient?.ai_processing_consent, selectedPatient?.sms_reminder_consent]);
 
   async function savePatient(event) {
     event.preventDefault();
@@ -727,6 +758,19 @@ function Patients({ patients, query, setQuery, onCreatePatient, canCreate }) {
       setError(saveError.message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function saveConsents(event) {
+    event.preventDefault();
+    setConsentSaving(true);
+    setError('');
+    try {
+      setSelectedPatient(await onUpdatePatient(selectedPatient.id, consentForm));
+    } catch (saveError) {
+      setError(saveError.message);
+    } finally {
+      setConsentSaving(false);
     }
   }
 
@@ -748,6 +792,8 @@ function Patients({ patients, query, setQuery, onCreatePatient, canCreate }) {
         <label>Dental profile<select value={form.dentition_type} onChange={(event) => setForm({ ...form, dentition_type: event.target.value })}><option value="ADULT">Adult · 32 teeth</option><option value="CHILD">Child · 20 teeth</option></select></label>
         <label>Allergies<textarea value={form.allergies} onChange={(event) => setForm({ ...form, allergies: event.target.value })} /></label>
         <label className="form-wide">Medical history<textarea value={form.medical_history} onChange={(event) => setForm({ ...form, medical_history: event.target.value })} /></label>
+        <label className="checkbox-field form-wide"><input type="checkbox" checked={form.ai_processing_consent} onChange={(event) => setForm({ ...form, ai_processing_consent: event.target.checked })} /> Patient has consented to send de-identified clinical text to Gemini for an AI summary.</label>
+        <label className="checkbox-field form-wide"><input type="checkbox" checked={form.sms_reminder_consent} onChange={(event) => setForm({ ...form, sms_reminder_consent: event.target.checked })} /> Patient has consented to receive follow-up reminders by SMS.</label>
       </div>
       <div className="form-actions"><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Create patient'}</button></div>
     </form>}
@@ -761,6 +807,12 @@ function Patients({ patients, query, setQuery, onCreatePatient, canCreate }) {
         <div><span>Allergies</span><p>{selectedPatient.allergies || 'No known allergies recorded'}</p></div>
         <div><span>Medical history</span><p>{selectedPatient.medical_history || 'No medical history recorded'}</p></div>
       </div>
+      {canCreate && <form className="management-form" onSubmit={saveConsents}>
+        <h4>Recorded communication and AI consent</h4>
+        <label className="checkbox-field"><input type="checkbox" checked={consentForm.ai_processing_consent} onChange={(event) => setConsentForm({ ...consentForm, ai_processing_consent: event.target.checked })} /> Patient has consented to send de-identified clinical text to Gemini for an AI summary.</label>
+        <label className="checkbox-field"><input type="checkbox" checked={consentForm.sms_reminder_consent} onChange={(event) => setConsentForm({ ...consentForm, sms_reminder_consent: event.target.checked })} /> Patient has consented to receive follow-up reminders by SMS.</label>
+        <div className="form-actions"><button className="secondary-button" type="submit" disabled={consentSaving}>{consentSaving ? 'Saving…' : 'Save consent settings'}</button></div>
+      </form>}
     </section>}
     <div className="search-field"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, patient code or phone" /></div>
     <div className="panel table-panel">
@@ -1171,11 +1223,13 @@ function Reception({ tokens, onTokensChanged, appointments, setSection }) {
   </section>;
 }
 
-function MedicalRecords({ appointments, patients, services, teeth, records, loading, loadError, onSave }) {
+function MedicalRecords({ appointments, patients, services, teeth, records, loading, loadError, onSave, onGenerateSummary }) {
   const eligibleAppointments = appointments.filter((item) => item.status !== 'Cancelled' && item.status !== 'CANCELLED');
   const [appointmentId, setAppointmentId] = useState('');
-  const [form, setForm] = useState({ diagnosis: '', treatment_plan: '', prescription: '', notes: '', teeth: [], services: [] });
+  const [form, setForm] = useState({ diagnosis: '', treatment_plan: '', prescription: '', notes: '', teeth: [], services: [], follow_up_date: '' });
   const [saving, setSaving] = useState(false);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summary, setSummary] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const selectedAppointment = eligibleAppointments.find((item) => String(item.id) === appointmentId);
@@ -1195,9 +1249,11 @@ function MedicalRecords({ appointments, patients, services, teeth, records, load
       prescription: record.prescription || '',
       notes: record.notes || '',
       teeth: record.teeth || [],
-      services: record.services || []
-    } : { diagnosis: '', treatment_plan: '', prescription: '', notes: '', teeth: [], services: [] });
+      services: record.services || [],
+      follow_up_date: record.follow_up_date || ''
+    } : { diagnosis: '', treatment_plan: '', prescription: '', notes: '', teeth: [], services: [], follow_up_date: '' });
     setError('');
+    setSummary('');
   }, [appointmentId, record?.id]);
 
   function toggleSelection(field, id) {
@@ -1215,12 +1271,31 @@ function MedicalRecords({ appointments, patients, services, teeth, records, load
     setError('');
     setSuccess('');
     try {
-      await onSave({ ...form, appointment: Number(appointmentId) }, record?.id);
+      await onSave({
+        ...form,
+        appointment: Number(appointmentId),
+        follow_up_date: form.follow_up_date || null
+      }, record?.id);
       setSuccess('Medical record saved.');
     } catch (saveError) {
       setError(saveError.message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function requestSummary() {
+    if (!record) return;
+    setSummaryLoading(true);
+    setError('');
+    setSummary('');
+    try {
+      const result = await onGenerateSummary(record.id);
+      setSummary(result.summary);
+    } catch (summaryError) {
+      setError(summaryError.message);
+    } finally {
+      setSummaryLoading(false);
     }
   }
 
@@ -1272,8 +1347,17 @@ function MedicalRecords({ appointments, patients, services, teeth, records, load
       </div>
       <label>Prescription<textarea rows="2" value={form.prescription} onChange={(event) => setForm({ ...form, prescription: event.target.value })} /></label>
       <label>Clinical notes<textarea rows="2" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
+      <label>Follow-up date<input type="date" value={form.follow_up_date} onChange={(event) => setForm({ ...form, follow_up_date: event.target.value })} /></label>
+      <p>A follow-up SMS is sent only when the patient has SMS consent and a valid mobile number, and the daily reminder task is configured.</p>
       <div className="form-actions"><button className="primary-button" disabled={saving || !appointmentId}>{saving ? 'Saving…' : record ? 'Update medical record' : 'Save medical record'}</button></div>
     </form>}
+    {!loading && record && <section className="panel management-form">
+      <h3>AI summary · Gemini</h3>
+      <p>Recorded clinical text is sent to Google Gemini after patient consent; direct identifiers are removed when detected. Review the result; it does not change the medical record or replace clinical judgment.</p>
+      {!selectedPatient?.ai_processing_consent && <p role="status">Patient AI-processing consent has not been recorded.</p>}
+      <button className="secondary-button" type="button" disabled={!selectedPatient?.ai_processing_consent || summaryLoading} onClick={requestSummary}>{summaryLoading ? 'Generating…' : 'Generate summary'}</button>
+      {summary && <div className="panel" role="status"><strong>AI-generated draft — clinician review required</strong><p>{summary}</p></div>}
+    </section>}
   </section>;
 }
 function ToothChart({ dentition, setDentition, selectedTooth, setSelectedTooth }) { const teeth = dentition === 'ADULT' ? teethAdult : teethChild; return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">CLINICAL RECORD</span><h2>Interactive tooth chart</h2></div><div className="segmented"><button className={dentition === 'ADULT' ? 'selected' : ''} onClick={() => setDentition('ADULT')}>Adult · 32</button><button className={dentition === 'CHILD' ? 'selected' : ''} onClick={() => setDentition('CHILD')}>Child · 20</button></div></div><div className="chart-layout"><div className="panel tooth-panel"><div className="chart-header"><div><strong>Nguyen Minh Anh</strong><span>DMS-0001 · {dentition === 'ADULT' ? 'Permanent dentition' : 'Primary dentition'}</span></div><span className="status confirmed">In treatment</span></div><div className="mouth-label">UPPER ARCH</div><div className={`teeth-grid ${dentition.toLowerCase()}`}>{teeth.slice(0, Math.ceil(teeth.length / 2)).map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-line" /><div className={`teeth-grid lower ${dentition.toLowerCase()}`}>{teeth.slice(Math.ceil(teeth.length / 2)).reverse().map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-label lower-label">LOWER ARCH</div><div className="chart-legend"><span><i className="dot healthy" />Healthy</span><span><i className="dot care" />Needs care</span><span><i className="dot monitor" />Monitor</span></div></div><aside className="panel tooth-detail"><span className="eyebrow">SELECTED TOOTH</span>{selectedTooth ? <><div className="tooth-number">{teeth.find((tooth) => tooth.id === selectedTooth)?.code}</div><h3>Clinical condition</h3><p>Update this tooth’s condition and add a treatment note for the patient record.</p><select defaultValue="Healthy"><option>Healthy</option><option>Needs care</option><option>Monitor</option><option>Restored</option></select><textarea placeholder="Add a clinical note..." /><button className="primary-button full">Save condition</button></> : <div className="empty-detail"><Stethoscope size={28} /><p>Select a tooth to inspect its clinical record.</p></div>}</aside></div></section>; }

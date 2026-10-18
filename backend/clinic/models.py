@@ -43,6 +43,8 @@ class Patient(models.Model):
     dentition_type = models.CharField(max_length=10, choices=[(ADULT, "Adult"), (CHILD, "Child")], default=ADULT)
     medical_history = models.TextField(blank=True)
     allergies = models.TextField(blank=True)
+    ai_processing_consent = models.BooleanField(default=False)
+    sms_reminder_consent = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
