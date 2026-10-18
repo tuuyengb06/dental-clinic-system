@@ -14,9 +14,16 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
+from appointments.ai_services import (
+    AIServiceConfigurationError,
+    AIServiceError,
+    generate_generic_follow_up_text,
+)
 from appointments.models import MedicalRecord
+from appointments.sms_services import SMSServiceError, build_follow_up_message
 from .models import (
     ActiveInvoicePayment,
     BankTransferVerification,
@@ -72,6 +79,12 @@ class PatientViewSet(viewsets.ModelViewSet):
     serializer_class = PatientSerializer
     permission_classes = [IsAppointmentStaff]
 
+    def get_throttles(self):
+        if self.action == "reminder_preview":
+            self.throttle_scope = "ai_reminder_preview"
+            return [ScopedRateThrottle()]
+        return super().get_throttles()
+
     def get_queryset(self):
         queryset = super().get_queryset()
         if "search" not in self.request.query_params:
@@ -88,6 +101,55 @@ class PatientViewSet(viewsets.ModelViewSet):
             Q(patient_code__icontains=search_term)
             | Q(full_name__icontains=search_term)
             | Q(phone__icontains=search_term)
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="reminder-preview",
+        throttle_classes=[ScopedRateThrottle],
+    )
+    def reminder_preview(self, request, pk=None):
+        if request.data:
+            raise ValidationError({"detail": "No request fields are needed for a reminder preview."})
+        patient = self.get_object()
+        if not patient.sms_reminder_consent:
+            raise ValidationError(
+                {"consent": "Patient consent for SMS reminders must be recorded first."}
+            )
+        record = (
+            MedicalRecord.objects.filter(
+                appointment__patient=patient,
+                follow_up_date__isnull=False,
+            )
+            .order_by("follow_up_date", "id")
+            .first()
+        )
+        if not record:
+            raise ValidationError(
+                {"follow_up_date": "No medical record with a follow-up date was found."}
+            )
+        try:
+            generic_text = generate_generic_follow_up_text()
+            message = build_follow_up_message(record.follow_up_date, generic_text)
+        except AIServiceConfigurationError as error:
+            return Response(
+                {"detail": str(error)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except (AIServiceError, SMSServiceError) as error:
+            logger.warning("Follow-up reminder preview could not be generated: %s", error)
+            return Response(
+                {"detail": "Reminder preview could not be generated. Please try again later."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        return Response(
+            {
+                "message": message,
+                "follow_up_date": record.follow_up_date,
+                "provider": "Gemini",
+                "sent": False,
+            }
         )
 
 

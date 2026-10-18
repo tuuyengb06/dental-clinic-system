@@ -60,7 +60,8 @@ flowchart LR
 | `appointments` | Lịch hẹn đang được dùng trong API và hồ sơ khám EMR. | `backend/appointments/models.py`, `backend/appointments/views.py` |
 | Chatbot | Phân loại quy tắc giá/lịch, đọc dữ liệu từ ORM; không dùng LLM, không đọc hồ sơ bệnh án để trả lời. | `backend/appointments/chatbot.py` |
 | Tóm tắt EMR | Endpoint bác sĩ/Admin có phân quyền và giới hạn tần suất; chỉ chạy khi bệnh nhân có consent và Gemini được cấu hình. Trả bản nháp, không ghi đè hồ sơ. | `backend/appointments/views.py`, `backend/appointments/ai_services.py` |
-| Nhắc tái khám | Management command đọc ngày tái khám và consent, tạo nội dung chung bằng Gemini rồi gửi qua Twilio; lịch chạy OS được cấu hình riêng. | `backend/appointments/management/commands/send_follow_up_reminders.py`, `backend/appointments/sms_services.py` |
+| Preview lời nhắc | Admin/Lễ tân có thể tạo preview cho bệnh nhân có SMS consent và ngày tái khám; chỉ gửi prompt chung cho Gemini, không gọi Twilio hoặc lưu/gửi tin nhắn. | `backend/clinic/views.py`, `frontend/src/main.jsx` |
+| Nhắc tái khám | Management command đọc ngày tái khám và consent, tạo nội dung chung bằng Gemini rồi gửi qua Twilio; lịch chạy OS được cấu hình riêng. Preview trên UI độc lập, không phải nội dung được lưu/duyệt cho lần gửi sau. | `backend/appointments/management/commands/send_follow_up_reminders.py`, `backend/appointments/sms_services.py` |
 | Database | SQLite mặc định; có thể chọn SQL Server qua biến môi trường `DMS_DB_ENGINE=mssql`. | `backend/dms/settings.py` |
 | Tạo ảnh VietQR | Frontend tải ảnh từ `img.vietqr.io` với mã ngân hàng, số tài khoản, tên chủ tài khoản, số tiền và nội dung chuyển khoản trong URL. Không xác minh giao dịch. | `backend/clinic/views.py`, `frontend/src/main.jsx` |
 
@@ -68,6 +69,7 @@ flowchart LR
 
 - Không có dịch vụ AI/LLM bên ngoài trong đường chạy chatbot.
 - Tóm tắt EMR gọi Gemini qua `POST /api/v1/medical-records/{id}/ai-summary/`; chỉ đọc hồ sơ đã lưu, cần `ai_processing_consent`, giới hạn 10 yêu cầu/giờ và trả kết quả chưa được lưu.
+- Lễ tân/Admin xem trước lời nhắc qua `POST /api/v1/patients/{id}/reminder-preview/`; cần `sms_reminder_consent` và EMR có ngày tái khám. Endpoint chỉ trả câu nhắc/ngày/provider và `sent=false`, không trả số điện thoại hoặc nội dung hồ sơ.
 - Trước khi gửi trường lâm sàng, backend loại bỏ các định danh nhận diện trực tiếp được phát hiện (tên/mã/điện thoại của bệnh nhân, email, ngày phổ biến). Đây là lọc theo mẫu, không bảo đảm dữ liệu được ẩn danh hoàn toàn; cần consent và duyệt chính sách xử lý dữ liệu của nhà cung cấp.
 - Ngày tái khám được lưu trong `appointments.MedicalRecord.follow_up_date`; `Patient.sms_reminder_consent` và số điện thoại là điều kiện gửi. `FollowUpReminder` lưu trạng thái/mã Twilio và có unique key theo hồ sơ + ngày.
 - Lệnh `python manage.py send_follow_up_reminders` cần được Windows Task Scheduler hoặc scheduler ngoài gọi hằng ngày; repository không tự đăng ký tác vụ hệ điều hành và tích hợp không hoạt động nếu thiếu biến môi trường Gemini/Twilio.
@@ -369,7 +371,9 @@ sequenceDiagram
     autonumber
     actor Patient as Bệnh nhân
     actor Dentist as Bác sĩ
+    actor Staff as Lễ tân/Admin
     participant UI as React UI
+    participant API as Django REST API / PatientViewSet
     participant DB as Database
     participant Scheduler as Windows Task Scheduler
     participant Command as Django management command
@@ -380,6 +384,16 @@ sequenceDiagram
     Dentist->>UI: Nhập ngày tái khám trong EMR
     UI->>DB: Lưu MedicalRecord.follow_up_date
     Note over Patient,DB: Nhân viên ghi sms_reminder_consent và số điện thoại ở hồ sơ bệnh nhân
+    opt Lễ tân/Admin xem trước nội dung
+        Staff->>UI: Chọn bệnh nhân đã consent, yêu cầu preview
+        UI->>API: POST /api/v1/patients/{id}/reminder-preview/
+        API->>DB: Kiểm tra consent và lấy ngày tái khám
+        DB-->>API: Chỉ ngày tái khám; không lấy EMR lâm sàng để prompt
+        API->>AI: Xin câu mời chung, không có patient ID/phone/EMR
+        AI-->>API: Lời mời chung
+        API-->>UI: Trả ngày + preview; sent=false
+        UI-->>Staff: Hiển thị preview; không gửi Twilio
+    end
     Scheduler->>Command: Chạy send_follow_up_reminders hằng ngày
     Command->>DB: Tìm follow_up_date đến hạn/quá hạn, có consent
     DB-->>Command: Các EMR và số điện thoại đủ điều kiện
@@ -394,7 +408,7 @@ sequenceDiagram
     end
 ```
 
-Command gửi lời mời chung có ngày tái khám, không đưa hồ sơ lâm sàng hay thông tin nhận diện vào prompt Gemini. `--dry-run` chỉ đếm hồ sơ đủ điều kiện, không gửi và không tạo delivery record. Delivery `FAILED` có thể được thử lại ở lần chạy sau; `UNKNOWN` không tự retry để tránh SMS trùng, cần đối chiếu trong Twilio. Trạng thái `SENDING` cũ hơn 30 phút được chuyển `UNKNOWN`. Command không tạo lịch hệ điều hành: cần tự cấu hình Task Scheduler, kiểm thử `--dry-run`, xác nhận tuyến gửi/chi phí SMS tại Twilio và chỉ sau đó mới chạy thật. Nội dung Gemini được gửi tự động, không có bước duyệt thủ công trước khi gửi.
+Command gửi lời mời chung có ngày tái khám, không đưa hồ sơ lâm sàng hay thông tin nhận diện vào prompt Gemini. `--dry-run` chỉ đếm hồ sơ đủ điều kiện, không gửi và không tạo delivery record. Delivery `FAILED` có thể được thử lại ở lần chạy sau; `UNKNOWN` không tự retry để tránh SMS trùng, cần đối chiếu trong Twilio. Trạng thái `SENDING` cũ hơn 30 phút được chuyển `UNKNOWN`. Command không tạo lịch hệ điều hành: cần tự cấu hình Task Scheduler, kiểm thử `--dry-run`, xác nhận tuyến gửi/chi phí SMS tại Twilio và chỉ sau đó mới chạy thật. Reminder preview trên giao diện là thao tác riêng: nó không gửi SMS, không lưu bản được duyệt và không bảo đảm nội dung giống tin nhắn Gemini tạo về sau trong command tự động.
 
 ## 5. Kiểm tra nhất quán và giới hạn tài liệu
 

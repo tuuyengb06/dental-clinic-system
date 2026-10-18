@@ -1,4 +1,5 @@
 import re
+from datetime import date
 
 import requests
 from django.conf import settings
@@ -14,6 +15,15 @@ class SMSServiceError(Exception):
 
 class SMSDeliveryUncertainError(SMSServiceError):
     pass
+
+
+def build_follow_up_message(scheduled_for: date, generic_text: str) -> str:
+    message = f"Mời bạn tái khám ngày {scheduled_for:%d/%m}. {generic_text}"
+    if len(message.encode("utf-16-be")) // 2 > 70:
+        raise SMSServiceError(
+            "Reminder exceeds the single-segment Vietnamese SMS length limit."
+        )
+    return message
 
 
 def validate_sms_configuration():

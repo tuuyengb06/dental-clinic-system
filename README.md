@@ -6,6 +6,8 @@ Tài liệu kiến trúc hiện trạng, ERD và sequence hai luồng AI tùy ch
 
 Bộ slide trình bày dự án 13 trang, có kiến trúc, ERD rút gọn, ảnh chụp giao diện demo và kịch bản phân vai gợi ý 10 phút, nằm tại [docs/project-presentation.pptx](docs/project-presentation.pptx). Slide nêu rõ hai luồng AI/SMS đã có trong source nhưng cần consent, credentials và cấu hình lịch gửi; chúng chưa được bật trong môi trường demo nếu thiếu cấu hình. Trên Windows có Microsoft PowerPoint, có thể tạo lại slide bằng `powershell -ExecutionPolicy Bypass -File docs/generate-project-presentation.ps1`.
 
+Kịch bản demo theo vai trò, dữ liệu synthetic, kết quả mong đợi và phương án dự phòng nằm tại [docs/slice-3-demo-runbook.md](docs/slice-3-demo-runbook.md).
+
 ## 1. Cài đặt yêu cầu
 
 - Python 3.11 hoặc mới hơn
@@ -104,7 +106,7 @@ Chạy `python manage.py migrate` để tạo schema từ migration. Sau đó ch
 - 1 tài khoản quản trị, 2 bác sĩ và 1 lễ tân (các tài khoản demo không có mật khẩu sử dụng được mặc định).
 - 5 bệnh nhân, danh mục dịch vụ nha khoa cơ bản, lịch hẹn, kế hoạch điều trị và hóa đơn mẫu.
 
-Để cấp mật khẩu cho tài khoản quản trị được seed, đặt biến môi trường `DMS_SEED_ADMIN_PASSWORD` trước khi chạy lệnh seed; hoặc dùng `python manage.py changepassword admin`. Nếu database đã có tài khoản demo `dms_admin`, lệnh seed sẽ đổi tên tài khoản đó thành `admin`.
+Để cấp cùng một mật khẩu mạnh cho các tài khoản demo, đặt `DMS_SEED_DEMO_PASSWORD` cục bộ trước khi seed; biến này không được commit. Nếu không đặt, tài khoản mới được tạo sẽ không có mật khẩu đăng nhập và có thể dùng `python manage.py changepassword admin` (tương tự `doctor1`, `doctor2`, `receptionist1`). `DMS_SEED_ADMIN_PASSWORD` vẫn có thể đặt riêng mật khẩu Admin. Nếu database đã có tài khoản demo `dms_admin`, lệnh seed sẽ đổi tên tài khoản đó thành `admin`.
 
 ## 5. API chính
 
@@ -113,6 +115,7 @@ Chạy `python manage.py migrate` để tạo schema từ migration. Sau đó ch
 - `GET /api/v1/auth/me/` (hồ sơ người dùng và role, cần JWT)
 - `GET/POST /api/v1/patients/` (hồ sơ gồm ngày sinh, kiểu răng, tiền sử bệnh và dị ứng)
 - `PATCH /api/v1/patients/{id}/` (cập nhật hồ sơ và consent; Admin/Lễ tân)
+- `POST /api/v1/patients/{id}/reminder-preview/` (Admin/Lễ tân có thể tạo nội dung Gemini chung cho hồ sơ có SMS consent và ngày tái khám; không gửi SMS, không đưa tên/số điện thoại/bệnh án vào prompt)
 - `POST /api/v1/medical-records/{id}/ai-summary/` (tạo bản tóm tắt Gemini; bác sĩ phụ trách/Admin, cần consent)
 - `GET /api/v1/patients/?search=<mã|tên|điện thoại>` (tra cứu hồ sơ bệnh nhân; yêu cầu role Admin hoặc Receptionist)
 - `GET/POST /api/v1/appointments/` (danh sách/đặt lịch; giờ hẹn phải nằm trong ca làm của bác sĩ và không trùng lịch)

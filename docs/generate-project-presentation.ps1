@@ -205,7 +205,7 @@ try {
     [void](Add-Text $slide 70 211 373 212 ("Bác sĩ chọn hồ sơ + đã có consent${nl}↓${nl}API kiểm tra role / quyền hồ sơ${nl}↓${nl}Lọc định danh theo mẫu → Gemini${nl}↓${nl}Trả bản nháp cho bác sĩ rà soát${nl}↓${nl}Không tự lưu vào bệnh án") 12 $Palette.Ink)
     [void](Add-Shape $slide 493 151 419 295 $Palette.White $true)
     Add-Chip $slide 511 168 210 "TÁI KHÁM · GEMINI + TWILIO" $Palette.Mint $Palette.Green
-    [void](Add-Text $slide 516 211 373 212 ("Ngày tái khám + SMS consent${nl}↓${nl}Task Scheduler gọi lệnh hằng ngày${nl}↓${nl}Gemini soạn lời mời chung${nl}↓${nl}Twilio gửi SMS + lưu trạng thái${nl}↓${nl}Không gửi bệnh án; UNKNOWN không retry") 12 $Palette.Ink)
+    [void](Add-Text $slide 516 211 373 212 ("Ngày tái khám + SMS consent${nl}↓${nl}Lễ tân xem preview, chưa gửi tin${nl}↓${nl}Task Scheduler gọi lệnh hằng ngày${nl}↓${nl}Gemini + Twilio gửi lời mời chung${nl}↓${nl}Không gửi bệnh án; UNKNOWN không retry") 12 $Palette.Ink)
     Add-Chip $slide 327 462 306 "TÙY CHỌN · CẦN API KEYS + TASK SCHEDULER" $Palette.White $Palette.Coral
 
     $slide = Add-Slide $presentation "10 / An toàn" "AI hỗ trợ hành chính, không thay bác sĩ" "Biện pháp đang có và các điều kiện bắt buộc trước khi kích hoạt tích hợp."

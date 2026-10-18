@@ -11,14 +11,14 @@ const teethChild = Array.from({ length: 20 }, (_, i) => ({ id: i + 1, code: `C${
 const navigationByRole = {
   ADMIN: [
     ['Overview', LayoutDashboard], ['Patients', Users], ['Appointments', CalendarDays], ['Tooth chart', Stethoscope],
-    ['Billing', CircleDollarSign], ['Radiographs', FileImage], ['Services', ClipboardPlus], ['Doctors', UserRound], ['Reception', UserRound], ['EMR', ClipboardPlus]
+    ['Billing', CircleDollarSign], ['Radiographs', FileImage], ['Services', ClipboardPlus], ['Doctors', UserRound], ['Reception', UserRound], ['Reminders', MessageCircle], ['EMR', ClipboardPlus]
   ],
   DENTIST: [
     ['Overview', LayoutDashboard], ['Patients', Users], ['Appointments', CalendarDays],
     ['Tooth chart', Stethoscope], ['Radiographs', FileImage], ['EMR', ClipboardPlus]
   ],
   RECEPTIONIST: [
-    ['Overview', LayoutDashboard], ['Reception', UserRound], ['Appointments', CalendarDays], ['Patients', Users], ['Billing', CircleDollarSign]
+    ['Overview', LayoutDashboard], ['Reception', UserRound], ['Appointments', CalendarDays], ['Patients', Users], ['Reminders', MessageCircle], ['Billing', CircleDollarSign]
   ]
 };
 
@@ -289,6 +289,15 @@ function App() {
     });
   }
 
+  async function previewFollowUpReminder(patientId) {
+    return apiRequest(`/patients/${patientId}/reminder-preview/`, {
+      tokens,
+      onTokens: updateTokens,
+      method: 'POST',
+      body: {}
+    });
+  }
+
   async function login(username, password) {
     const nextTokens = await apiRequest('/auth/token/', { method: 'POST', body: { username, password } });
     const currentUser = await apiRequest('/auth/me/', { tokens: nextTokens });
@@ -326,6 +335,7 @@ function App() {
         : <Overview appointments={appointments} patients={patients} setSection={setSection} />)}
       {section === 'Patients' && <Patients patients={visiblePatients} query={query} setQuery={setQuery} onCreatePatient={createPatient} onUpdatePatient={updatePatient} canCreate={role === 'ADMIN' || role === 'RECEPTIONIST'} />}
       {section === 'Reception' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Reception tokens={tokens} onTokensChanged={updateTokens} appointments={appointments} setSection={setSection} />}
+      {section === 'Reminders' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <FollowUpReminderPreview patients={patients} onPreview={previewFollowUpReminder} />}
       {section === 'Appointments' && <Appointments appointments={appointments} patients={patients} doctors={doctors} services={services} schedules={schedules} role={role} loading={apiLoading} loadError={apiError} onCreateAppointment={createAppointment} onCreateSchedule={createSchedule} onCancelAppointment={cancelAppointment} />}
       {section === 'EMR' && (role === 'DENTIST' || role === 'ADMIN') && <MedicalRecords appointments={appointments} patients={patients} services={services} teeth={teeth} records={medicalRecords} loading={apiLoading} loadError={apiError} onSave={saveMedicalRecord} onGenerateSummary={generateAiSummary} />}
       {section === 'Tooth chart' && <ToothChart dentition={dentition} setDentition={setDentition} selectedTooth={selectedTooth} setSelectedTooth={setSelectedTooth} />}
@@ -1360,6 +1370,62 @@ function MedicalRecords({ appointments, patients, services, teeth, records, load
     </section>}
   </section>;
 }
+
+function FollowUpReminderPreview({ patients, onPreview }) {
+  const eligiblePatients = patients.filter((patient) => patient.sms_reminder_consent);
+  const [patientId, setPatientId] = useState('');
+  const [preview, setPreview] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!eligiblePatients.some((patient) => String(patient.id) === patientId)) {
+      setPatientId(String(eligiblePatients[0]?.id || ''));
+      setPreview(null);
+    }
+  }, [patients, patientId]);
+
+  async function generatePreview() {
+    if (!patientId || loading) return;
+    setLoading(true);
+    setError('');
+    setPreview(null);
+    try {
+      setPreview(await onPreview(Number(patientId)));
+    } catch (previewError) {
+      setError(previewError.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return <section className="page-section management-page">
+    <div className="section-toolbar"><div><span className="eyebrow">FOLLOW-UP WORKSPACE</span><h2>AI reminder preview</h2></div></div>
+    <div className="panel management-form">
+      <p>Generate a generic Gemini reminder preview for a patient who has recorded SMS consent. This screen does not send a message; the scheduled Twilio job is a separate operation.</p>
+      {error && <div className="form-error" role="alert">{error}</div>}
+      {!eligiblePatients.length
+        ? <div className="management-state" role="status">No patients with recorded SMS consent are available. Record consent only when it has actually been obtained.</div>
+        : <>
+          <label>Patient with SMS consent
+            <select value={patientId} onChange={(event) => { setPatientId(event.target.value); setPreview(null); setError(''); }}>
+              {eligiblePatients.map((patient) => <option key={patient.id} value={patient.id}>{patient.patient_code} · {patient.full_name}</option>)}
+            </select>
+          </label>
+          <button className="secondary-button" type="button" disabled={loading || !patientId} onClick={generatePreview}>
+            {loading ? 'Generating preview…' : 'Generate reminder preview'}
+          </button>
+        </>}
+      {preview && <div className="panel" role="status">
+        <strong>Preview only · not sent</strong>
+        <p>Follow-up date: {preview.follow_up_date}</p>
+        <p>{preview.message}</p>
+        <small>Draft generated by {preview.provider}. No phone number or medical-record text was sent to the AI provider.</small>
+      </div>}
+    </div>
+  </section>;
+}
+
 function ToothChart({ dentition, setDentition, selectedTooth, setSelectedTooth }) { const teeth = dentition === 'ADULT' ? teethAdult : teethChild; return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">CLINICAL RECORD</span><h2>Interactive tooth chart</h2></div><div className="segmented"><button className={dentition === 'ADULT' ? 'selected' : ''} onClick={() => setDentition('ADULT')}>Adult · 32</button><button className={dentition === 'CHILD' ? 'selected' : ''} onClick={() => setDentition('CHILD')}>Child · 20</button></div></div><div className="chart-layout"><div className="panel tooth-panel"><div className="chart-header"><div><strong>Nguyen Minh Anh</strong><span>DMS-0001 · {dentition === 'ADULT' ? 'Permanent dentition' : 'Primary dentition'}</span></div><span className="status confirmed">In treatment</span></div><div className="mouth-label">UPPER ARCH</div><div className={`teeth-grid ${dentition.toLowerCase()}`}>{teeth.slice(0, Math.ceil(teeth.length / 2)).map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-line" /><div className={`teeth-grid lower ${dentition.toLowerCase()}`}>{teeth.slice(Math.ceil(teeth.length / 2)).reverse().map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-label lower-label">LOWER ARCH</div><div className="chart-legend"><span><i className="dot healthy" />Healthy</span><span><i className="dot care" />Needs care</span><span><i className="dot monitor" />Monitor</span></div></div><aside className="panel tooth-detail"><span className="eyebrow">SELECTED TOOTH</span>{selectedTooth ? <><div className="tooth-number">{teeth.find((tooth) => tooth.id === selectedTooth)?.code}</div><h3>Clinical condition</h3><p>Update this tooth’s condition and add a treatment note for the patient record.</p><select defaultValue="Healthy"><option>Healthy</option><option>Needs care</option><option>Monitor</option><option>Restored</option></select><textarea placeholder="Add a clinical note..." /><button className="primary-button full">Save condition</button></> : <div className="empty-detail"><Stethoscope size={28} /><p>Select a tooth to inspect its clinical record.</p></div>}</aside></div></section>; }
 function Tooth({ tooth, selected, onClick }) { return <button onClick={onClick} className={`tooth ${tooth.state.toLowerCase().replace(' ', '-')} ${selected ? 'selected' : ''}`}><span>{tooth.code.slice(1)}</span><div className="tooth-shape" /></button>; }
 function Billing({ invoices, records, loading, onCreateInvoice, onPayCash, onCreateQr, onReconcileQr, onCancelQr }) {
