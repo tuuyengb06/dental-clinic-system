@@ -110,6 +110,29 @@
 .chatbot-form input:focus{outline:2px solid var(--coral);outline-offset:1px}
 .chatbot-form button{display:grid;place-items:center;width:40px;border-radius:7px;background:var(--green);color:#fff}
 .chatbot-form button:disabled{cursor:not-allowed;opacity:.5}
+.revenue-dashboard>.section-toolbar{align-items:center}
+.dashboard-timezone{padding:7px 10px;border-radius:999px;background:#e8eff4;color:#42677e;font-size:10px;font-weight:700}
+.dashboard-filter-panel{display:flex;align-items:end;gap:12px;flex-wrap:wrap;padding:16px;margin-bottom:16px}
+.dashboard-filter-panel label{display:grid;gap:5px;color:var(--deep);font-size:11px;font-weight:700}
+.dashboard-filter-panel input,.dashboard-filter-panel select{min-width:150px;padding:9px 10px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink);font:inherit}
+.dashboard-filter-summary{margin:0 0 3px auto;color:var(--muted);font-size:11px}
+.dashboard-metrics{grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:16px}
+.dashboard-metrics .metric-card strong{font-size:clamp(20px,3vw,30px);overflow-wrap:anywhere}
+.dashboard-chart-panel{min-width:0;padding:20px;margin-bottom:16px}
+.dashboard-chart-panel .panel-heading{margin-bottom:18px}
+.dashboard-chart-panel .panel-heading h3{margin:5px 0 0;color:var(--deep);font:600 19px Fraunces,Georgia,serif}
+.dashboard-chart-scroll{overflow-x:auto;padding-bottom:8px}
+.dashboard-bars{display:grid;grid-auto-columns:minmax(44px,1fr);grid-auto-flow:column;align-items:end;gap:7px;min-width:max-content;height:250px;padding:8px 4px 0;border-bottom:1px solid var(--line)}
+.dashboard-bar-column{height:100%;display:grid;grid-template-rows:22px 1fr 22px;justify-items:center;align-items:end;min-width:40px}
+.dashboard-bar-value{max-width:100%;overflow:hidden;color:var(--muted);font-size:9px;text-overflow:ellipsis;white-space:nowrap}
+.dashboard-bar-track{width:70%;height:100%;display:flex;align-items:flex-end;justify-content:center}
+.dashboard-bar{width:100%;min-height:0;border-radius:4px 4px 0 0;transition:height .2s ease}
+.dashboard-bar.revenue{background:linear-gradient(180deg,#6caa89,var(--green))}
+.dashboard-bar.visits{background:linear-gradient(180deg,#7fa9c2,#42677e)}
+.dashboard-bar-label{align-self:center;color:var(--muted);font-size:9px;white-space:nowrap}
+.dashboard-empty-chart{display:grid;place-items:center;min-height:160px;margin:0;color:var(--muted);font-size:13px}
+.dashboard-definition{margin:0 0 18px;color:var(--muted);font-size:11px;line-height:1.7}
+.dashboard-definition code{color:var(--deep);font-weight:700}
 .pill.inactive{background:#f1eeea;color:#827970}
 .danger-button{color:#b34d3d}
 .cancel-appointment-button{padding:6px 9px;color:#a34c3d;font-size:10px;white-space:nowrap}
@@ -242,3 +265,5 @@
 @media(max-width:560px){.login-card{padding:27px 22px}.topbar-actions .user-card>div:nth-child(2){display:none}.topbar-actions .user-card .secondary-button{font-size:10px;padding:7px}}
 @media(max-width:700px){.invoice-line{grid-template-columns:minmax(120px,1fr) minmax(85px,.7fr) 72px minmax(100px,.7fr);gap:7px;padding:9px 4px;font-size:10px}.invoice-line input{width:68px}.invoice-create-panel,.invoice-history-panel,.invoice-detail-panel{padding:15px}}
 @media(max-width:560px){.chatbot-widget{right:12px;bottom:12px}.chatbot-panel{height:min(560px,calc(100vh - 90px))}}
+@media(max-width:700px){.dashboard-filter-panel{align-items:stretch}.dashboard-filter-panel label{flex:1 1 140px}.dashboard-filter-panel input,.dashboard-filter-panel select{width:100%;min-width:0}.dashboard-filter-summary{width:100%;margin:0}.dashboard-chart-panel{padding:15px}}
+@media(max-width:560px){.dashboard-metrics{grid-template-columns:1fr}}

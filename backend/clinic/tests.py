@@ -1,4 +1,4 @@
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
@@ -852,3 +852,190 @@ class AuthenticationAndManagementApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["tooth_codes"], ["A01"])
         self.assertEqual(response.data["services"], [self.service.id])
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
+class RevenueVisitDashboardApiTests(APITestCase):
+    def setUp(self):
+        self.admin_role = Role.objects.create(code="ADMIN", name="Administrator")
+        self.receptionist_role = Role.objects.create(code="RECEPTIONIST", name="Receptionist")
+        self.admin = User.objects.create_user(
+            username="dashboard-admin",
+            password="DashboardPass123!",
+        )
+        self.receptionist = User.objects.create_user(
+            username="dashboard-receptionist",
+            password="DashboardPass123!",
+        )
+        ClinicUser.objects.create(user=self.admin, role=self.admin_role)
+        ClinicUser.objects.create(user=self.receptionist, role=self.receptionist_role)
+        dentist_role = Role.objects.create(code="DENTIST", name="Dentist")
+        dentist_user = User.objects.create_user(
+            username="dashboard-dentist",
+            password="DashboardPass123!",
+        )
+        dentist_profile = ClinicUser.objects.create(user=dentist_user, role=dentist_role)
+        self.doctor = Doctor.objects.create(
+            clinic_user=dentist_profile,
+            license_number="DASHBOARD-TEST-001",
+        )
+        self.patient = Patient.objects.create(
+            patient_code="DASHBOARD-TEST-001",
+            full_name="Dashboard Test Patient",
+        )
+        self.service = Service.objects.create(
+            code="DASHBOARD-CHECKUP",
+            name="Dashboard check-up",
+            price="250000.00",
+        )
+
+    def dashboard(self, start_date, end_date, group_by="auto"):
+        return self.client.get(
+            "/api/v1/dashboard/analytics/",
+            {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "group_by": group_by,
+            },
+        )
+
+    def create_invoice(self, day, number, total, invoice_status):
+        invoice = Invoice.objects.create(
+            patient=self.patient,
+            invoice_number=number,
+            total_amount=total,
+            paid_amount=total if invoice_status == Invoice.PAID else Decimal("0.00"),
+            status=invoice_status,
+        )
+        issued_at = timezone.make_aware(datetime.combine(day, time(12, 0)))
+        Invoice.objects.filter(pk=invoice.pk).update(issued_at=issued_at)
+        return invoice
+
+    def test_admin_dashboard_sums_paid_invoices_once_and_completed_visits(self):
+        start_date = timezone.localdate() - timedelta(days=5)
+        paid_invoice = self.create_invoice(
+            start_date,
+            "INV-DASHBOARD-PAID",
+            Decimal("300000.00"),
+            Invoice.PAID,
+        )
+        InvoiceItem.objects.create(
+            invoice=paid_invoice,
+            service=self.service,
+            description="First service line",
+            quantity=1,
+            unit_price=Decimal("100000.00"),
+        )
+        InvoiceItem.objects.create(
+            invoice=paid_invoice,
+            service=self.service,
+            description="Second service line",
+            quantity=2,
+            unit_price=Decimal("100000.00"),
+        )
+        Payment.objects.create(
+            invoice=paid_invoice,
+            amount=Decimal("300000.00"),
+            method=Payment.CASH,
+            status=Payment.COMPLETED,
+        )
+        pending_invoice = self.create_invoice(
+            start_date + timedelta(days=1),
+            "INV-DASHBOARD-ISSUED",
+            Decimal("900000.00"),
+            Invoice.ISSUED,
+        )
+        Payment.objects.create(
+            invoice=pending_invoice,
+            amount=Decimal("900000.00"),
+            method=Payment.BANK_TRANSFER,
+            status=Payment.PENDING,
+        )
+        appointment_date = timezone.make_aware(datetime.combine(start_date, time(9, 0)))
+        ScheduledAppointment.objects.create(
+            patient=self.patient,
+            doctor=self.doctor,
+            service=self.service,
+            appointment_date=appointment_date,
+            status=ScheduledAppointment.Status.COMPLETED,
+        )
+        ScheduledAppointment.objects.create(
+            patient=self.patient,
+            doctor=self.doctor,
+            service=self.service,
+            appointment_date=appointment_date + timedelta(days=1),
+            status=ScheduledAppointment.Status.CONFIRMED,
+        )
+        ScheduledAppointment.objects.create(
+            patient=self.patient,
+            doctor=self.doctor,
+            service=self.service,
+            appointment_date=appointment_date + timedelta(days=2),
+            status=ScheduledAppointment.Status.CANCELLED,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.dashboard(start_date, start_date + timedelta(days=3))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["group_by"], "day")
+        self.assertEqual(response.data["timezone"], "Asia/Ho_Chi_Minh")
+        self.assertEqual(response.data["revenue_definition"], "PAID invoice total_amount grouped by invoice issued_at.")
+        self.assertEqual(response.data["visit_definition"], "Completed appointments grouped by appointment_date.")
+        self.assertEqual(response.data["total_revenue"], "300000.00")
+        self.assertEqual(response.data["total_visits"], 1)
+        self.assertEqual(len(response.data["series"]), 4)
+        self.assertEqual(
+            response.data["series"],
+            [
+                {"period": start_date.isoformat(), "revenue": "300000.00", "visits": 1},
+                {"period": (start_date + timedelta(days=1)).isoformat(), "revenue": "0.00", "visits": 0},
+                {"period": (start_date + timedelta(days=2)).isoformat(), "revenue": "0.00", "visits": 0},
+                {"period": (start_date + timedelta(days=3)).isoformat(), "revenue": "0.00", "visits": 0},
+            ],
+        )
+
+    def test_admin_dashboard_groups_long_ranges_by_month_and_includes_empty_months(self):
+        start_date = date(2026, 1, 20)
+        end_date = date(2026, 4, 25)
+        self.client.force_authenticate(self.admin)
+
+        response = self.dashboard(start_date, end_date)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["group_by"], "month")
+        self.assertEqual(response.data["total_revenue"], "0.00")
+        self.assertEqual(response.data["total_visits"], 0)
+        self.assertEqual(
+            [item["period"] for item in response.data["series"]],
+            ["2026-01", "2026-02", "2026-03", "2026-04"],
+        )
+        self.assertTrue(all(item["revenue"] == "0.00" and item["visits"] == 0 for item in response.data["series"]))
+
+    def test_dashboard_rejects_invalid_ranges_and_grouping(self):
+        self.client.force_authenticate(self.admin)
+        today = timezone.localdate()
+        reversed_range = self.dashboard(today, today - timedelta(days=1))
+        invalid_date = self.client.get(
+            "/api/v1/dashboard/analytics/",
+            {"start_date": "not-a-date", "end_date": today.isoformat()},
+        )
+        too_many_daily_points = self.dashboard(today - timedelta(days=366), today, "day")
+        invalid_grouping = self.dashboard(today, today, "week")
+
+        self.assertEqual(reversed_range.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(invalid_date.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(too_many_daily_points.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(invalid_grouping.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_dashboard_is_only_available_to_admins(self):
+        today = timezone.localdate()
+        anonymous = self.dashboard(today, today)
+        self.client.force_authenticate(self.receptionist)
+        receptionist = self.dashboard(today, today)
+        self.client.force_authenticate(self.admin)
+        admin = self.dashboard(today, today)
+
+        self.assertEqual(anonymous.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(receptionist.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(admin.status_code, status.HTTP_200_OK)
