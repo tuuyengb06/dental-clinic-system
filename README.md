@@ -26,6 +26,17 @@ Backend chạy tại `http://127.0.0.1:8000`.
 
 Kiểm tra nhanh: mở `http://127.0.0.1:8000/api/v1/health/` và xác nhận response có `status: ok`.
 
+Để tạo QR chuyển khoản cho bản demo, cấu hình thông tin tài khoản nhận trong PowerShell trước khi chạy backend (không commit thông tin tài khoản thật):
+
+```powershell
+$env:DMS_VIETQR_BANK_ID = "<bank code or BIN>"
+$env:DMS_VIETQR_ACCOUNT_NUMBER = "<account number>"
+$env:DMS_VIETQR_ACCOUNT_NAME = "<account holder name>"
+python manage.py runserver 8000
+```
+
+Nếu chưa cấu hình đủ ba biến, API QR trả về `503` và không tạo giao dịch chờ. Ảnh QR được tải từ dịch vụ VietQR; URL chứa số tiền, mã hóa đơn và thông tin tài khoản nhận.
+
 `python manage.py migrate` là cách khởi tạo database được khuyến nghị. Schema SQLite tương ứng với 13 bảng nghiệp vụ cũng có trong `backend/schema.sql`. Nếu cần khởi tạo bảng trực tiếp từ SQL trên database mới, chạy các lệnh sau trong thư mục `backend`:
 
 ```powershell
@@ -84,6 +95,8 @@ Chạy `python manage.py migrate` để tạo schema từ migration. Sau đó ch
 - `GET /api/v1/invoices/available-records/` (hồ sơ có dịch vụ được chỉ định nhưng chưa lập hóa đơn, chỉ trả thông tin cần thiết cho thu ngân)
 - `POST /api/v1/invoices/` (tạo một hóa đơn cho hồ sơ khám với mọi dịch vụ chỉ định và số lượng; backend lấy đơn giá danh mục, tự tính thành tiền/tổng tiền, phát hành trạng thái `ISSUED` chưa thanh toán; không cho lập trùng hóa đơn cho một hồ sơ)
 - `POST /api/v1/invoices/{id}/pay-cash/` (lễ tân/Admin xác nhận đã nhận đủ tiền mặt cho hóa đơn `ISSUED`; tạo một giao dịch `COMPLETED`, cập nhật hóa đơn thành `PAID`, từ chối thanh toán lặp)
+- `POST /api/v1/invoices/{id}/pay-qr/` (lễ tân/Admin tạo hoặc xem lại VietQR cho hóa đơn chưa thanh toán; tạo một giao dịch `BANK_TRANSFER` ở trạng thái `PENDING`, không cập nhật hóa đơn thành `PAID`)
+- `POST /api/ai/chat` (public chatbot chỉ tra giá dịch vụ đang hoạt động và giờ bắt đầu còn trống theo ca làm/lịch hẹn; body chỉ nhận `{"question":"..."}`, tối đa 500 ký tự; giới hạn 30 câu hỏi/IP mỗi giờ)
 - `GET/POST /api/v1/services/` (`POST/PATCH/DELETE` chỉ dành cho ADMIN; DELETE sẽ ngừng dịch vụ)
 - `GET /api/v1/doctors/`
 - `GET /api/v1/health/` (public health check; các API nghiệp vụ khác cần JWT)
@@ -96,7 +109,9 @@ Luồng đặt lịch trên giao diện dành cho lễ tân/Admin, gửi `patien
 
 Tại màn hình lịch, lễ tân/Admin có thể yêu cầu hủy lịch Pending hoặc Confirmed sau khi xác nhận trong hộp thoại. API trả bản ghi cập nhật; giao diện chỉ đổi trạng thái sau phản hồi thành công và giữ thông báo lỗi nếu API từ chối hoặc mất kết nối. Các trạng thái được phép hủy là quy ước hiện tại, cần được nhóm trưởng xác nhận.
 
-Tại màn hình `Billing`, Admin/Lễ tân chọn hồ sơ khám có dịch vụ đã chỉ định, nhập số lượng và xem tổng tạm tính trước khi tạo hóa đơn. Backend chỉ chấp nhận đầy đủ danh sách dịch vụ của hồ sơ, lấy giá hiện tại từ danh mục thay vì tin giá/tổng do client gửi, lưu giá mô tả tại thời điểm lập hóa đơn, và giới hạn một hóa đơn cho mỗi hồ sơ khám. Hóa đơn mới có trạng thái `ISSUED`, số đã thanh toán bằng 0. Lễ tân/Admin có thể xác nhận đã nhận đủ tiền mặt một lần; API lưu người nhận, thời điểm, số tiền, phương thức và trạng thái giao dịch `COMPLETED` rồi cập nhật hóa đơn thành `PAID` trong cùng transaction. Hóa đơn không được ghi nhận thanh toán lần hai.
+Tại màn hình `Billing`, Admin/Lễ tân chọn hồ sơ khám có dịch vụ đã chỉ định, nhập số lượng và xem tổng tạm tính trước khi tạo hóa đơn. Backend chỉ chấp nhận đầy đủ danh sách dịch vụ của hồ sơ, lấy giá hiện tại từ danh mục thay vì tin giá/tổng do client gửi, lưu giá mô tả tại thời điểm lập hóa đơn, và giới hạn một hóa đơn cho mỗi hồ sơ khám. Hóa đơn mới có trạng thái `ISSUED`, số đã thanh toán bằng 0. Lễ tân/Admin có thể xác nhận đã nhận đủ tiền mặt một lần; API lưu người nhận, thời điểm, số tiền, phương thức và trạng thái giao dịch `COMPLETED` rồi cập nhật hóa đơn thành `PAID` trong cùng transaction. Với chuyển khoản QR, cấu hình `DMS_VIETQR_BANK_ID`, `DMS_VIETQR_ACCOUNT_NUMBER` và `DMS_VIETQR_ACCOUNT_NAME` trong môi trường backend; API dùng VietQR hiển thị số tiền và nội dung chuyển khoản là mã hóa đơn, đồng thời ghi một giao dịch `PENDING`. Tạo hoặc xem lại QR không được xem là thanh toán thành công; hiện chưa có webhook/đối soát từ ngân hàng đã được PO duyệt nên hóa đơn vẫn `ISSUED`, và không thể xác nhận thanh toán chuyển khoản tự động. Trong thời gian có giao dịch QR chờ xác minh, giao diện khóa xác nhận thu tiền mặt để tránh ghi nhận chồng. Không lưu số tài khoản nhận trong mã nguồn.
+
+Chatbot ở góc màn hình dùng bộ phân loại câu hỏi và truy vấn dữ liệu hệ thống trực tiếp; hiện không gọi mô hình AI/dịch vụ bên ngoài và không gửi lịch sử chat sang bên thứ ba. Chatbot chỉ cung cấp giá của dịch vụ đang hoạt động và khung giờ gợi ý theo ca làm/lịch hẹn hiện có (thời lượng dịch vụ, bước gợi ý 15 phút); cần có ngày và dịch vụ để tra lịch. Không có thao tác đặt lịch, không đọc/tiết lộ hồ sơ bệnh nhân, không tư vấn chẩn đoán; câu hỏi ngoài phạm vi hoặc tình huống y tế cần liên hệ lễ tân/cơ sở y tế. Khung giờ trả về không phải xác nhận giữ chỗ và cần được lễ tân kiểm tra lại. Nguồn dữ liệu không truy cập được sẽ trả thông báo thử lại/liên hệ lễ tân thay vì tự bịa câu trả lời.
 
 ## 6. Build kiểm tra
 

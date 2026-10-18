@@ -36,6 +36,10 @@ else:
         }
     }
 
+VIETQR_BANK_ID = os.environ.get("DMS_VIETQR_BANK_ID", "").strip().upper()
+VIETQR_ACCOUNT_NUMBER = os.environ.get("DMS_VIETQR_ACCOUNT_NUMBER", "").strip()
+VIETQR_ACCOUNT_NAME = os.environ.get("DMS_VIETQR_ACCOUNT_NAME", "").strip()
+
 # 2. Cấu hình các App được cài đặt trong Project
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -60,7 +64,10 @@ AUTH_USER_MODEL = 'authentication.User'
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
-    )
+    ),
+    'DEFAULT_THROTTLE_RATES': {
+        'ai_chat': '30/hour',
+    },
 }
 
 SIMPLE_JWT = {

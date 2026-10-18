@@ -190,13 +190,21 @@ class Payment(models.Model):
     CARD = "CARD"
     BANK_TRANSFER = "BANK_TRANSFER"
     METHOD_CHOICES = [(CASH, "Cash"), (CARD, "Card"), (BANK_TRANSFER, "Bank transfer")]
+    PENDING = "PENDING"
     COMPLETED = "COMPLETED"
-    STATUS_CHOICES = [(COMPLETED, "Completed")]
+    STATUS_CHOICES = [
+        (PENDING, "Pending"),
+        (COMPLETED, "Completed"),
+    ]
     invoice = models.ForeignKey(Invoice, on_delete=models.PROTECT, related_name="payments")
     amount = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
     method = models.CharField(max_length=20, choices=METHOD_CHOICES, default=CASH)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=COMPLETED)
-    paid_at = models.DateTimeField(auto_now_add=True)
+    bank_id = models.CharField(max_length=20, blank=True, default="")
+    bank_account_number = models.CharField(max_length=25, blank=True, default="")
+    bank_account_name = models.CharField(max_length=100, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
     received_by = models.ForeignKey(ClinicUser, on_delete=models.PROTECT, null=True, blank=True, related_name="payments_received")
 
     class Meta:

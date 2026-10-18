@@ -85,7 +85,15 @@ class PaymentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Payment
-        fields = ["id", "amount", "method", "status", "paid_at", "received_by_name"]
+        fields = [
+            "id",
+            "amount",
+            "method",
+            "status",
+            "created_at",
+            "paid_at",
+            "received_by_name",
+        ]
         read_only_fields = fields
 
     def get_received_by_name(self, payment):

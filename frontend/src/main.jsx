@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Activity, CalendarDays, ChevronDown, CircleDollarSign, ClipboardPlus, FileImage, LayoutDashboard, Menu, Pencil, Plus, Search, ShieldCheck, Stethoscope, Trash2, UserRound, Users, X } from 'lucide-react';
+import { Activity, CalendarDays, ChevronDown, CircleDollarSign, ClipboardPlus, FileImage, LayoutDashboard, Menu, MessageCircle, Pencil, Plus, Search, Send, ShieldCheck, Stethoscope, Trash2, UserRound, Users, X } from 'lucide-react';
 import './styles.css';
 import './app.css';
 
 const API = import.meta.env.DEV ? '/api/v1' : (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1');
+const AI_CHAT_API = API.replace(/\/v1\/?$/, '/ai/chat');
 const teethAdult = Array.from({ length: 32 }, (_, i) => ({ id: i + 1, code: `A${String(i + 1).padStart(2, '0')}`, state: i === 6 || i === 18 ? 'Needs care' : 'Healthy' }));
 const teethChild = Array.from({ length: 20 }, (_, i) => ({ id: i + 1, code: `C${String(i + 1).padStart(2, '0')}`, state: i === 3 ? 'Monitor' : 'Healthy' }));
 const navigationByRole = {
@@ -244,6 +245,14 @@ function App() {
     return paid;
   }
 
+  async function createInvoiceQr(invoiceId) {
+    const result = await apiRequest(`/invoices/${invoiceId}/pay-qr/`, {
+      tokens, onTokens: updateTokens, method: 'POST'
+    });
+    setInvoices((current) => current.map((invoice) => invoice.id === result.invoice.id ? result.invoice : invoice));
+    return result;
+  }
+
   async function login(username, password) {
     const nextTokens = await apiRequest('/auth/token/', { method: 'POST', body: { username, password } });
     const currentUser = await apiRequest('/auth/me/', { tokens: nextTokens });
@@ -261,8 +270,8 @@ function App() {
     setAuthError('');
   }
 
-  if (!authReady) return <div className="auth-loading">Checking your session…</div>;
-  if (!profile) return <LoginPage onLogin={login} initialError={authError} />;
+  if (!authReady) return <><div className="auth-loading">Checking your session…</div><ChatWidget /></>;
+  if (!profile) return <><LoginPage onLogin={login} initialError={authError} /><ChatWidget /></>;
 
   const visiblePatients = patients.filter((patient) => `${patient.full_name} ${patient.patient_code} ${patient.phone}`.toLowerCase().includes(query.toLowerCase()));
   const role = String(profile.role || '').toUpperCase() === 'DOCTOR' ? 'DENTIST' : String(profile.role || '').toUpperCase();
@@ -282,11 +291,83 @@ function App() {
       {section === 'Appointments' && <Appointments appointments={appointments} patients={patients} doctors={doctors} services={services} schedules={schedules} role={role} loading={apiLoading} loadError={apiError} onCreateAppointment={createAppointment} onCreateSchedule={createSchedule} onCancelAppointment={cancelAppointment} />}
       {section === 'EMR' && (role === 'DENTIST' || role === 'ADMIN') && <MedicalRecords appointments={appointments} patients={patients} services={services} teeth={teeth} records={medicalRecords} loading={apiLoading} loadError={apiError} onSave={saveMedicalRecord} />}
       {section === 'Tooth chart' && <ToothChart dentition={dentition} setDentition={setDentition} selectedTooth={selectedTooth} setSelectedTooth={setSelectedTooth} />}
-      {section === 'Billing' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Billing invoices={invoices} records={invoiceSources} loading={apiLoading} onCreateInvoice={createInvoice} onPayCash={payInvoiceCash} />}
+      {section === 'Billing' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Billing invoices={invoices} records={invoiceSources} loading={apiLoading} onCreateInvoice={createInvoice} onPayCash={payInvoiceCash} onCreateQr={createInvoiceQr} />}
       {section === 'Radiographs' && <Radiographs />}
       {section === 'Services' && role === 'ADMIN' && <ServiceManagement tokens={tokens} onTokensChanged={updateTokens} />}
       {section === 'Doctors' && role === 'ADMIN' && <DoctorDirectory tokens={tokens} onTokensChanged={updateTokens} />}
     </main>
+    <ChatWidget />
+  </div>;
+}
+
+function ChatWidget() {
+  const [open, setOpen] = useState(false);
+  const [question, setQuestion] = useState('');
+  const [messages, setMessages] = useState([
+    {
+      role: 'assistant',
+      text: 'Xin chào! Bạn có thể hỏi giá dịch vụ hoặc giờ khám còn trống. Khi hỏi lịch, vui lòng ghi ngày và tên dịch vụ.'
+    }
+  ]);
+  const [loading, setLoading] = useState(false);
+  const messagesEndRef = useRef(null);
+
+  useEffect(() => {
+    if (open) messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, loading, open]);
+
+  async function sendQuestion(event) {
+    event.preventDefault();
+    const trimmedQuestion = question.trim();
+    if (!trimmedQuestion || loading) return;
+
+    setQuestion('');
+    setMessages((current) => [...current, { role: 'user', text: trimmedQuestion }].slice(-21));
+    setLoading(true);
+    try {
+      const response = await fetch(AI_CHAT_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: trimmedQuestion })
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = payload?.answer || payload?.detail || 'Hiện chatbot chưa trả lời được. Bạn vui lòng thử lại hoặc liên hệ lễ tân.';
+        throw new Error(message);
+      }
+      setMessages((current) => [...current, { role: 'assistant', text: payload.answer }].slice(-21));
+    } catch (error) {
+      setMessages((current) => [
+        ...current,
+        { role: 'assistant', text: `${error.message || 'Không kết nối được chatbot.'} Nếu cần hỗ trợ gấp, vui lòng liên hệ lễ tân.` }
+      ].slice(-21));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return <div className="chatbot-widget">
+    {open && <section className="chatbot-panel" role="dialog" aria-modal="false" aria-labelledby="chatbot-title">
+      <header className="chatbot-header">
+        <div><strong id="chatbot-title">Tư vấn dịch vụ & lịch khám</strong><span>Dựa trên dữ liệu phòng khám</span></div>
+        <button type="button" className="chatbot-close" aria-label="Đóng chatbot" onClick={() => setOpen(false)}><X size={18} /></button>
+      </header>
+      <div className="chatbot-scope-note">Chỉ tra cứu giá và lịch hiện có; không tư vấn y tế hoặc đặt lịch trong hội thoại.</div>
+      <div className="chatbot-messages" aria-live="polite" aria-relevant="additions text">
+        {messages.map((message, index) => <div key={`${index}-${message.role}`} className={`chatbot-message ${message.role}`}><p>{message.text}</p></div>)}
+        {loading && <div className="chatbot-message assistant"><p role="status">Đang tra cứu…</p></div>}
+        <div ref={messagesEndRef} />
+      </div>
+      <form className="chatbot-form" onSubmit={sendQuestion}>
+        <label className="sr-only" htmlFor="chatbot-question">Câu hỏi</label>
+        <input id="chatbot-question" maxLength={500} value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Hỏi giá hoặc lịch khám…" disabled={loading} />
+        <button type="submit" aria-label="Gửi câu hỏi" disabled={loading || !question.trim()}><Send size={17} /></button>
+      </form>
+    </section>}
+    <button type="button" className="chatbot-launcher" aria-label={open ? 'Đóng tư vấn' : 'Mở chatbot tư vấn'} aria-expanded={open} onClick={() => setOpen((current) => !current)}>
+      {open ? <X size={21} /> : <MessageCircle size={21} />}
+      <span>{open ? 'Đóng' : 'Tư vấn'}</span>
+    </button>
   </div>;
 }
 
@@ -1067,18 +1148,23 @@ function MedicalRecords({ appointments, patients, services, teeth, records, load
 }
 function ToothChart({ dentition, setDentition, selectedTooth, setSelectedTooth }) { const teeth = dentition === 'ADULT' ? teethAdult : teethChild; return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">CLINICAL RECORD</span><h2>Interactive tooth chart</h2></div><div className="segmented"><button className={dentition === 'ADULT' ? 'selected' : ''} onClick={() => setDentition('ADULT')}>Adult · 32</button><button className={dentition === 'CHILD' ? 'selected' : ''} onClick={() => setDentition('CHILD')}>Child · 20</button></div></div><div className="chart-layout"><div className="panel tooth-panel"><div className="chart-header"><div><strong>Nguyen Minh Anh</strong><span>DMS-0001 · {dentition === 'ADULT' ? 'Permanent dentition' : 'Primary dentition'}</span></div><span className="status confirmed">In treatment</span></div><div className="mouth-label">UPPER ARCH</div><div className={`teeth-grid ${dentition.toLowerCase()}`}>{teeth.slice(0, Math.ceil(teeth.length / 2)).map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-line" /><div className={`teeth-grid lower ${dentition.toLowerCase()}`}>{teeth.slice(Math.ceil(teeth.length / 2)).reverse().map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-label lower-label">LOWER ARCH</div><div className="chart-legend"><span><i className="dot healthy" />Healthy</span><span><i className="dot care" />Needs care</span><span><i className="dot monitor" />Monitor</span></div></div><aside className="panel tooth-detail"><span className="eyebrow">SELECTED TOOTH</span>{selectedTooth ? <><div className="tooth-number">{teeth.find((tooth) => tooth.id === selectedTooth)?.code}</div><h3>Clinical condition</h3><p>Update this tooth’s condition and add a treatment note for the patient record.</p><select defaultValue="Healthy"><option>Healthy</option><option>Needs care</option><option>Monitor</option><option>Restored</option></select><textarea placeholder="Add a clinical note..." /><button className="primary-button full">Save condition</button></> : <div className="empty-detail"><Stethoscope size={28} /><p>Select a tooth to inspect its clinical record.</p></div>}</aside></div></section>; }
 function Tooth({ tooth, selected, onClick }) { return <button onClick={onClick} className={`tooth ${tooth.state.toLowerCase().replace(' ', '-')} ${selected ? 'selected' : ''}`}><span>{tooth.code.slice(1)}</span><div className="tooth-shape" /></button>; }
-function Billing({ invoices, records, loading, onCreateInvoice, onPayCash }) {
+function Billing({ invoices, records, loading, onCreateInvoice, onPayCash, onCreateQr }) {
   const [recordId, setRecordId] = useState('');
   const [quantities, setQuantities] = useState({});
   const [selectedInvoiceId, setSelectedInvoiceId] = useState('');
   const [cashConfirmOpen, setCashConfirmOpen] = useState(false);
+  const [qrDialogOpen, setQrDialogOpen] = useState(false);
+  const [qrTransfer, setQrTransfer] = useState(null);
+  const [qrImageError, setQrImageError] = useState(false);
   const [cashMethod, setCashMethod] = useState('CASH');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [cashError, setCashError] = useState('');
+  const [qrError, setQrError] = useState('');
   const [success, setSuccess] = useState('');
   const selectedRecord = records.find((record) => String(record.id) === recordId);
   const selectedInvoice = invoices.find((invoice) => String(invoice.id) === selectedInvoiceId);
+  const hasPendingQr = selectedInvoice?.payments?.some((payment) => payment.method === 'BANK_TRANSFER' && payment.status === 'PENDING') || false;
   const total = selectedRecord?.services.reduce((sum, service) => {
     const quantity = Number(quantities[service.id] || 1);
     return sum + Number(service.price) * quantity;
@@ -1136,6 +1222,25 @@ function Billing({ invoices, records, loading, onCreateInvoice, onPayCash }) {
     }
   }
 
+  async function showQrPayment() {
+    if (!selectedInvoice) return;
+    setSaving(true);
+    setQrError('');
+    setError('');
+    setSuccess('');
+    try {
+      const result = await onCreateQr(selectedInvoice.id);
+      setQrTransfer(result.transfer);
+      setQrImageError(false);
+      setQrDialogOpen(true);
+      setSuccess('Transfer QR is ready. The invoice remains unpaid until a bank transaction is verified.');
+    } catch (paymentError) {
+      setQrError(paymentError.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return <section className="page-section management-page">
     <div className="section-toolbar"><div><span className="eyebrow">FINANCE</span><h2>Invoices</h2></div></div>
     {error && <div className="form-error" role="alert">{error}</div>}
@@ -1165,7 +1270,7 @@ function Billing({ invoices, records, loading, onCreateInvoice, onPayCash }) {
             })}
           </div>
           <div className="invoice-total invoice-grand-total"><span>Total due</span><strong>{total.toLocaleString('vi-VN')} ₫</strong></div>
-          <p className="invoice-payment-note">New invoices are issued unpaid. Payment collection is not included in this workflow.</p>
+          <p className="invoice-payment-note">New invoices are issued unpaid. Cash and QR transfer options are available from invoice details.</p>
           <div className="form-actions"><button className="primary-button" type="submit" disabled={saving || !selectedRecord.services.length}>{saving ? 'Creating invoice…' : 'Create invoice'}</button></div>
         </>}
       </form>}
@@ -1183,7 +1288,9 @@ function Billing({ invoices, records, loading, onCreateInvoice, onPayCash }) {
       </table></div>}
     </section>
     {selectedInvoice && <section className="panel invoice-detail-panel">
-      <div className="panel-heading"><div><span className="eyebrow">INVOICE DETAILS</span><h3>{selectedInvoice.invoice_number} · {selectedInvoice.patient_name}</h3></div><div className="invoice-detail-actions"><span className={`pill invoice-status ${selectedInvoice.status.toLowerCase()}`}>{selectedInvoice.status}</span>{selectedInvoice.status === 'ISSUED' && Number(selectedInvoice.balance) > 0 && <button type="button" className="primary-button" onClick={() => { setCashError(''); setCashMethod('CASH'); setCashConfirmOpen(true); }}>Pay by cash</button>}</div></div>
+      <div className="panel-heading"><div><span className="eyebrow">INVOICE DETAILS</span><h3>{selectedInvoice.invoice_number} · {selectedInvoice.patient_name}</h3></div><div className="invoice-detail-actions"><span className={`pill invoice-status ${selectedInvoice.status.toLowerCase()}`}>{selectedInvoice.status}</span>{selectedInvoice.status === 'ISSUED' && Number(selectedInvoice.balance) > 0 && <><button type="button" className="primary-button" disabled={saving || hasPendingQr} title={hasPendingQr ? 'A bank transfer is pending; do not record another payment.' : undefined} onClick={() => { setCashError(''); setCashMethod('CASH'); setCashConfirmOpen(true); }}>Pay by cash</button><button type="button" className="secondary-button" disabled={saving} onClick={showQrPayment}>{hasPendingQr ? 'Show transfer QR' : 'Pay by QR'}</button></>}</div></div>
+      {hasPendingQr && <div className="qr-pending-note" role="status">Bank transfer pending confirmation. The invoice is not paid yet; do not treat this QR or a patient's transfer claim as payment confirmation.</div>}
+      {qrError && <div className="form-error" role="alert">{qrError}</div>}
       <div className="invoice-lines">
         <div className="invoice-line invoice-line-heading"><span>Service</span><span>Unit price</span><span>Quantity</span><span>Amount</span></div>
         {selectedInvoice.items.map((item) => <div className="invoice-line" key={item.id}>
@@ -1195,11 +1302,30 @@ function Billing({ invoices, records, loading, onCreateInvoice, onPayCash }) {
         <h4>Payment transactions</h4>
         {selectedInvoice.payments.map((payment) => <div className="invoice-payment-row" key={payment.id}>
           <strong>{Number(payment.amount).toLocaleString('vi-VN')} ₫ · {payment.method}</strong>
-          <span>{payment.status} · {new Date(payment.paid_at).toLocaleString()}</span>
+          <span>{payment.status === 'COMPLETED' && payment.paid_at ? `Paid ${new Date(payment.paid_at).toLocaleString()}` : `Created ${new Date(payment.created_at).toLocaleString()} · ${payment.status === 'PENDING' ? 'Awaiting verification' : payment.status}`}</span>
           {payment.received_by_name && <span>Received by {payment.received_by_name}</span>}
         </div>)}
       </div>}
     </section>}
+    {qrDialogOpen && qrTransfer && <div className="confirmation-backdrop" role="presentation">
+      <section className="panel cancellation-dialog qr-payment-dialog" role="dialog" aria-modal="true" aria-labelledby="qr-payment-title">
+        <h3 id="qr-payment-title">Bank transfer QR</h3>
+        <p>Scan this code to transfer the exact amount. The invoice will stay <strong>unpaid</strong> until a bank transaction is verified.</p>
+        <div className="qr-image-frame">
+          {qrImageError ? <p role="alert">The QR image could not be loaded. Use the bank details below to make the transfer.</p> : <img src={qrTransfer.qr_url} alt={`VietQR for invoice ${qrTransfer.description}`} onError={() => setQrImageError(true)} />}
+        </div>
+        <dl className="qr-transfer-details">
+          <div><dt>Amount</dt><dd>{Number(qrTransfer.amount).toLocaleString('vi-VN')} ₫</dd></div>
+          <div><dt>Bank</dt><dd>{qrTransfer.bank_id}</dd></div>
+          <div><dt>Account number</dt><dd>{qrTransfer.account_number}</dd></div>
+          <div><dt>Account name</dt><dd>{qrTransfer.account_name}</dd></div>
+          <div><dt>Transfer content</dt><dd>{qrTransfer.description}</dd></div>
+          <div><dt>Status</dt><dd>Pending verification</dd></div>
+        </dl>
+        <p className="qr-pending-note">A QR code or a patient's report does not confirm receipt. Automatic bank verification is not configured yet.</p>
+        <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setQrDialogOpen(false)}>Close</button></div>
+      </section>
+    </div>}
     {cashConfirmOpen && selectedInvoice && <div className="confirmation-backdrop" role="presentation">
       <section className="panel cancellation-dialog cash-payment-dialog" role="dialog" aria-modal="true" aria-labelledby="cash-payment-title">
         <h3 id="cash-payment-title">Confirm cash payment</h3>
