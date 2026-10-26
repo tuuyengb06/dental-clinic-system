@@ -73,6 +73,7 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'ai_chat': '30/hour',
         'ai_summary': '10/hour',
+        'ai_reminder_preview': '10/hour',
     },
 }
 
