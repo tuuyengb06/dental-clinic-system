@@ -6,6 +6,17 @@ Tài liệu kiến trúc hiện trạng, ERD và sequence hai luồng AI tùy ch
 
 Bộ slide trình bày dự án 13 trang, có kiến trúc, ERD rút gọn, ảnh chụp giao diện demo và kịch bản phân vai gợi ý 10 phút, nằm tại [docs/project-presentation.pptx](docs/project-presentation.pptx). Slide nêu rõ hai luồng AI/SMS đã có trong source nhưng cần consent, credentials và cấu hình lịch gửi; chúng chưa được bật trong môi trường demo nếu thiếu cấu hình. Trên Windows có Microsoft PowerPoint, có thể tạo lại slide bằng `powershell -ExecutionPolicy Bypass -File docs/generate-project-presentation.ps1`.
 
+## Cấu trúc thư mục
+
+- `backend/`: ứng dụng Django, migration, kiểm thử và `backend/requirements.txt`. Chỉ cần một Python virtual environment cho backend: `backend/.venv/`; các lệnh khởi chạy trong tài liệu đều chạy sau khi vào thư mục này.
+- `frontend/`: giao diện React/Vite và dependency Node.js trong `frontend/node_modules/`.
+- `docs/`: tài liệu kiến trúc và tài liệu demo; `prompts/`: prompt AI; `generate_prompts.py`: tiện ích tạo prompt.
+- `docker-compose.yml`, `backend/Dockerfile` và `frontend/Dockerfile`: cấu hình đóng gói ở từng build context. Các file cùng tên `Dockerfile`, `.dockerignore` hoặc `requirements.txt` nằm trong các thư mục khác nhau vì phục vụ thành phần/build context riêng; không gộp hoặc đổi chỗ nếu chưa cập nhật đường dẫn tham chiếu.
+
+Thư mục `.venv/` ở root và `backend/.venv/` là hai virtual environment độc lập, không phải thư mục cha/con của cùng một môi trường. Cấu hình được tài liệu và `chay_app.bat` sử dụng là `backend/.venv/`; `.venv/` ở root không được các lệnh khởi chạy này tham chiếu và có thể là môi trường cũ. Không cần giữ đồng thời cả hai để chạy ứng dụng, nhưng hãy xóa thủ công `.venv/` ở root chỉ sau khi chắc chắn không dùng nó cho công việc khác. Cả hai đều là file cục bộ, không đưa lên Git.
+
+`requirements.txt` ở root là bản cũ gần giống `backend/requirements.txt` nhưng thiếu khai báo `bcrypt`; hướng dẫn cài đặt ứng dụng dùng bản trong `backend/`. Hai file `.env.example` cũng có mục đích riêng: file ở root cấu hình Docker Compose, file trong `backend/` là mẫu biến môi trường cho backend chạy trực tiếp. Không xóa hoặc ghi đè các file này chỉ vì trùng tên.
+
 ## 1. Cài đặt yêu cầu
 
 - Python 3.11 hoặc mới hơn
