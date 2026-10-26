@@ -32,6 +32,28 @@
 .patient-profile-grid strong,.patient-profile-grid p{margin:0;color:var(--ink);font-size:13px;line-height:1.6;white-space:pre-wrap}
 .form-actions,.row-actions{display:flex;align-items:center;gap:9px}
 .form-actions{margin-top:18px}
+.follow-up-intro{margin:0 0 14px}
+.follow-up-layout{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(280px,.9fr);gap:16px;align-items:start}
+.follow-up-list-panel,.follow-up-preview-panel{min-width:0;padding:20px}
+.follow-up-list-panel .panel-heading h3,.follow-up-preview-panel .panel-heading h3{margin:5px 0 0;color:var(--deep);font:600 19px Fraunces,Georgia,serif}
+.follow-up-list-panel .panel-heading,.follow-up-preview-panel .panel-heading{margin-bottom:14px}
+.follow-up-table-scroll{overflow:auto}
+.follow-up-table-scroll table{min-width:590px}
+.follow-up-table-scroll tbody tr{cursor:pointer}
+.follow-up-row-selected{background:#f0f5ef}
+.follow-up-table-scroll td small{display:block;margin-top:4px;color:var(--muted);font-size:10px}
+.follow-up-select{padding:0;background:transparent;color:var(--deep);font-size:12px;font-weight:700;text-align:left}
+.follow-up-consent-on{background:#e1efe6;color:#28664f}
+.follow-up-preview-panel{display:grid;gap:13px}
+.follow-up-selected{display:grid;gap:4px;padding:12px;background:#f8f7f2}
+.follow-up-selected strong{color:var(--deep);font-size:13px}
+.follow-up-selected span{color:var(--muted);font-size:11px}
+.follow-up-generated{display:grid;gap:7px}
+.follow-up-generated label{color:var(--deep);font-size:12px;font-weight:700}
+.follow-up-generated textarea{width:100%;padding:10px 11px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink);font:13px/1.6 Inter,Arial,sans-serif;resize:vertical}
+.follow-up-preview-actions{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.follow-up-preview-actions>span{color:var(--muted);font-size:10px}
+.follow-up-preview-actions button{display:flex;align-items:center;gap:6px}
 .management-table{margin-top:8px}
 .management-table .table-description{display:block;max-width:320px;margin-top:4px;color:var(--muted);white-space:normal;font-size:11px}
 .management-state{padding:20px;color:var(--muted);font-size:13px}
@@ -268,6 +290,7 @@
 @media(max-width:700px){.form-grid{grid-template-columns:1fr}.form-grid .form-wide{grid-column:auto}.management-table td,.management-table th{padding:12px 10px}}
 @media(max-width:700px){.patient-profile-grid{grid-template-columns:1fr}}
 @media(max-width:900px){.main-content{padding:24px}.reception-layout{grid-template-columns:1fr}}
+@media(max-width:900px){.follow-up-layout{grid-template-columns:1fr}}
 @media(max-width:700px){.calendar-toolbar{flex-wrap:wrap}.calendar-toolbar strong{order:-1;width:100%;text-align:center}.emr-selection-grid{grid-template-columns:1fr}.section-toolbar{gap:12px;align-items:flex-start}.calendar-actions{justify-content:flex-end}}
 @media(max-width:850px){.reception-results-layout{grid-template-columns:1fr}}
 @media(max-width:560px){.reception-search{padding:15px}.reception-search-controls{flex-wrap:wrap}.reception-search-controls input{flex-basis:calc(100% - 32px)}.reception-search-controls .primary-button{width:100%;justify-content:center}.reception-profile-grid{grid-template-columns:1fr}.reception-profile-grid .profile-wide{grid-column:auto}.reception-visit-history>div{flex-direction:column;gap:4px}}

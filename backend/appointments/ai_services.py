@@ -13,7 +13,7 @@ class AIServiceError(Exception):
     pass
 
 
-def _generate_text(prompt, max_output_tokens):
+def _generate_text(prompt, max_output_tokens, system_instruction=None):
     if not settings.GEMINI_API_KEY or not settings.GEMINI_MODEL:
         raise AIServiceConfigurationError(
             "Gemini is not configured. Set DMS_GEMINI_API_KEY before using AI features."
@@ -23,17 +23,23 @@ def _generate_text(prompt, max_output_tokens):
         "https://generativelanguage.googleapis.com/v1beta/models/"
         f"{settings.GEMINI_MODEL}:generateContent"
     )
+    request_data = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.2,
+            "maxOutputTokens": max_output_tokens,
+        },
+    }
+    if system_instruction:
+        request_data["system_instruction"] = {
+            "parts": [{"text": system_instruction}]
+        }
+
     try:
         response = requests.post(
             url,
             headers={"x-goog-api-key": settings.GEMINI_API_KEY},
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "temperature": 0.2,
-                    "maxOutputTokens": max_output_tokens,
-                },
-            },
+            json=request_data,
             timeout=(5, 30),
         )
     except requests.RequestException as error:
@@ -97,12 +103,19 @@ def generate_medical_record_summary(record):
 
 def generate_generic_follow_up_text():
     text = _generate_text(
-        "Viết một câu SMS tiếng Việt ngắn, lịch sự, mời bệnh nhân liên hệ phòng khám "
-        "để đặt lịch tái khám. Chỉ trả về phần lời mời chung, không nhắc tên, ngày, "
-        "số điện thoại, bệnh án, chẩn đoán hay lời khuyên y tế; tối đa 28 ký tự Unicode.",
+        "Tạo phần lời mời ngắn để nối vào câu nhắc tái khám. Chỉ trả về đúng một "
+        "câu tiếng Việt, không thêm dấu ngoặc kép, nhãn, lời giải thích hoặc thông tin "
+        "khác. Câu phải mời người nhận liên hệ phòng khám; không đưa ra ngày, giờ, "
+        "số điện thoại, tên, mã bệnh nhân, dịch vụ, thông tin bệnh án hay lời khuyên "
+        "y tế. Không dùng chữ số. Tối đa 28 ký tự Unicode.",
         max_output_tokens=40,
+        system_instruction=(
+            "Bạn chỉ tạo lời mời liên hệ phòng khám để đặt lịch tái khám. "
+            "Không suy đoán hoặc tạo thông tin cá nhân, lịch hẹn, y tế hay con số. "
+            "Tuân thủ chính xác yêu cầu định dạng của người dùng."
+        ),
     )
     text = " ".join(text.split()).strip('"“”\'')
-    if not text or len(text) > 28:
+    if not text or len(text) > 28 or re.search(r"\d", text):
         raise AIServiceError("Gemini returned reminder text outside the allowed length.")
     return text

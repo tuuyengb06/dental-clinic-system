@@ -1,11 +1,17 @@
 from django.contrib import admin
 from django.urls import path, include
 from appointments.chatbot import ChatbotAPIView
+from appointments.views import GenerateFollowUpReminderAPIView
 from clinic.dashboard import RevenueVisitDashboardAPIView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/ai/chat', ChatbotAPIView.as_view(), name='ai-chat'),
+    path(
+        'api/ai/generate-reminder',
+        GenerateFollowUpReminderAPIView.as_view(),
+        name='ai-generate-reminder',
+    ),
     path('api/v1/dashboard/analytics/', RevenueVisitDashboardAPIView.as_view(), name='dashboard-analytics'),
     path('api/v1/auth/', include('authentication.urls')),
     path('api/v1/', include('clinic.urls')),
