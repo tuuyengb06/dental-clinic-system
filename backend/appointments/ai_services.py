@@ -1,12 +1,13 @@
 import json
 import re
 import time
+from collections.abc import Mapping
 
 import requests
 from django.conf import settings
 
 
-AI_REQUEST_TIMEOUT = (3, 15)
+AI_REQUEST_TIMEOUT = (3, 5)
 AI_MAX_ATTEMPTS = 2
 AI_RETRY_DELAY_SECONDS = 0.5
 
@@ -16,6 +17,10 @@ class AIServiceConfigurationError(Exception):
 
 
 class AIServiceError(Exception):
+    pass
+
+
+class AIServiceOutputError(AIServiceError):
     pass
 
 
@@ -93,17 +98,34 @@ def _generate_text(prompt, max_output_tokens, system_instruction=None):
         raise AIServiceUnavailableError("Gemini could not be reached.")
     try:
         data = response.json()
-        text = "".join(
-            part.get("text", "")
-            for part in data["candidates"][0]["content"]["parts"]
-            if isinstance(part.get("text"), str)
-        ).strip()
-    except (KeyError, IndexError, TypeError, ValueError) as error:
-        raise AIServiceError("Gemini returned an invalid response.") from error
+        if not isinstance(data, Mapping):
+            raise AIServiceOutputError("Gemini returned an invalid response.")
+        candidates = data.get("candidates")
+        if not isinstance(candidates, list) or not candidates:
+            raise AIServiceOutputError("Gemini returned an invalid response.")
+        candidate = candidates[0]
+        if not isinstance(candidate, Mapping):
+            raise AIServiceOutputError("Gemini returned an invalid response.")
+        content = candidate.get("content")
+        if not isinstance(content, Mapping):
+            raise AIServiceOutputError("Gemini returned an invalid response.")
+        parts = content.get("parts")
+        if not isinstance(parts, list):
+            raise AIServiceOutputError("Gemini returned an invalid response.")
+        text_parts = []
+        for part in parts:
+            if not isinstance(part, Mapping):
+                raise AIServiceOutputError("Gemini returned an invalid response.")
+            if "text" in part and not isinstance(part["text"], str):
+                raise AIServiceOutputError("Gemini returned an invalid response.")
+            text_parts.append(part.get("text", ""))
+        text = "".join(text_parts).strip()
+    except (TypeError, ValueError) as error:
+        raise AIServiceOutputError("Gemini returned an invalid response.") from error
     finally:
         response.close()
     if not text:
-        raise AIServiceError("Gemini returned an empty response.")
+        raise AIServiceOutputError("Gemini returned an empty response.")
     return text
 
 
@@ -194,5 +216,7 @@ def generate_generic_follow_up_text():
     )
     text = " ".join(text.split()).strip('"“”\'')
     if not text or len(text) > 28 or re.search(r"\d", text):
-        raise AIServiceError("Gemini returned reminder text outside the allowed length.")
+        raise AIServiceOutputError(
+            "Gemini returned reminder text outside the allowed length."
+        )
     return text

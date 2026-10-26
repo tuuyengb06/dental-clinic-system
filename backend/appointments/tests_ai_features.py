@@ -258,6 +258,60 @@ class MedicalRecordAISummaryTests(TestCase):
         self.assertEqual(response.data["code"], "ai_timeout")
         self.assertTrue(response.data["retryable"])
 
+    @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
+    @patch("appointments.ai_services.time.sleep")
+    @patch("appointments.ai_services.requests.post")
+    def test_slow_summary_ai_times_out_after_five_second_read_timeout(
+        self, post, sleep
+    ):
+        post.side_effect = requests.Timeout()
+        original_diagnosis = self.record.diagnosis
+        original_notes = self.record.notes
+
+        response = self.client.post(
+            f"/api/v1/medical-records/{self.record.pk}/ai-summary/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_504_GATEWAY_TIMEOUT)
+        self.assertEqual(response.data["code"], "ai_timeout")
+        self.assertTrue(response.data["retryable"])
+        self.assertEqual(post.call_count, 2)
+        self.assertEqual(post.call_args.kwargs["timeout"], (3, 5))
+        sleep.assert_called_once_with(0.5)
+        self.record.refresh_from_db()
+        self.assertEqual(self.record.diagnosis, original_diagnosis)
+        self.assertEqual(self.record.notes, original_notes)
+
+    @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
+    @patch("appointments.ai_services.requests.post")
+    def test_summary_handles_missing_provider_json_fields_without_mutating_record(
+        self, post
+    ):
+        provider_response = Mock(status_code=200)
+        provider_response.json.return_value = {"candidates": [{"content": {}}]}
+        post.return_value = provider_response
+        original_diagnosis = self.record.diagnosis
+        original_notes = self.record.notes
+
+        with self.assertLogs("appointments.views", level="WARNING") as logs:
+            response = self.client.post(
+                f"/api/v1/medical-records/{self.record.pk}/ai-summary/",
+                {},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+        self.assertEqual(response.data["code"], "ai_generation_failed")
+        self.assertTrue(response.data["retryable"])
+        self.assertIn("thử lại", response.data["detail"])
+        provider_response.close.assert_called_once()
+        self.assertNotIn("An Nguyen", " ".join(logs.output))
+        self.record.refresh_from_db()
+        self.assertEqual(self.record.diagnosis, original_diagnosis)
+        self.assertEqual(self.record.notes, original_notes)
+
 
 @override_settings(
     TWILIO_ACCOUNT_SID="AC-test",
@@ -730,6 +784,85 @@ class FollowUpReminderPreviewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+        self.assertEqual(response.data["code"], "ai_generation_failed")
+        self.assertTrue(response.data["retryable"])
+        self.assertFalse(FollowUpReminder.objects.filter(medical_record=self.record).exists())
+        provider_response.close.assert_called_once()
+
+    @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
+    @patch("appointments.ai_services.requests.post")
+    def test_preview_rejects_malformed_json_and_missing_provider_fields(self, post):
+        malformed_json = Mock(status_code=200)
+        malformed_json.json.side_effect = ValueError("invalid JSON")
+        missing_fields = Mock(status_code=200)
+        missing_fields.json.return_value = {"candidates": [{}]}
+        post.side_effect = [malformed_json, missing_fields]
+
+        for _ in range(2):
+            response = self.client.post(
+                "/api/ai/generate-reminder",
+                {"medical_record_id": self.record.pk},
+                format="json",
+            )
+            self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+            self.assertEqual(response.data["code"], "ai_generation_failed")
+            self.assertTrue(response.data["retryable"])
+
+        malformed_json.close.assert_called_once()
+        missing_fields.close.assert_called_once()
+        self.record.refresh_from_db()
+        self.assertEqual(self.record.follow_up_date, date(2026, 11, 3))
+        self.assertEqual(self.record.diagnosis, "Private diagnosis")
+        self.assertFalse(FollowUpReminder.objects.filter(medical_record=self.record).exists())
+
+    @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
+    @patch("appointments.ai_services.time.sleep")
+    @patch("appointments.ai_services.requests.post")
+    def test_preview_timeout_returns_fallback_and_preserves_reminder_data(
+        self, post, sleep
+    ):
+        post.side_effect = requests.Timeout()
+
+        response = self.client.post(
+            "/api/ai/generate-reminder",
+            {"medical_record_id": self.record.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_504_GATEWAY_TIMEOUT)
+        self.assertEqual(response.data["code"], "ai_timeout")
+        self.assertTrue(response.data["retryable"])
+        self.assertIn("thử lại", response.data["detail"])
+        self.assertEqual(post.call_count, 2)
+        self.assertEqual(post.call_args.kwargs["timeout"], (3, 5))
+        sleep.assert_called_once_with(0.5)
+        self.record.refresh_from_db()
+        self.assertEqual(self.record.follow_up_date, date(2026, 11, 3))
+        self.assertFalse(FollowUpReminder.objects.filter(medical_record=self.record).exists())
+
+    @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
+    @patch("appointments.ai_services.time.sleep")
+    @patch("appointments.ai_services.requests.post")
+    def test_preview_connection_failure_returns_safe_unavailable_response(
+        self, post, sleep
+    ):
+        post.side_effect = requests.ConnectionError()
+
+        response = self.client.post(
+            "/api/ai/generate-reminder",
+            {"medical_record_id": self.record.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertEqual(response.data["code"], "ai_unavailable")
+        self.assertTrue(response.data["retryable"])
+        self.assertIn("thử lại sau", response.data["detail"])
+        self.assertEqual(post.call_count, 2)
+        sleep.assert_called_once_with(0.5)
+        self.record.refresh_from_db()
+        self.assertEqual(self.record.follow_up_date, date(2026, 11, 3))
+        self.assertFalse(FollowUpReminder.objects.filter(medical_record=self.record).exists())
 
     @patch("appointments.views.generate_generic_follow_up_text")
     def test_preview_reports_temporary_service_failure_as_retryable(self, generate_text):
@@ -874,7 +1007,7 @@ class FollowUpReminderPromptTests(TestCase):
         self.assertNotIn("Private Reminder Patient", str(request_data))
         self.assertNotIn("2026-11-03", str(request_data))
         self.assertIn("không đưa ra ngày", request_data["contents"][0]["parts"][0]["text"])
-        self.assertEqual(post.call_args.kwargs["timeout"], (3, 15))
+        self.assertEqual(post.call_args.kwargs["timeout"], (3, 5))
 
     @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
     @patch("appointments.ai_services.requests.post")
@@ -911,7 +1044,8 @@ class AIServiceRetryTests(TestCase):
         self.assertEqual(_generate_text("prompt", 20), "summary")
 
         self.assertEqual(post.call_count, 2)
-        self.assertEqual(post.call_args.kwargs["timeout"], (3, 15))
+        self.assertEqual(post.call_args.kwargs["timeout"], (3, 5))
+        response.close.assert_called_once()
         sleep.assert_called_once_with(0.5)
 
     @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
@@ -927,6 +1061,40 @@ class AIServiceRetryTests(TestCase):
 
         self.assertEqual(post.call_count, 2)
         self.assertEqual(sleep.call_count, 1)
+
+    @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
+    @patch("appointments.ai_services.requests.post")
+    def test_malformed_provider_json_and_missing_fields_raise_output_error(self, post):
+        from appointments.ai_services import AIServiceOutputError, _generate_text
+
+        malformed_json = Mock(status_code=200)
+        malformed_json.json.side_effect = ValueError("invalid JSON")
+        missing_fields = Mock(status_code=200)
+        missing_fields.json.return_value = {"candidates": [{}]}
+        post.side_effect = [malformed_json, missing_fields]
+
+        for _ in range(2):
+            with self.assertRaises(AIServiceOutputError):
+                _generate_text("prompt", 20)
+
+        malformed_json.close.assert_called_once()
+        missing_fields.close.assert_called_once()
+
+    @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
+    @patch("appointments.ai_services.requests.post")
+    def test_empty_provider_text_raises_output_error_and_closes_response(self, post):
+        from appointments.ai_services import AIServiceOutputError, _generate_text
+
+        response = Mock(status_code=200)
+        response.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": "  "}]}}]
+        }
+        post.return_value = response
+
+        with self.assertRaises(AIServiceOutputError):
+            _generate_text("prompt", 20)
+
+        response.close.assert_called_once()
 
     @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
     @patch("appointments.ai_services.time.sleep")

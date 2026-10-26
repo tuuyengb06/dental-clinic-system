@@ -290,7 +290,7 @@ class ChatbotAPIView(APIView):
                 )
                 intent = "out_of_scope"
         except DatabaseError:
-            logger.exception("Chatbot could not read service or schedule data")
+            logger.warning("Chatbot could not read service or schedule data.")
             return Response(
                 {
                     "answer": "Hiện chưa thể đọc dữ liệu giá/lịch khám. Vui lòng thử lại sau hoặc liên hệ lễ tân.",

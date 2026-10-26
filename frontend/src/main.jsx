@@ -504,7 +504,6 @@ function ChatWidget() {
     if (!trimmedQuestion || requestInFlight.current) return;
 
     requestInFlight.current = true;
-    setQuestion('');
     setMessages((current) => [...current, { role: 'user', text: trimmedQuestion }].slice(-21));
     setLoading(true);
     try {
@@ -518,7 +517,11 @@ function ChatWidget() {
         const message = payload?.answer || payload?.detail || 'Hiện chatbot chưa trả lời được. Bạn vui lòng thử lại hoặc liên hệ lễ tân.';
         throw new Error(message);
       }
+      if (typeof payload?.answer !== 'string' || !payload.answer.trim()) {
+        throw new Error('Chatbot chưa trả được câu trả lời hợp lệ. Câu hỏi vẫn được giữ lại để bạn thử lại.');
+      }
       setMessages((current) => [...current, { role: 'assistant', text: payload.answer }].slice(-21));
+      setQuestion('');
     } catch (error) {
       setMessages((current) => [
         ...current,

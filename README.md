@@ -79,7 +79,7 @@ Có thể đặt lệnh thứ hai trong Windows Task Scheduler, chạy mỗi ng�
 
 Lễ tân/Admin cũng có thể mở mục **Follow-up reminders**, chọn hồ sơ có ngày tái khám và tạo bản nháp bằng Gemini để xem trước, sao chép gửi thủ công qua SMS hoặc Zalo. Chỉ hồ sơ có SMS consent mới được tạo bản nháp. API `POST /api/ai/generate-reminder` chỉ nhận ID hồ sơ; ngày được lấy từ database và ghép vào câu mời chung do AI tạo. Tên, mã, số điện thoại, ngày tái khám và dữ liệu lâm sàng không được gửi cho Gemini; bản nháp không tự gửi. API giới hạn 10 yêu cầu/người dùng/giờ. Tính năng này cần `DMS_GEMINI_API_KEY`, nhưng không cần cấu hình Twilio để tạo hoặc sao chép bản nháp.
 
-Hai chức năng AI dùng timeout kết nối 3 giây và chờ dữ liệu 15 giây cho mỗi lần gọi. Backend chỉ tự thử lại một lần (tối đa hai lần gọi), nghỉ 0,5 giây giữa các lần và chỉ retry timeout, lỗi kết nối, HTTP 408/429 hoặc 5xx; lỗi cấu hình, dữ liệu đầu vào và phản hồi không hợp lệ không tự retry. API trả mã lỗi cùng cờ `retryable`; giao diện hiển thị thông báo tiếng Việt và chỉ cho thử lại thủ công với lỗi tạm thời. Thử lại không lưu kết quả vào hồ sơ và không gửi tin nhắn.
+Hai chức năng AI dùng timeout kết nối 3 giây và timeout đọc phản hồi 5 giây cho mỗi lần gọi. Backend chỉ tự thử lại một lần (tối đa hai lần gọi), nghỉ 0,5 giây giữa các lần và chỉ retry timeout, lỗi kết nối, HTTP 408/429 hoặc 5xx; lỗi cấu hình và dữ liệu đầu vào không tự retry. Phản hồi JSON sai cấu trúc, thiếu nội dung hoặc rỗng được xem là lỗi đầu ra, trả thông báo rõ ràng và cho phép người dùng thử lại thủ công. API trả mã lỗi cùng cờ `retryable`; giao diện hiển thị thông báo tiếng Việt và chỉ cho thử lại khi phù hợp. Thử lại không lưu kết quả vào hồ sơ và không gửi tin nhắn. Chatbot hỏi giá/lịch là tra cứu quy tắc nội bộ, không gọi AI; khi dữ liệu hệ thống không khả dụng, trả thông báo dự phòng an toàn và giữ nguyên câu hỏi để người dùng thử lại.
 
 ## 3. Khởi chạy frontend
 
@@ -165,7 +165,11 @@ Backend có thể kiểm tra bằng:
 ```powershell
 cd backend
 python manage.py check
+python manage.py test appointments.tests_business_workflow
+python manage.py test
 ```
+
+`appointments.tests_business_workflow` kiểm thử API xuyên suốt từ tiếp nhận bệnh nhân, đặt lịch, lập EMR, tóm tắt/preview AI đến lập hóa đơn và thanh toán tiền mặt hoặc QR. Gemini được giả lập trong kiểm thử; ca lỗi bao gồm thời gian đặt ngoài ca, hồ sơ thiếu dữ liệu, AI tạm lỗi, hóa đơn thiếu dịch vụ và đối soát QR sai số tiền, sau đó xác nhận có thể thử lại mà không làm sai lệch dữ liệu.
 
 ## 7. Chụp ảnh minh chứng
 
@@ -180,4 +184,4 @@ python manage.py check
 
 ## Phạm vi MVP
 
-Đã có giao diện tiếp nhận tra cứu hồ sơ theo mã bệnh nhân, họ tên hoặc số điện thoại, hiển thị thông tin định danh, ngày sinh, kiểu răng, dị ứng, tiền sử bệnh và các lịch hẹn hiện có. API tra cứu trả lỗi đầu vào rõ ràng cho truy vấn trống hoặc ký tự không hợp lệ. EMR lưu chẩn đoán, hướng điều trị dạng ghi chú, răng được chọn và danh sách dịch vụ qua `/api/v1/medical-records/`; API chưa cung cấp luồng TreatmentPlan/TreatmentItem riêng để lưu số lượng hoặc gắn riêng từng dịch vụ với từng răng. Hóa đơn được tạo từ các dịch vụ chỉ định lưu trên hồ sơ khám, hỗ trợ đơn giá/số lượng/thành tiền và trạng thái chưa thanh toán; giao diện cũng hỗ trợ xác nhận thanh toán đủ bằng tiền mặt, lưu giao dịch và cập nhật hóa đơn sang `PAID`. Chuyển khoản QR, chatbot AI, ảnh radiograph và dashboard doanh thu vẫn ngoài phạm vi.
+Đã có giao diện tiếp nhận tra cứu hồ sơ theo mã bệnh nhân, họ tên hoặc số điện thoại, hiển thị thông tin định danh, ngày sinh, kiểu răng, dị ứng, tiền sử bệnh và các lịch hẹn hiện có. API tra cứu trả lỗi đầu vào rõ ràng cho truy vấn trống hoặc ký tự không hợp lệ. EMR lưu chẩn đoán, hướng điều trị dạng ghi chú, răng được chọn và danh sách dịch vụ qua `/api/v1/medical-records/`; API chưa cung cấp luồng TreatmentPlan/TreatmentItem riêng để lưu số lượng hoặc gắn riêng từng dịch vụ với từng răng. Hóa đơn được tạo từ các dịch vụ chỉ định lưu trên hồ sơ khám, hỗ trợ đơn giá/số lượng/thành tiền và trạng thái chưa thanh toán; giao diện cũng hỗ trợ thanh toán tiền mặt và chuyển khoản QR với đối soát thủ công. Tóm tắt EMR và bản nháp nhắc tái khám bằng AI là các tích hợp riêng, cần consent và cấu hình nhà cung cấp; dashboard doanh thu có API riêng. MVP chưa có xác minh chuyển khoản tự động từ ngân hàng.
