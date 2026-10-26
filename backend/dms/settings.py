@@ -5,9 +5,16 @@ from datetime import timedelta
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Cấu hình bảo mật và môi trường mặc định
-SECRET_KEY = 'django-insecure-dental-clinic-system-key-change-me'
-DEBUG = True
-ALLOWED_HOSTS = ['*']
+SECRET_KEY = os.environ.get(
+    "DMS_SECRET_KEY",
+    "django-insecure-dental-clinic-system-key-change-me",
+)
+DEBUG = os.environ.get("DMS_DEBUG", "true").lower() == "true"
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.environ.get("DMS_ALLOWED_HOSTS", "*").split(",")
+    if host.strip()
+]
 
 # Định nghĩa các module gốc
 ROOT_URLCONF = 'dms.urls'

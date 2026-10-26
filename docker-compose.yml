@@ -1,0 +1,53 @@
+name: dental-clinic-system
+
+services:
+  backend:
+    build:
+      context: ./backend
+    environment:
+      DMS_ALLOWED_HOSTS: localhost,127.0.0.1
+      DMS_DEBUG: "false"
+      DMS_DB_NAME: /data/db.sqlite3
+      DMS_SECRET_KEY: ${DMS_SECRET_KEY:?Set DMS_SECRET_KEY in .env}
+      DMS_SEED_ADMIN_PASSWORD: ${DMS_SEED_ADMIN_PASSWORD:?Set DMS_SEED_ADMIN_PASSWORD in .env}
+      DMS_GEMINI_API_KEY: ${DMS_GEMINI_API_KEY:-}
+      DMS_GEMINI_MODEL: ${DMS_GEMINI_MODEL:-gemini-2.5-flash}
+      DMS_VIETQR_BANK_ID: ${DMS_VIETQR_BANK_ID:-}
+      DMS_VIETQR_ACCOUNT_NUMBER: ${DMS_VIETQR_ACCOUNT_NUMBER:-}
+      DMS_VIETQR_ACCOUNT_NAME: ${DMS_VIETQR_ACCOUNT_NAME:-}
+      DMS_TWILIO_ACCOUNT_SID: ${DMS_TWILIO_ACCOUNT_SID:-}
+      DMS_TWILIO_AUTH_TOKEN: ${DMS_TWILIO_AUTH_TOKEN:-}
+      DMS_TWILIO_FROM_NUMBER: ${DMS_TWILIO_FROM_NUMBER:-}
+    volumes:
+      - dental_data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/api/v1/health/', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: /api/v1
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${DMS_WEB_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  dental_data:
