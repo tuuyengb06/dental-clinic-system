@@ -77,6 +77,33 @@ class MedicalRecordAISummaryTests(TestCase):
             "test-key",
         )
 
+    @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
+    @patch("appointments.ai_services.requests.post")
+    def test_summary_redacts_common_date_formats_and_identifiers(self, post):
+        self.record.diagnosis = "Bệnh nhân An Nguyen; mã PAT-9001; DOB 01.02.1990; 090 123 4567; 2024/05/06"
+        self.record.save(update_fields=["diagnosis"])
+        response_from_provider = Mock(status_code=200)
+        response_from_provider.json.return_value = {
+            "candidates": [
+                {"content": {"parts": [{"text": "Ghi nhận: bệnh nhân ổn."}]}}
+            ]
+        }
+        post.return_value = response_from_provider
+
+        response = self.client.post(
+            f"/api/v1/medical-records/{self.record.pk}/ai-summary/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        sent_text = post.call_args.kwargs["json"]["contents"][0]["parts"][0]["text"]
+        self.assertNotIn("An Nguyen", sent_text)
+        self.assertNotIn("PAT-9001", sent_text)
+        self.assertNotIn("01.02.1990", sent_text)
+        self.assertNotIn("2024/05/06", sent_text)
+        self.assertNotIn("090 123 4567", sent_text)
+
     @patch("appointments.ai_services.requests.post")
     def test_summary_rejects_client_supplied_clinical_content(self, post):
         response = self.client.post(
