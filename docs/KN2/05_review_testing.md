@@ -1,5 +1,7 @@
 # 05. Review and Testing
 
+> **Lưu ý về thời điểm:** Đây là ảnh chụp review/test plan ngày 2026-09-08. Các trạng thái “Blocked/Not Run” bên dưới ghi lại lần rà soát khi source chưa được triển khai; không mô tả kết quả test hiện tại. Cần chạy lại test trên code hiện hành trước khi dùng làm bằng chứng nghiệm thu.
+
 ## 1. Document Information
 - Project: Dental Management System (DMS)
 - Version: 1.0

@@ -14,8 +14,27 @@ from rest_framework.views import APIView
 
 from clinic.models import Doctor, Service, WorkSchedule
 from .models import Appointment
+from .ai_services import (
+    AIServiceConfigurationError,
+    AIServiceError,
+    AIServiceOutputError,
+    AIServiceTimeoutError,
+    AIServiceUnavailableError,
+    generate_service_explanation,
+)
 
 logger = logging.getLogger(__name__)
+SERVICE_ALIASES = {
+    "CONSULT": ("tu van", "kiem tra rang"),
+    "CLEANING": ("lay cao rang", "ve sinh rang", "danh bong"),
+    "FILLING": ("tram rang",),
+    "EXTRACTION": ("nho rang",),
+    "XRAY": ("chup x quang", "x quang", "chup x-quang", "x-quang", "xray"),
+}
+EXPLANATION_DISCLAIMER = (
+    "Thông tin chỉ mang tính tham khảo, không thay thế tư vấn hoặc chẩn đoán "
+    "của bác sĩ."
+)
 
 
 class ChatQuestionSerializer(serializers.Serializer):
@@ -42,13 +61,35 @@ def _doctor_name(doctor):
 
 def _find_service(question, services):
     normalized_question = _normalize(question)
-    matches = [
-        service
-        for service in services
-        if _normalize(service.name) in normalized_question
-        or _normalize(service.code) in normalized_question
-    ]
-    return max(matches, key=lambda service: len(_normalize(service.name)), default=None)
+    matches = []
+    for service in services:
+        terms = (
+            _normalize(service.name),
+            _normalize(service.code),
+            *(map(_normalize, SERVICE_ALIASES.get(service.code, ()))),
+        )
+        matching_terms = [
+            term for term in terms if term and term in normalized_question
+        ]
+        if matching_terms:
+            matches.append((service, max(matching_terms, key=len)))
+    return max(matches, key=lambda match: len(match[1]), default=(None, None))[0]
+
+
+def _explanation_error_response(code, detail, response_status, retryable=False):
+    return Response(
+        {"code": code, "detail": detail, "retryable": retryable},
+        status=response_status,
+    )
+
+
+def _service_explanation_answer(service):
+    if not service.description.strip():
+        return (
+            "Danh mục chưa có mô tả cho dịch vụ này nên mình chưa thể giải thích "
+            "chính xác. Bạn vui lòng liên hệ lễ tân để được hỗ trợ."
+        )
+    return generate_service_explanation(service)
 
 
 def _parse_requested_date(question):
@@ -276,12 +317,31 @@ class ChatbotAPIView(APIView):
                     normalized_question,
                 )
             )
+            is_explanation = bool(
+                re.search(
+                    r"\b(giai thich|la gi|la nhu the nao|cong dung|dung de lam gi|"
+                    r"what is|explain|"
+                    r"how does it work)\b",
+                    normalized_question,
+                )
+            )
             if is_availability:
                 answer = _availability_answer(question, services)
                 intent = "availability"
             elif is_price:
                 answer = _price_answer(question, services)
                 intent = "price"
+            elif is_explanation:
+                service = _find_service(question, services)
+                if service is None:
+                    answer = (
+                        "Bạn hãy cho biết tên dịch vụ cần giải thích, ví dụ "
+                        "“giải thích dịch vụ trám răng”."
+                    )
+                    intent = "service_explanation"
+                else:
+                    answer = _service_explanation_answer(service)
+                    intent = "service_explanation"
             else:
                 answer = (
                     "Mình chỉ hỗ trợ tra giá dịch vụ đang hoạt động và giờ khám còn trống "
@@ -297,6 +357,44 @@ class ChatbotAPIView(APIView):
                     "intent": "unavailable",
                 },
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except AIServiceConfigurationError:
+            logger.error("Gemini service explanation is not configured.")
+            return _explanation_error_response(
+                "ai_unavailable",
+                "Dịch vụ giải thích AI chưa được cấu hình. Vui lòng liên hệ quản trị viên.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except AIServiceTimeoutError:
+            logger.warning("Gemini service explanation request timed out.")
+            return _explanation_error_response(
+                "ai_timeout",
+                "AI phản hồi quá thời gian chờ. Vui lòng thử lại.",
+                status.HTTP_504_GATEWAY_TIMEOUT,
+                retryable=True,
+            )
+        except AIServiceUnavailableError:
+            logger.warning("Gemini service explanation is temporarily unavailable.")
+            return _explanation_error_response(
+                "ai_unavailable",
+                "Dịch vụ AI đang tạm thời không khả dụng sau số lần thử tối đa. Vui lòng thử lại sau.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                retryable=True,
+            )
+        except AIServiceOutputError:
+            logger.warning("Gemini service explanation returned invalid output.")
+            return _explanation_error_response(
+                "ai_generation_failed",
+                "AI trả về nội dung không hợp lệ. Vui lòng thử lại.",
+                status.HTTP_502_BAD_GATEWAY,
+                retryable=True,
+            )
+        except AIServiceError:
+            logger.warning("Gemini service explanation request failed.")
+            return _explanation_error_response(
+                "ai_generation_failed",
+                "Không thể tạo giải thích do phản hồi không hợp lệ từ dịch vụ AI.",
+                status.HTTP_502_BAD_GATEWAY,
             )
 
         return Response({"answer": answer, "intent": intent}, status=status.HTTP_200_OK)

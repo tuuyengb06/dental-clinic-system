@@ -496,7 +496,7 @@ function ChatWidget() {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
-      text: 'Xin chào! Bạn có thể hỏi giá dịch vụ hoặc giờ khám còn trống. Khi hỏi lịch, vui lòng ghi ngày và tên dịch vụ.'
+      text: 'Xin chào! Bạn có thể hỏi giá, giờ khám còn trống hoặc yêu cầu giải thích một dịch vụ. Khi hỏi lịch, vui lòng ghi ngày và tên dịch vụ.'
     }
   ]);
   const [loading, setLoading] = useState(false);
@@ -548,7 +548,7 @@ function ChatWidget() {
         <div><strong id="chatbot-title">Tư vấn dịch vụ & lịch khám</strong><span>Dựa trên dữ liệu phòng khám</span></div>
         <button type="button" className="chatbot-close" aria-label="Đóng chatbot" onClick={() => setOpen(false)}><X size={18} /></button>
       </header>
-      <div className="chatbot-scope-note">Chỉ tra cứu giá và lịch hiện có; không tư vấn y tế hoặc đặt lịch trong hội thoại.</div>
+      <div className="chatbot-scope-note">Có thể giải thích dịch vụ dựa trên danh mục, tra giá và giờ khám. Không chẩn đoán, tư vấn điều trị hoặc đặt lịch. Không nhập thông tin cá nhân hay bệnh án.</div>
       <div className="chatbot-messages" aria-live="polite" aria-relevant="additions text" aria-busy={loading}>
         {messages.map((message, index) => <div key={`${index}-${message.role}`} className={`chatbot-message ${message.role}`}><p>{message.text}</p></div>)}
         {loading && <div className="chatbot-message assistant"><p role="status">Đang tra cứu…</p></div>}
@@ -556,7 +556,7 @@ function ChatWidget() {
       </div>
       <form className="chatbot-form" onSubmit={sendQuestion}>
         <label className="sr-only" htmlFor="chatbot-question">Câu hỏi</label>
-        <input id="chatbot-question" maxLength={500} value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Hỏi giá hoặc lịch khám…" disabled={loading} />
+        <input id="chatbot-question" maxLength={500} value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Hỏi giá, lịch hoặc giải thích dịch vụ…" disabled={loading} />
         <button type="submit" aria-label="Gửi câu hỏi" disabled={loading || !question.trim()}><Send size={17} /></button>
       </form>
     </section>}

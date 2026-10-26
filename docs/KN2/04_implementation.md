@@ -1,5 +1,7 @@
 # 04. Implementation
 
+> **Lưu ý về thời điểm:** Đây là ảnh chụp trạng thái triển khai ngày 2026-09-08. Các nhận định “chưa có source/0%/Not started” bên dưới chỉ mô tả repository tại thời điểm lập tài liệu, không phải trạng thái hiện tại. Hãy đối chiếu source, test và hướng dẫn chạy hiện hành trong README trước khi nghiệm thu.
+
 ## 1. Document Information
 - Project: Dental Management System (DMS)
 - Version: 1.0

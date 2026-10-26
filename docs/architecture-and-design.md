@@ -2,7 +2,7 @@
 
 ## 1. Mục đích và phạm vi
 
-Tài liệu này đối chiếu kiến trúc và mô hình dữ liệu với source Django/React hiện tại. Hai luồng Gemini (tóm tắt EMR và soạn lời nhắc chung) đã có trong source nhưng là tích hợp tùy chọn; cần consent, khóa nhà cung cấp và cấu hình lịch SMS trước khi hoạt động.
+Tài liệu này đối chiếu kiến trúc và mô hình dữ liệu với source Django/React hiện tại. Các luồng Gemini gồm tóm tắt EMR, soạn lời mời nhắc tái khám chung và giải thích dịch vụ theo mô tả danh mục. Tích hợp Gemini tùy chọn; tóm tắt cần consent, khóa nhà cung cấp, còn nhắc SMS cần consent, cấu hình Twilio và lịch chạy riêng.
 
 Sơ đồ ERD tập trung vào các model nghiệp vụ do Django quản lý. Các bảng nền tảng Django như `django_migrations`, `django_content_type`, `auth_group`, quyền, session và bảng quản trị không được vẽ đầy đủ. Các trường `id` tự tăng được lược khỏi sơ đồ để dễ đọc; các cột quan hệ và trường nghiệp vụ được ghi trực tiếp.
 
@@ -20,7 +20,7 @@ flowchart LR
         Clinic["clinic<br/>patient, service, schedule,<br/>invoice, payment, dashboard"]
         Appt["appointments<br/>appointment, EMR"]
         ReminderJob["Django management command<br/>send_follow_up_reminders"]
-        Chat["ChatbotAPIView<br/>phân loại từ khóa + truy vấn ORM"]
+        Chat["ChatbotAPIView<br/>tra giá/lịch + giải thích dịch vụ"]
         API --> Auth
         API --> Clinic
         API --> Appt
@@ -30,7 +30,7 @@ flowchart LR
     DB[(Cơ sở dữ liệu<br/>SQLite mặc định<br/>SQL Server tùy cấu hình)]
     QR["img.vietqr.io<br/>dịch vụ tạo ảnh QR"]
     Bank["Tài khoản ngân hàng nhận<br/>ngoài hệ thống"]
-    AI["Google Gemini API<br/>tóm tắt EMR + lời nhắc chung<br/>tùy chọn"]
+    AI["Google Gemini API<br/>tóm tắt EMR + lời nhắc chung<br/>+ giải thích dịch vụ, tùy chọn"]
     Scheduler["Windows Task Scheduler<br/>gọi management command mỗi ngày"]
     Notify["Twilio SMS<br/>tùy chọn"]
 
@@ -41,6 +41,7 @@ flowchart LR
     Clinic --> DB
     Appt --> DB
     Chat -->|"giá dịch vụ, bác sĩ,<br/>ca làm, lịch hẹn"| DB
+    Chat -.->|"Chỉ tên + mô tả dịch vụ,<br/>không gửi câu hỏi/lịch sử chat"| AI
     UI -->|"Tải ảnh QR từ URL chứa thông tin chuyển khoản"| QR
     QR -. "QR hướng người chuyển tới tài khoản đã cấu hình" .-> Bank
     Appt -->|"EMR có consent; dữ liệu giảm định danh"| AI
@@ -58,7 +59,7 @@ flowchart LR
 | `authentication` | User tùy biến kế thừa Django `AbstractUser`; cấp và refresh JWT. | `backend/authentication/models.py`, `backend/authentication/urls.py` |
 | `clinic` | Người dùng phòng khám, bác sĩ, bệnh nhân, răng, dịch vụ, ca làm, lập hóa đơn, thanh toán và analytics. | `backend/clinic/models.py`, `backend/clinic/views.py`, `backend/clinic/dashboard.py` |
 | `appointments` | Lịch hẹn đang được dùng trong API và hồ sơ khám EMR. | `backend/appointments/models.py`, `backend/appointments/views.py` |
-| Chatbot | Phân loại quy tắc giá/lịch, đọc dữ liệu từ ORM; không dùng LLM, không đọc hồ sơ bệnh án để trả lời. | `backend/appointments/chatbot.py` |
+| Chatbot | Tra giá/lịch từ ORM; khi được yêu cầu giải thích, gửi riêng tên và mô tả dịch vụ đã chọn tới Gemini. Không gửi câu hỏi/lịch sử chat hoặc hồ sơ bệnh nhân. | `backend/appointments/chatbot.py`, `backend/appointments/ai_services.py` |
 | Tóm tắt EMR | Endpoint bác sĩ/Admin có phân quyền và giới hạn tần suất; chỉ chạy khi bệnh nhân có consent và Gemini được cấu hình. Trả bản nháp, không ghi đè hồ sơ. | `backend/appointments/views.py`, `backend/appointments/ai_services.py` |
 | Nhắc tái khám | Management command đọc ngày tái khám và consent, tạo nội dung chung bằng Gemini rồi gửi qua Twilio; lịch chạy OS được cấu hình riêng. | `backend/appointments/management/commands/send_follow_up_reminders.py`, `backend/appointments/sms_services.py` |
 | Database | SQLite mặc định; có thể chọn SQL Server qua biến môi trường `DMS_DB_ENGINE=mssql`. | `backend/dms/settings.py` |
@@ -66,9 +67,9 @@ flowchart LR
 
 ### Ranh giới hiện trạng và điều kiện kích hoạt
 
-- Không có dịch vụ AI/LLM bên ngoài trong đường chạy chatbot.
+- Tra giá và lịch trong chatbot không gọi AI. Giải thích dịch vụ mới gọi Gemini, chỉ với tên/mô tả công khai của dịch vụ đang hoạt động; câu hỏi gốc, lịch sử chat và dữ liệu bệnh nhân không được đưa vào prompt. Câu trả lời giới hạn theo nguồn và luôn kèm cảnh báo không thay thế tư vấn/chẩn đoán của bác sĩ. Cần cấu hình khóa Gemini và mô tả dịch vụ; thiếu mô tả thì hệ thống không gọi AI.
 - Tóm tắt EMR gọi Gemini qua `POST /api/v1/medical-records/{id}/ai-summary/`; chỉ đọc hồ sơ đã lưu của bác sĩ được phân công hoặc Admin, cần `ai_processing_consent`, giới hạn 10 yêu cầu/giờ và trả kết quả chưa được lưu.
-- Hai API tóm tắt EMR và sinh bản nháp tái khám gọi Gemini với timeout kết nối 3 giây/chờ dữ liệu 15 giây mỗi lần; chỉ retry timeout, lỗi kết nối, HTTP 408/429 và 5xx một lần, cách nhau 0,5 giây. Lỗi timeout trả 504, dịch vụ tạm thời không khả dụng trả 503, dữ liệu đầu vào không hợp lệ trả 400; phản hồi lỗi có `code`, `detail` và `retryable` để giao diện quyết định có hiện nút thử lại. Thử lại thủ công không ghi kết quả vào hồ sơ và không gửi SMS.
+- Các yêu cầu Gemini dùng timeout kết nối 3 giây/chờ dữ liệu 5 giây mỗi lần; chỉ retry timeout, lỗi kết nối, HTTP 408/429 và 5xx một lần, cách nhau 0,5 giây. Lỗi timeout trả 504, dịch vụ tạm thời không khả dụng trả 503, dữ liệu đầu vào không hợp lệ trả 400; API AI trả mã lỗi, nội dung và cờ `retryable` để giao diện quyết định có hiện nút thử lại. Tóm tắt không ghi kết quả vào hồ sơ, bản nháp không tự gửi SMS.
 - API nhắc tái khám chỉ cho Lễ tân/Admin, cần `sms_reminder_consent`, giới hạn 10 yêu cầu/người dùng/giờ; danh sách UI chỉ trả các trường cần để chọn hồ sơ. Bác sĩ không thể truy cập API danh sách/preview.
 - Tóm tắt chỉ gửi chẩn đoán, kế hoạch điều trị, đơn thuốc, ghi chú, tên dịch vụ và mã răng. Backend lọc tên/mã bệnh nhân, số điện thoại, email, ngày sinh đã lưu và các định dạng ngày phổ biến nếu phát hiện; không gửi riêng thông tin ngày sinh, dị ứng, tiền sử, liên hệ hay lịch hẹn từ hồ sơ bệnh nhân. Đây là lọc theo mẫu, không bảo đảm dữ liệu được ẩn danh hoàn toàn; cần consent và duyệt chính sách xử lý dữ liệu của nhà cung cấp.
 - Ngày tái khám được lưu trong `appointments.MedicalRecord.follow_up_date`; `Patient.sms_reminder_consent` và số điện thoại là điều kiện gửi. `FollowUpReminder` lưu trạng thái/mã Twilio và có unique key theo hồ sơ + ngày.

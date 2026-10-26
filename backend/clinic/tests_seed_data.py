@@ -30,6 +30,7 @@ class SeedDentalDataCommandTests(TestCase):
         self.assertTrue(User.objects.get(username="admin").has_usable_password())
         self.assertEqual(first_counts["patients"], 5)
         self.assertEqual(first_counts["services"], 5)
+        self.assertTrue(Service.objects.get(code="FILLING").description)
         self.assertEqual(first_counts["appointments"], 1)
         self.assertEqual(first_counts["scheduled_appointments"], 1)
         self.assertEqual(first_counts["medical_records"], 1)

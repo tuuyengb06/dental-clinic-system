@@ -1,5 +1,7 @@
 # 06. Final Delivery
 
+> **Lưu ý về thời điểm:** Đây là bản bàn giao baseline tài liệu ngày 2026-09-08, được lập trước khi source ứng dụng hiện tại hoàn thiện. Các kết luận “code pending”, “runtime chưa bàn giao” và trạng thái feature trong tài liệu là lịch sử của lần bàn giao đó, không phải đánh giá hiện trạng. Đối chiếu README, source và kết quả test mới nhất trước khi nghiệm thu.
+
 ## 1. Document Information
 - Project: Dental Management System (DMS)
 - Version: 1.0 documentation baseline
