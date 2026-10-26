@@ -9,6 +9,8 @@
 - Testers: QA engineer và nhóm phát triển DMS
 - Review status: Review completed; execution evidence blocked by missing implementation artifacts
 
+> **Historical baseline:** This report records the review state on 2026-09-08, before application source and tests existed. Its `Blocked` and `Not Run` results describe that date and are superseded by the evidence-based update in [06_final_delivery.md](./06_final_delivery.md#implementation-status-update-2026-10-26).
+
 ## 2. Review Scope
 - Requirements review: Kiểm tra phạm vi, vai trò, acceptance criteria, non-functional requirements và out-of-scope trong `01_requirements.md`.
 - Design review: Kiểm tra kiến trúc React/DRF, schema, API, component structure, transaction và RBAC trong `02_design.md`.
