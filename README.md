@@ -79,6 +79,8 @@ Có thể đặt lệnh thứ hai trong Windows Task Scheduler, chạy mỗi ng�
 
 Lễ tân/Admin cũng có thể mở mục **Follow-up reminders**, chọn hồ sơ có ngày tái khám và tạo bản nháp bằng Gemini để xem trước, sao chép gửi thủ công qua SMS hoặc Zalo. Chỉ hồ sơ có SMS consent mới được tạo bản nháp. API `POST /api/ai/generate-reminder` chỉ nhận ID hồ sơ; ngày được lấy từ database và ghép vào câu mời chung do AI tạo. Tên, mã, số điện thoại và dữ liệu lâm sàng không được gửi cho Gemini; bản nháp không tự gửi. Tính năng này cần `DMS_GEMINI_API_KEY`, nhưng không cần cấu hình Twilio để tạo hoặc sao chép bản nháp.
 
+Hai chức năng AI dùng timeout kết nối 3 giây và chờ dữ liệu 15 giây cho mỗi lần gọi. Backend chỉ tự thử lại một lần (tối đa hai lần gọi), nghỉ 0,5 giây giữa các lần và chỉ retry timeout, lỗi kết nối, HTTP 408/429 hoặc 5xx; lỗi cấu hình, dữ liệu đầu vào và phản hồi không hợp lệ không tự retry. API trả mã lỗi cùng cờ `retryable`; giao diện hiển thị thông báo tiếng Việt và chỉ cho thử lại thủ công với lỗi tạm thời. Thử lại không lưu kết quả vào hồ sơ và không gửi tin nhắn.
+
 ## 3. Khởi chạy frontend
 
 Mở một PowerShell mới:

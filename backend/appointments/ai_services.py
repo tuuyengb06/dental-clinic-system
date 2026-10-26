@@ -1,8 +1,14 @@
 import json
 import re
+import time
 
 import requests
 from django.conf import settings
+
+
+AI_REQUEST_TIMEOUT = (3, 15)
+AI_MAX_ATTEMPTS = 2
+AI_RETRY_DELAY_SECONDS = 0.5
 
 
 class AIServiceConfigurationError(Exception):
@@ -10,6 +16,14 @@ class AIServiceConfigurationError(Exception):
 
 
 class AIServiceError(Exception):
+    pass
+
+
+class AIServiceTimeoutError(AIServiceError):
+    pass
+
+
+class AIServiceUnavailableError(AIServiceError):
     pass
 
 
@@ -35,18 +49,48 @@ def _generate_text(prompt, max_output_tokens, system_instruction=None):
             "parts": [{"text": system_instruction}]
         }
 
-    try:
-        response = requests.post(
-            url,
-            headers={"x-goog-api-key": settings.GEMINI_API_KEY},
-            json=request_data,
-            timeout=(5, 30),
-        )
-    except requests.RequestException as error:
-        raise AIServiceError("Gemini could not be reached.") from error
+    response = None
+    for attempt in range(AI_MAX_ATTEMPTS):
+        try:
+            response = requests.post(
+                url,
+                headers={"x-goog-api-key": settings.GEMINI_API_KEY},
+                json=request_data,
+                timeout=AI_REQUEST_TIMEOUT,
+            )
+        except requests.Timeout as error:
+            if attempt == AI_MAX_ATTEMPTS - 1:
+                raise AIServiceTimeoutError("Gemini request timed out.") from error
+            time.sleep(AI_RETRY_DELAY_SECONDS)
+            continue
+        except requests.ConnectionError as error:
+            if attempt == AI_MAX_ATTEMPTS - 1:
+                raise AIServiceUnavailableError("Gemini could not be reached.") from error
+            time.sleep(AI_RETRY_DELAY_SECONDS)
+            continue
+        except requests.RequestException as error:
+            raise AIServiceError("Gemini request failed.") from error
 
-    if response.status_code >= 400:
-        raise AIServiceError(f"Gemini returned HTTP {response.status_code}.")
+        if response.status_code in (408, 429) or response.status_code >= 500:
+            if attempt == AI_MAX_ATTEMPTS - 1:
+                response.close()
+                if response.status_code == 408:
+                    raise AIServiceTimeoutError(
+                        "Gemini request timed out after all attempts."
+                    )
+                raise AIServiceUnavailableError(
+                    f"Gemini returned HTTP {response.status_code} after all attempts."
+                )
+            response.close()
+            time.sleep(AI_RETRY_DELAY_SECONDS)
+            continue
+        if response.status_code >= 400:
+            response.close()
+            raise AIServiceError(f"Gemini returned HTTP {response.status_code}.")
+        break
+
+    if response is None:
+        raise AIServiceUnavailableError("Gemini could not be reached.")
     try:
         data = response.json()
         text = "".join(

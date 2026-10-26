@@ -19,12 +19,25 @@ from .serializers import (
 from .ai_services import (
     AIServiceConfigurationError,
     AIServiceError,
+    AIServiceTimeoutError,
+    AIServiceUnavailableError,
     generate_generic_follow_up_text,
     generate_medical_record_summary,
 )
 from .sms_services import SMSServiceError, build_follow_up_message
 
 logger = logging.getLogger(__name__)
+
+
+def _ai_error_response(code, detail, response_status, retryable=False, errors=None):
+    payload = {
+        "code": code,
+        "detail": detail,
+        "retryable": retryable,
+    }
+    if errors is not None:
+        payload["errors"] = errors
+    return Response(payload, status=response_status)
 
 
 class IsAppointmentStaff(BasePermission):
@@ -141,24 +154,49 @@ class MedicalRecordViewSet(viewsets.ModelViewSet):
     )
     def ai_summary(self, request, pk=None):
         if request.data:
-            raise ValidationError({"detail": "No request fields are needed for an AI summary."})
+            return _ai_error_response(
+                "invalid_input",
+                "API tóm tắt không nhận dữ liệu đầu vào. Hãy lưu hồ sơ rồi thử lại.",
+                status.HTTP_400_BAD_REQUEST,
+            )
         record = self.get_object()
         if not record.appointment.patient.ai_processing_consent:
-            raise ValidationError(
-                {"consent": "Patient consent for AI processing must be recorded first."}
+            return _ai_error_response(
+                "invalid_input",
+                "Cần ghi nhận sự đồng ý xử lý AI của bệnh nhân trước khi tạo tóm tắt.",
+                status.HTTP_400_BAD_REQUEST,
             )
         try:
             summary = generate_medical_record_summary(record)
         except AIServiceConfigurationError as error:
-            return Response(
-                {"detail": str(error)},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            logger.error("Gemini medical-record summary is not configured: %s", error)
+            return _ai_error_response(
+                "ai_unavailable",
+                "Dịch vụ AI chưa được cấu hình. Vui lòng liên hệ quản trị viên.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except AIServiceTimeoutError:
+            logger.warning("Gemini medical-record summary request timed out.")
+            return _ai_error_response(
+                "ai_timeout",
+                "AI phản hồi quá thời gian chờ. Vui lòng thử lại.",
+                status.HTTP_504_GATEWAY_TIMEOUT,
+                retryable=True,
+            )
+        except AIServiceUnavailableError:
+            logger.warning("Gemini medical-record summary is temporarily unavailable.")
+            return _ai_error_response(
+                "ai_unavailable",
+                "Dịch vụ AI đang tạm thời không khả dụng sau số lần thử tối đa. Vui lòng thử lại sau.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                retryable=True,
             )
         except AIServiceError as error:
             logger.warning("Gemini medical-record summary request failed: %s", error)
-            return Response(
-                {"detail": "AI summary could not be generated. Please try again later."},
-                status=status.HTTP_502_BAD_GATEWAY,
+            return _ai_error_response(
+                "ai_generation_failed",
+                "Không thể tạo tóm tắt AI do phản hồi không hợp lệ từ dịch vụ.",
+                status.HTTP_502_BAD_GATEWAY,
             )
         return Response({"summary": summary, "provider": "Gemini"})
 
@@ -184,7 +222,13 @@ class GenerateFollowUpReminderAPIView(APIView):
 
     def post(self, request):
         serializer = FollowUpReminderRequestSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return _ai_error_response(
+                "invalid_input",
+                "Dữ liệu đầu vào không hợp lệ. Vui lòng kiểm tra hồ sơ được chọn.",
+                status.HTTP_400_BAD_REQUEST,
+                errors=serializer.errors,
+            )
         record = MedicalRecord.objects.select_related(
             "appointment__patient"
         ).filter(
@@ -193,32 +237,56 @@ class GenerateFollowUpReminderAPIView(APIView):
             appointment__status=Appointment.Status.CANCELLED
         ).first()
         if record is None:
-            return Response(
-                {"detail": "Follow-up appointment was not found."},
-                status=status.HTTP_404_NOT_FOUND,
+            return _ai_error_response(
+                "record_not_found",
+                "Không tìm thấy lịch tái khám đã chọn.",
+                status.HTTP_404_NOT_FOUND,
             )
         if record.follow_up_date is None:
-            raise ValidationError(
-                {"follow_up_date": "This record has no follow-up date."}
+            return _ai_error_response(
+                "invalid_input",
+                "Hồ sơ chưa có ngày tái khám. Vui lòng kiểm tra dữ liệu hồ sơ.",
+                status.HTTP_400_BAD_REQUEST,
             )
         if not record.appointment.patient.sms_reminder_consent:
-            raise ValidationError(
-                {"consent": "Patient consent for SMS reminders must be recorded first."}
+            return _ai_error_response(
+                "invalid_input",
+                "Chưa ghi nhận SMS consent. Vui lòng xác nhận consent trước khi tạo bản nháp.",
+                status.HTTP_400_BAD_REQUEST,
             )
 
         try:
             generic_text = generate_generic_follow_up_text()
             message = build_follow_up_message(record.follow_up_date, generic_text)
         except AIServiceConfigurationError as error:
-            return Response(
-                {"detail": str(error)},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            logger.error("Gemini follow-up reminder is not configured: %s", error)
+            return _ai_error_response(
+                "ai_unavailable",
+                "Dịch vụ AI chưa được cấu hình. Vui lòng liên hệ quản trị viên.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except AIServiceTimeoutError:
+            logger.warning("Gemini follow-up reminder request timed out.")
+            return _ai_error_response(
+                "ai_timeout",
+                "AI phản hồi quá thời gian chờ. Vui lòng thử lại.",
+                status.HTTP_504_GATEWAY_TIMEOUT,
+                retryable=True,
+            )
+        except AIServiceUnavailableError:
+            logger.warning("Gemini follow-up reminder is temporarily unavailable.")
+            return _ai_error_response(
+                "ai_unavailable",
+                "Dịch vụ AI đang tạm thời không khả dụng sau số lần thử tối đa. Vui lòng thử lại sau.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                retryable=True,
             )
         except (AIServiceError, SMSServiceError) as error:
             logger.warning("AI follow-up reminder preview could not be generated: %s", error)
-            return Response(
-                {"detail": "Reminder preview could not be generated. Please try again later."},
-                status=status.HTTP_502_BAD_GATEWAY,
+            return _ai_error_response(
+                "ai_generation_failed",
+                "Không thể tạo bản nháp do phản hồi không hợp lệ từ dịch vụ AI.",
+                status.HTTP_502_BAD_GATEWAY,
             )
 
         return Response(

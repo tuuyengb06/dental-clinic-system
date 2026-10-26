@@ -68,6 +68,7 @@ flowchart LR
 
 - Không có dịch vụ AI/LLM bên ngoài trong đường chạy chatbot.
 - Tóm tắt EMR gọi Gemini qua `POST /api/v1/medical-records/{id}/ai-summary/`; chỉ đọc hồ sơ đã lưu, cần `ai_processing_consent`, giới hạn 10 yêu cầu/giờ và trả kết quả chưa được lưu.
+- Hai API tóm tắt EMR và sinh bản nháp tái khám gọi Gemini với timeout kết nối 3 giây/chờ dữ liệu 15 giây mỗi lần; chỉ retry timeout, lỗi kết nối, HTTP 408/429 và 5xx một lần, cách nhau 0,5 giây. Lỗi timeout trả 504, dịch vụ tạm thời không khả dụng trả 503, dữ liệu đầu vào không hợp lệ trả 400; phản hồi lỗi có `code`, `detail` và `retryable` để giao diện quyết định có hiện nút thử lại. Thử lại thủ công không ghi kết quả vào hồ sơ và không gửi SMS.
 - Trước khi gửi trường lâm sàng, backend loại bỏ các định danh nhận diện trực tiếp được phát hiện (tên/mã/điện thoại của bệnh nhân, email, ngày phổ biến). Đây là lọc theo mẫu, không bảo đảm dữ liệu được ẩn danh hoàn toàn; cần consent và duyệt chính sách xử lý dữ liệu của nhà cung cấp.
 - Ngày tái khám được lưu trong `appointments.MedicalRecord.follow_up_date`; `Patient.sms_reminder_consent` và số điện thoại là điều kiện gửi. `FollowUpReminder` lưu trạng thái/mã Twilio và có unique key theo hồ sơ + ngày.
 - Lệnh `python manage.py send_follow_up_reminders` cần được Windows Task Scheduler hoặc scheduler ngoài gọi hằng ngày; repository không tự đăng ký tác vụ hệ điều hành và tích hợp không hoạt động nếu thiếu biến môi trường Gemini/Twilio.
@@ -360,7 +361,7 @@ sequenceDiagram
     UI-->>Dentist: Hiển thị bản nháp để bác sĩ tham khảo
 ```
 
-Endpoint chỉ nhận body rỗng, giới hạn 10 yêu cầu/giờ và không lưu summary. Thiếu cấu hình trả HTTP 503; lỗi gọi/đọc phản hồi Gemini trả HTTP 502. Việc lọc định danh là heuristic; không đảm bảo ẩn danh hoàn toàn. Summary có thể sai hoặc bỏ sót, không phải chẩn đoán/kết luận điều trị và cần bác sĩ đánh giá độc lập. Chỉ bật sau khi phòng khám phê duyệt consent và điều khoản xử lý dữ liệu sức khỏe của Gemini.
+Endpoint chỉ nhận body rỗng, giới hạn 10 yêu cầu/giờ và không lưu summary. Timeout sau số lần thử tối đa trả HTTP 504; dịch vụ tạm thời không khả dụng trả HTTP 503; thiếu cấu hình cũng trả HTTP 503 nhưng không retry; đầu vào không hợp lệ trả HTTP 400; phản hồi AI không dùng được trả HTTP 502. API lỗi có `code`, `detail` và `retryable`; giao diện cho phép thử lại thủ công khi lỗi được đánh dấu tạm thời. Mỗi request thử lại tối đa một lần, tổng cộng tối đa hai lần gọi Gemini. Việc lọc định danh là heuristic; không đảm bảo ẩn danh hoàn toàn. Summary có thể sai hoặc bỏ sót, không phải chẩn đoán/kết luận điều trị và cần bác sĩ đánh giá độc lập. Chỉ bật sau khi phòng khám phê duyệt consent và điều khoản xử lý dữ liệu sức khỏe của Gemini.
 
 ### 4.2 Sinh tin nhắn nhắc tái khám bằng AI
 
@@ -425,7 +426,7 @@ sequenceDiagram
     UI-->>Receptionist: Xem trước và sao chép để tự gửi qua SMS/Zalo
 ```
 
-Danh sách chỉ gồm hồ sơ EMR có ngày tái khám và lịch chưa hủy; các trường hiển thị được giới hạn cho mục đích chọn lịch. API tạo preview chỉ nhận `medical_record_id`, yêu cầu vai trò Lễ tân/Admin và SMS consent, rồi lấy ngày từ database thay vì tin dữ liệu do trình duyệt gửi. Gemini chỉ sinh lời mời tĩnh, không nhận ngày hay dữ liệu bệnh nhân; backend ghép ngày chính xác vào câu trả lời và từ chối nội dung vượt 70 đơn vị UTF-16. HTTP 503 biểu thị thiếu cấu hình Gemini; lỗi/đầu ra không dùng được trả HTTP 502. Preview không lưu hoặc gửi tin nhắn; hiện chưa có retry, giới hạn số lần gọi riêng cho endpoint này, hay gửi trực tiếp qua SMS/Zalo.
+Danh sách chỉ gồm hồ sơ EMR có ngày tái khám và lịch chưa hủy; các trường hiển thị được giới hạn cho mục đích chọn lịch. API tạo preview chỉ nhận `medical_record_id`, yêu cầu vai trò Lễ tân/Admin và SMS consent, rồi lấy ngày từ database thay vì tin dữ liệu do trình duyệt gửi. Gemini chỉ sinh lời mời tĩnh, không nhận ngày hay dữ liệu bệnh nhân; backend ghép ngày chính xác vào câu trả lời và từ chối nội dung vượt 70 đơn vị UTF-16. Timeout trả HTTP 504; lỗi kết nối/HTTP 429 hoặc 5xx kéo dài qua retry trả HTTP 503; thiếu cấu hình trả HTTP 503 không retry; đầu vào không hợp lệ trả HTTP 400; đầu ra không dùng được trả HTTP 502. Preview không lưu hoặc gửi tin nhắn; retry thủ công dùng lại hồ sơ đã chọn và không tạo bản ghi mới.
 
 ## 5. Kiểm tra nhất quán và giới hạn tài liệu
 
