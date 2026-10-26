@@ -22,6 +22,8 @@ Phần bàn giao ban đầu bên dưới được lập ngày 2026-09-08, trư�
 
 Các kết quả 139 tests thuộc hai nhánh riêng biệt; chưa phải kết quả của một build tích hợp chứa đồng thời cả ba tính năng. Cần chạy lại suite sau khi các PR được review và hợp nhất.
 
+Kiểm tra tích hợp bổ sung tại máy phát triển: tạo nhánh local không push, hợp nhất lần lượt hai commit tính năng Tooth Chart và AI lên `origin/main`; toàn bộ **142 backend tests** pass, frontend production build pass, Django checks, migration check và cấu hình Compose pass. Đây là bằng chứng tích hợp của các commit hiện tại, nhưng chưa thay thế việc kiểm tra lại sau khi PR được hợp nhất trên GitHub.
+
 ### Acceptance items still requiring external verification
 
 - Docker Compose syntax đã được kiểm tra, nhưng Docker Engine không chạy trong môi trường kiểm tra này; chưa nghiệm thu khởi chạy container trên môi trường sạch.
