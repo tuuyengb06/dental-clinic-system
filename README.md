@@ -165,7 +165,11 @@ Backend có thể kiểm tra bằng:
 ```powershell
 cd backend
 python manage.py check
+python manage.py test appointments.tests_business_workflow
+python manage.py test
 ```
+
+`appointments.tests_business_workflow` kiểm thử API xuyên suốt từ tiếp nhận bệnh nhân, đặt lịch, lập EMR, tóm tắt/preview AI đến lập hóa đơn và thanh toán tiền mặt hoặc QR. Gemini được giả lập trong kiểm thử; ca lỗi bao gồm thời gian đặt ngoài ca, hồ sơ thiếu dữ liệu, AI tạm lỗi, hóa đơn thiếu dịch vụ và đối soát QR sai số tiền, sau đó xác nhận có thể thử lại mà không làm sai lệch dữ liệu.
 
 ## 7. Chụp ảnh minh chứng
 
@@ -180,4 +184,4 @@ python manage.py check
 
 ## Phạm vi MVP
 
-Đã có giao diện tiếp nhận tra cứu hồ sơ theo mã bệnh nhân, họ tên hoặc số điện thoại, hiển thị thông tin định danh, ngày sinh, kiểu răng, dị ứng, tiền sử bệnh và các lịch hẹn hiện có. API tra cứu trả lỗi đầu vào rõ ràng cho truy vấn trống hoặc ký tự không hợp lệ. EMR lưu chẩn đoán, hướng điều trị dạng ghi chú, răng được chọn và danh sách dịch vụ qua `/api/v1/medical-records/`; API chưa cung cấp luồng TreatmentPlan/TreatmentItem riêng để lưu số lượng hoặc gắn riêng từng dịch vụ với từng răng. Hóa đơn được tạo từ các dịch vụ chỉ định lưu trên hồ sơ khám, hỗ trợ đơn giá/số lượng/thành tiền và trạng thái chưa thanh toán; giao diện cũng hỗ trợ xác nhận thanh toán đủ bằng tiền mặt, lưu giao dịch và cập nhật hóa đơn sang `PAID`. Chuyển khoản QR, chatbot AI, ảnh radiograph và dashboard doanh thu vẫn ngoài phạm vi.
+Đã có giao diện tiếp nhận tra cứu hồ sơ theo mã bệnh nhân, họ tên hoặc số điện thoại, hiển thị thông tin định danh, ngày sinh, kiểu răng, dị ứng, tiền sử bệnh và các lịch hẹn hiện có. API tra cứu trả lỗi đầu vào rõ ràng cho truy vấn trống hoặc ký tự không hợp lệ. EMR lưu chẩn đoán, hướng điều trị dạng ghi chú, răng được chọn và danh sách dịch vụ qua `/api/v1/medical-records/`; API chưa cung cấp luồng TreatmentPlan/TreatmentItem riêng để lưu số lượng hoặc gắn riêng từng dịch vụ với từng răng. Hóa đơn được tạo từ các dịch vụ chỉ định lưu trên hồ sơ khám, hỗ trợ đơn giá/số lượng/thành tiền và trạng thái chưa thanh toán; giao diện cũng hỗ trợ thanh toán tiền mặt và chuyển khoản QR với đối soát thủ công. Tóm tắt EMR và bản nháp nhắc tái khám bằng AI là các tích hợp riêng, cần consent và cấu hình nhà cung cấp; dashboard doanh thu có API riêng. MVP chưa có xác minh chuyển khoản tự động từ ngân hàng.
