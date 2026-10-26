@@ -77,6 +77,8 @@ python manage.py send_follow_up_reminders
 
 Có thể đặt lệnh thứ hai trong Windows Task Scheduler, chạy mỗi ngày bằng tài khoản dịch vụ có quyền truy cập database. Chỉ bỏ `--dry-run` sau khi kiểm thử cấu hình. Lệnh tạo nội dung SMS chung bằng Gemini, không gửi bệnh án cho Gemini để viết tin nhắn; chỉ SMS có ngày tái khám được gửi tới Twilio. Twilio có thể tính phí tin nhắn và số gửi đi cần được cấu hình/duyệt tại tài khoản Twilio. Bảng `FollowUpReminder` lưu trạng thái và mã giao dịch để không gửi trùng cùng một lần tái khám. Lỗi từ chối rõ ràng có thể được thử lại; nếu kết quả từ Twilio không xác định, trạng thái `UNKNOWN` không được tự gửi lại để tránh gửi trùng và cần kiểm tra tại Twilio.
 
+Lễ tân/Admin cũng có thể mở mục **Follow-up reminders**, chọn hồ sơ có ngày tái khám và tạo bản nháp bằng Gemini để xem trước, sao chép gửi thủ công qua SMS hoặc Zalo. Chỉ hồ sơ có SMS consent mới được tạo bản nháp. API `POST /api/ai/generate-reminder` chỉ nhận ID hồ sơ; ngày được lấy từ database và ghép vào câu mời chung do AI tạo. Tên, mã, số điện thoại và dữ liệu lâm sàng không được gửi cho Gemini; bản nháp không tự gửi. Tính năng này cần `DMS_GEMINI_API_KEY`, nhưng không cần cấu hình Twilio để tạo hoặc sao chép bản nháp.
+
 ## 3. Khởi chạy frontend
 
 Mở một PowerShell mới:

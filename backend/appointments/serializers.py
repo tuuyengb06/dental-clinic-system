@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from datetime import timedelta
 
 from django.db.models import Q
@@ -173,3 +174,53 @@ class MedicalRecordSerializer(serializers.ModelSerializer):
         if any(not service.is_active for service in services):
             raise serializers.ValidationError("Inactive services cannot be prescribed.")
         return services
+
+
+class FollowUpAppointmentSerializer(serializers.ModelSerializer):
+    appointment_id = serializers.IntegerField(read_only=True)
+    appointment_date = serializers.DateTimeField(
+        source="appointment.appointment_date",
+        read_only=True,
+    )
+    patient_name = serializers.CharField(
+        source="appointment.patient.full_name",
+        read_only=True,
+    )
+    patient_code = serializers.CharField(
+        source="appointment.patient.patient_code",
+        read_only=True,
+    )
+    dentist_name = serializers.SerializerMethodField()
+    sms_reminder_consent = serializers.BooleanField(
+        source="appointment.patient.sms_reminder_consent",
+        read_only=True,
+    )
+
+    class Meta:
+        model = MedicalRecord
+        fields = [
+            "id",
+            "appointment_id",
+            "appointment_date",
+            "patient_name",
+            "patient_code",
+            "dentist_name",
+            "follow_up_date",
+            "sms_reminder_consent",
+        ]
+        read_only_fields = fields
+
+    def get_dentist_name(self, record):
+        user = record.appointment.doctor.clinic_user.user
+        return user.get_full_name() or user.username
+
+
+class FollowUpReminderRequestSerializer(serializers.Serializer):
+    medical_record_id = serializers.IntegerField(min_value=1)
+
+    def to_internal_value(self, data):
+        if isinstance(data, Mapping) and set(data) - set(self.fields):
+            raise serializers.ValidationError(
+                {"detail": "Only medical_record_id is accepted."}
+            )
+        return super().to_internal_value(data)

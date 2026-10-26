@@ -331,9 +331,9 @@ erDiagram
 - `BankTransferVerification` là thông tin kiểm toán cho đối soát thủ công, một-một với Payment đã được xác minh; mã tham chiếu là duy nhất.
 - Quan hệ/cột `SET_NULL`, nullable và các giá trị trạng thái phải được đọc cùng `backend/clinic/models.py` và `backend/appointments/models.py`; ERD tập trung thể hiện FK và cardinality, không mã hóa mọi `on_delete`.
 
-## 4. Sequence cho hai luồng AI tùy chọn
+## 4. Sequence cho các luồng AI tùy chọn
 
-Các luồng dưới đây mô tả source hiện tại. Gemini và Twilio chỉ được gọi khi cấu hình credential; gửi SMS cần consent và một lịch chạy OS do đơn vị vận hành tự thiết lập. Không có API webhook ngân hàng hay chatbot LLM trong các luồng này.
+Các luồng dưới đây mô tả source hiện tại. Gemini và Twilio chỉ được gọi khi cấu hình credential; gửi SMS cần consent và một lịch chạy OS do đơn vị vận hành tự thiết lập. Không có API webhook ngân hàng trong các luồng này.
 
 ### 4.1 Tóm tắt hồ sơ bệnh án bằng AI
 
@@ -395,6 +395,37 @@ sequenceDiagram
 ```
 
 Command gửi lời mời chung có ngày tái khám, không đưa hồ sơ lâm sàng hay thông tin nhận diện vào prompt Gemini. `--dry-run` chỉ đếm hồ sơ đủ điều kiện, không gửi và không tạo delivery record. Delivery `FAILED` có thể được thử lại ở lần chạy sau; `UNKNOWN` không tự retry để tránh SMS trùng, cần đối chiếu trong Twilio. Trạng thái `SENDING` cũ hơn 30 phút được chuyển `UNKNOWN`. Command không tạo lịch hệ điều hành: cần tự cấu hình Task Scheduler, kiểm thử `--dry-run`, xác nhận tuyến gửi/chi phí SMS tại Twilio và chỉ sau đó mới chạy thật. Nội dung Gemini được gửi tự động, không có bước duyệt thủ công trước khi gửi.
+
+### 4.3 Lễ tân tạo bản nháp nhắc tái khám
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Receptionist as Lễ tân
+    participant UI as React UI
+    participant API as Django REST API
+    participant DB as Database
+    participant AI as Google Gemini API
+
+    Receptionist->>UI: Mở Follow-up reminders và chọn hồ sơ
+    UI->>API: GET /api/v1/follow-up-appointments/ (JWT)
+    API->>API: Xác thực vai trò Receptionist/Admin
+    API->>DB: Lấy EMR có follow_up_date, không gồm lịch đã hủy
+    DB-->>API: Ngày tái khám, lịch hẹn, bệnh nhân và SMS consent
+    API-->>UI: Trả các trường cần thiết cho danh sách
+    Receptionist->>UI: Bấm tạo bản nháp
+    UI->>API: POST /api/ai/generate-reminder (medical_record_id)
+    API->>DB: Đọc ngày tái khám và SMS consent từ hồ sơ
+    API->>API: Từ chối nếu thiếu ngày hoặc consent
+    API->>AI: System prompt + user prompt chỉ xin lời mời chung
+    Note over API,AI: Không gửi ID hồ sơ, ngày, tên, mã, điện thoại hay dữ liệu lâm sàng
+    AI-->>API: Một câu mời liên hệ phòng khám
+    API->>API: Ghép ngày đã lưu; kiểm tra giới hạn một SMS 70 ký tự
+    API-->>UI: Trả nội dung preview, sent=false
+    UI-->>Receptionist: Xem trước và sao chép để tự gửi qua SMS/Zalo
+```
+
+Danh sách chỉ gồm hồ sơ EMR có ngày tái khám và lịch chưa hủy; các trường hiển thị được giới hạn cho mục đích chọn lịch. API tạo preview chỉ nhận `medical_record_id`, yêu cầu vai trò Lễ tân/Admin và SMS consent, rồi lấy ngày từ database thay vì tin dữ liệu do trình duyệt gửi. Gemini chỉ sinh lời mời tĩnh, không nhận ngày hay dữ liệu bệnh nhân; backend ghép ngày chính xác vào câu trả lời và từ chối nội dung vượt 70 đơn vị UTF-16. HTTP 503 biểu thị thiếu cấu hình Gemini; lỗi/đầu ra không dùng được trả HTTP 502. Preview không lưu hoặc gửi tin nhắn; hiện chưa có retry, giới hạn số lần gọi riêng cho endpoint này, hay gửi trực tiếp qua SMS/Zalo.
 
 ## 5. Kiểm tra nhất quán và giới hạn tài liệu
 

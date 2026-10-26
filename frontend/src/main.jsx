@@ -1,31 +1,32 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Activity, CalendarDays, ChevronDown, CircleDollarSign, ClipboardPlus, FileImage, LayoutDashboard, Menu, MessageCircle, Pencil, Plus, Search, Send, ShieldCheck, Stethoscope, Trash2, UserRound, Users, X } from 'lucide-react';
+import { Activity, CalendarDays, ChevronDown, CircleDollarSign, ClipboardPlus, Copy, FileImage, LayoutDashboard, Menu, MessageCircle, Pencil, Plus, Search, Send, ShieldCheck, Stethoscope, Trash2, UserRound, Users, X } from 'lucide-react';
 import './styles.css';
 import './app.css';
 
 const API = import.meta.env.DEV ? '/api/v1' : (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1');
-const AI_CHAT_API = API.replace(/\/v1\/?$/, '/ai/chat');
+const API_ROOT = API.replace(/\/v1\/?$/, '');
+const AI_CHAT_API = `${API_ROOT}/ai/chat`;
 const teethAdult = Array.from({ length: 32 }, (_, i) => ({ id: i + 1, code: `A${String(i + 1).padStart(2, '0')}`, state: i === 6 || i === 18 ? 'Needs care' : 'Healthy' }));
 const teethChild = Array.from({ length: 20 }, (_, i) => ({ id: i + 1, code: `C${String(i + 1).padStart(2, '0')}`, state: i === 3 ? 'Monitor' : 'Healthy' }));
 const navigationByRole = {
   ADMIN: [
     ['Overview', LayoutDashboard], ['Patients', Users], ['Appointments', CalendarDays], ['Tooth chart', Stethoscope],
-    ['Billing', CircleDollarSign], ['Radiographs', FileImage], ['Services', ClipboardPlus], ['Doctors', UserRound], ['Reception', UserRound], ['EMR', ClipboardPlus]
+    ['Follow-up reminders', MessageCircle], ['Billing', CircleDollarSign], ['Radiographs', FileImage], ['Services', ClipboardPlus], ['Doctors', UserRound], ['Reception', UserRound], ['EMR', ClipboardPlus]
   ],
   DENTIST: [
     ['Overview', LayoutDashboard], ['Patients', Users], ['Appointments', CalendarDays],
     ['Tooth chart', Stethoscope], ['Radiographs', FileImage], ['EMR', ClipboardPlus]
   ],
   RECEPTIONIST: [
-    ['Overview', LayoutDashboard], ['Reception', UserRound], ['Appointments', CalendarDays], ['Patients', Users], ['Billing', CircleDollarSign]
+    ['Overview', LayoutDashboard], ['Reception', UserRound], ['Appointments', CalendarDays], ['Follow-up reminders', MessageCircle], ['Patients', Users], ['Billing', CircleDollarSign]
   ]
 };
 
 const TOKEN_STORAGE_KEY = 'dms.auth.tokens';
 
-async function apiRequest(path, { tokens, onTokens, method = 'GET', body } = {}) {
-  const send = (accessToken) => fetch(`${API}${path}`, {
+async function apiRequest(path, { tokens, onTokens, method = 'GET', body, baseUrl = API } = {}) {
+  const sendToBase = (accessToken) => fetch(`${baseUrl}${path}`, {
     method,
     headers: {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
@@ -34,7 +35,7 @@ async function apiRequest(path, { tokens, onTokens, method = 'GET', body } = {})
     ...(body ? { body: JSON.stringify(body) } : {})
   });
 
-  let response = await send(tokens?.access);
+  let response = await sendToBase(tokens?.access);
   if (response.status === 401 && tokens?.refresh && onTokens) {
     const refreshed = await fetch(`${API}/auth/token/refresh/`, {
       method: 'POST',
@@ -47,7 +48,7 @@ async function apiRequest(path, { tokens, onTokens, method = 'GET', body } = {})
     }
     const nextTokens = { ...tokens, ...(await refreshed.json()) };
     onTokens(nextTokens);
-    response = await send(nextTokens.access);
+    response = await sendToBase(nextTokens.access);
   }
 
   const payload = response.status === 204 ? null : await response.json().catch(() => null);
@@ -67,6 +68,7 @@ function App() {
   const [schedules, setSchedules] = useState([]);
   const [teeth, setTeeth] = useState([]);
   const [medicalRecords, setMedicalRecords] = useState([]);
+  const [followUpAppointments, setFollowUpAppointments] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [invoiceSources, setInvoiceSources] = useState([]);
   const [tokens, setTokens] = useState(null);
@@ -139,6 +141,9 @@ function App() {
         apiRequest('/invoices/available-records/', { tokens, onTokens: updateTokens })
       ])
       : Promise.resolve([[], []]);
+    const followUpRequest = currentRole === 'ADMIN' || currentRole === 'RECEPTIONIST'
+      ? apiRequest('/follow-up-appointments/', { tokens, onTokens: updateTokens })
+      : Promise.resolve([]);
     Promise.all([
       apiRequest('/patients/', { tokens, onTokens: updateTokens }),
       apiRequest('/appointments/', { tokens, onTokens: updateTokens }),
@@ -147,8 +152,9 @@ function App() {
       apiRequest('/schedules/', { tokens, onTokens: updateTokens }),
       apiRequest('/teeth/', { tokens, onTokens: updateTokens }),
       recordRequest,
-      billingRequest
-    ]).then(([patientData, appointmentData, doctorData, serviceData, scheduleData, toothData, recordData, billingData]) => {
+      billingRequest,
+      followUpRequest
+    ]).then(([patientData, appointmentData, doctorData, serviceData, scheduleData, toothData, recordData, billingData, followUpData]) => {
       setPatients(patientData);
       setAppointments(appointmentData);
       setDoctors(doctorData);
@@ -156,6 +162,7 @@ function App() {
       setSchedules(scheduleData);
       setTeeth(toothData);
       setMedicalRecords(recordData);
+      setFollowUpAppointments(followUpData);
       setInvoices(billingData[0]);
       setInvoiceSources(billingData[1]);
       setApiLive(true);
@@ -289,6 +296,16 @@ function App() {
     });
   }
 
+  async function generateFollowUpReminder(recordId) {
+    return apiRequest('/ai/generate-reminder', {
+      tokens,
+      onTokens: updateTokens,
+      method: 'POST',
+      body: { medical_record_id: recordId },
+      baseUrl: API_ROOT
+    });
+  }
+
   async function login(username, password) {
     const nextTokens = await apiRequest('/auth/token/', { method: 'POST', body: { username, password } });
     const currentUser = await apiRequest('/auth/me/', { tokens: nextTokens });
@@ -327,6 +344,7 @@ function App() {
       {section === 'Patients' && <Patients patients={visiblePatients} query={query} setQuery={setQuery} onCreatePatient={createPatient} onUpdatePatient={updatePatient} canCreate={role === 'ADMIN' || role === 'RECEPTIONIST'} />}
       {section === 'Reception' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Reception tokens={tokens} onTokensChanged={updateTokens} appointments={appointments} setSection={setSection} />}
       {section === 'Appointments' && <Appointments appointments={appointments} patients={patients} doctors={doctors} services={services} schedules={schedules} role={role} loading={apiLoading} loadError={apiError} onCreateAppointment={createAppointment} onCreateSchedule={createSchedule} onCancelAppointment={cancelAppointment} />}
+      {section === 'Follow-up reminders' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <FollowUpReminders records={followUpAppointments} loading={apiLoading} loadError={apiError} onGenerate={generateFollowUpReminder} />}
       {section === 'EMR' && (role === 'DENTIST' || role === 'ADMIN') && <MedicalRecords appointments={appointments} patients={patients} services={services} teeth={teeth} records={medicalRecords} loading={apiLoading} loadError={apiError} onSave={saveMedicalRecord} onGenerateSummary={generateAiSummary} />}
       {section === 'Tooth chart' && <ToothChart dentition={dentition} setDentition={setDentition} selectedTooth={selectedTooth} setSelectedTooth={setSelectedTooth} />}
       {section === 'Billing' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Billing invoices={invoices} records={invoiceSources} loading={apiLoading} onCreateInvoice={createInvoice} onPayCash={payInvoiceCash} onCreateQr={createInvoiceQr} onReconcileQr={reconcileInvoiceQr} onCancelQr={cancelInvoiceQr} />}
@@ -336,6 +354,106 @@ function App() {
     </main>
     <ChatWidget />
   </div>;
+}
+
+function FollowUpReminders({ records, loading, loadError, onGenerate }) {
+  const [selectedRecordId, setSelectedRecordId] = useState('');
+  const [preview, setPreview] = useState(null);
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState('');
+  const [copyStatus, setCopyStatus] = useState('');
+  const selectedRecord = records.find((record) => String(record.id) === selectedRecordId);
+
+  function selectRecord(record) {
+    setSelectedRecordId(String(record.id));
+    setPreview(null);
+    setError('');
+    setCopyStatus('');
+  }
+
+  async function generatePreview() {
+    if (!selectedRecord || !selectedRecord.sms_reminder_consent || generating) return;
+    setGenerating(true);
+    setError('');
+    setCopyStatus('');
+    setPreview(null);
+    try {
+      setPreview(await onGenerate(selectedRecord.id));
+    } catch (requestError) {
+      setError(requestError.message || 'Không tạo được tin nhắn nhắc tái khám.');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function copyPreview() {
+    if (!preview?.message) return;
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('Trình duyệt không hỗ trợ sao chép tự động. Hãy chọn nội dung để sao chép.');
+      }
+      await navigator.clipboard.writeText(preview.message);
+      setCopyStatus('Đã sao chép tin nhắn.');
+    } catch (copyError) {
+      setCopyStatus(copyError.message || 'Không thể sao chép tin nhắn.');
+    }
+  }
+
+  function formatDate(value) {
+    return value ? new Date(`${value}T00:00:00`).toLocaleDateString('vi-VN') : '—';
+  }
+
+  return <section className="page-section management-page">
+    <div className="section-toolbar">
+      <div><span className="eyebrow">FOLLOW-UP APPOINTMENTS</span><h2>Follow-up reminders</h2></div>
+      <span className="pill">{records.length} records</span>
+    </div>
+    <p className="management-hint follow-up-intro">Chọn hồ sơ có ngày tái khám để tạo bản nháp. Chỉ hồ sơ đã có SMS consent mới được tạo; nội dung không tự gửi qua SMS/Zalo.</p>
+    {loadError && <div className="form-error" role="alert">{loadError}</div>}
+    {loading ? <p className="management-state" role="status">Đang tải lịch tái khám…</p> : !records.length
+      ? <div className="panel management-state">Chưa có hồ sơ nào được ghi ngày tái khám.</div>
+      : <div className="follow-up-layout">
+        <section className="panel table-panel management-table follow-up-list-panel">
+          <div className="panel-heading"><div><span className="eyebrow">EMR FOLLOW-UP DATES</span><h3>Danh sách lịch tái khám</h3></div></div>
+          <div className="follow-up-table-scroll"><table aria-label="Danh sách lịch tái khám">
+            <thead><tr><th>Bệnh nhân</th><th>Lịch khám</th><th>Ngày tái khám</th><th>SMS consent</th></tr></thead>
+            <tbody>{records.map((record) => <tr
+              key={record.id}
+              className={String(record.id) === selectedRecordId ? 'follow-up-row-selected' : ''}
+              aria-selected={String(record.id) === selectedRecordId}
+              onClick={() => selectRecord(record)}
+            >
+              <td><button className="follow-up-select" type="button" onClick={() => selectRecord(record)}>{record.patient_name}</button><small>{record.patient_code}</small></td>
+              <td>{new Date(record.appointment_date).toLocaleString('vi-VN')}<small>{record.dentist_name}</small></td>
+              <td>{formatDate(record.follow_up_date)}</td>
+              <td><span className={`pill ${record.sms_reminder_consent ? 'follow-up-consent-on' : 'inactive'}`}>{record.sms_reminder_consent ? 'Đã đồng ý' : 'Chưa đồng ý'}</span></td>
+            </tr>)}</tbody>
+          </table></div>
+        </section>
+        <section className="panel follow-up-preview-panel">
+          <div className="panel-heading"><div><span className="eyebrow">AI MESSAGE PREVIEW</span><h3>Tạo tin nhắn</h3></div></div>
+          <p className="management-hint">AI chỉ tạo lời mời chung; ngày tái khám được lấy từ hồ sơ đã lưu và ghép bởi hệ thống. Không gửi thông tin bệnh nhân hoặc bệnh án cho AI.</p>
+          {selectedRecord && <div className="follow-up-selected">
+            <strong>{selectedRecord.patient_name}</strong>
+            <span>Tái khám: {formatDate(selectedRecord.follow_up_date)}</span>
+          </div>}
+          {selectedRecord && !selectedRecord.sms_reminder_consent && <div className="form-error" role="alert">Chưa ghi nhận SMS consent. Hãy xác nhận consent trước khi tạo bản nháp.</div>}
+          <button className="primary-button" type="button" disabled={!selectedRecord?.sms_reminder_consent || generating} onClick={generatePreview}>
+            <MessageCircle size={16} />{generating ? 'Đang tạo…' : 'Tạo tin nhắn bằng AI'}
+          </button>
+          {error && <div className="form-error" role="alert">{error}</div>}
+          {preview && <div className="follow-up-generated">
+            <label htmlFor="follow-up-message">Nội dung xem trước</label>
+            <textarea id="follow-up-message" readOnly value={preview.message} rows={3} />
+            <div className="follow-up-preview-actions">
+              <span>{preview.message.length}/70 ký tự · Chưa gửi</span>
+              <button className="secondary-button" type="button" onClick={copyPreview}><Copy size={15} />Sao chép</button>
+            </div>
+          </div>}
+          {copyStatus && <div className={copyStatus.startsWith('Đã') ? 'form-success' : 'form-error'} role="status">{copyStatus}</div>}
+        </section>
+      </div>}
+  </section>;
 }
 
 function ChatWidget() {

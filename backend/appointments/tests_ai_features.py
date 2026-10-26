@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import date, timedelta
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
@@ -279,3 +279,310 @@ class TwilioSMSServiceTests(TestCase):
             send_sms("not-a-phone", "Mời bạn tái khám.")
 
         post.assert_not_called()
+
+
+class FollowUpReminderPreviewTests(TestCase):
+    def setUp(self):
+        receptionist_role = Role.objects.create(
+            code="RECEPTIONIST",
+            name="Receptionist",
+        )
+        dentist_role = Role.objects.create(code="DENTIST", name="Dentist")
+        receptionist = User.objects.create_user(
+            username="reminder-receptionist",
+            password="ReceptionPass123!",
+        )
+        dentist_user = User.objects.create_user(
+            username="reminder-dentist",
+            password="DentistPass123!",
+            first_name="Linh",
+            last_name="Dentist",
+        )
+        ClinicUser.objects.create(user=receptionist, role=receptionist_role)
+        dentist_profile = ClinicUser.objects.create(
+            user=dentist_user,
+            role=dentist_role,
+        )
+        self.doctor = Doctor.objects.create(
+            clinic_user=dentist_profile,
+            license_number="REMINDER-API-001",
+        )
+        self.receptionist = receptionist
+        self.patient = Patient.objects.create(
+            patient_code="REMINDER-API-001",
+            full_name="Private Reminder Patient",
+            phone="0912345678",
+            sms_reminder_consent=True,
+        )
+        self.record = self.create_record(self.patient, date(2026, 11, 3))
+        self.client = APIClient()
+        self.client.force_authenticate(receptionist)
+
+    def create_record(self, patient, follow_up_date):
+        appointment = Appointment.objects.create(
+            patient=patient,
+            doctor=self.doctor,
+            appointment_date=timezone.now(),
+        )
+        return MedicalRecord.objects.create(
+            appointment=appointment,
+            diagnosis="Private diagnosis",
+            treatment_plan="Private treatment plan",
+            follow_up_date=follow_up_date,
+        )
+
+    def test_follow_up_list_returns_selected_fields_without_clinical_data(self):
+        no_consent_patient = Patient.objects.create(
+            patient_code="REMINDER-API-002",
+            full_name="No Consent Patient",
+            sms_reminder_consent=False,
+        )
+        no_consent_record = self.create_record(
+            no_consent_patient,
+            date(2026, 11, 5),
+        )
+        missing_date_patient = Patient.objects.create(
+            patient_code="REMINDER-API-003",
+            full_name="Missing Date Patient",
+            sms_reminder_consent=True,
+        )
+        self.create_record(missing_date_patient, None)
+
+        response = self.client.get("/api/v1/follow-up-appointments/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            {item["id"] for item in response.data},
+            {self.record.pk, no_consent_record.pk},
+        )
+        self.assertEqual(response.data[0]["follow_up_date"], "2026-11-03")
+        self.assertIn("sms_reminder_consent", response.data[0])
+        self.assertNotIn("diagnosis", response.data[0])
+        self.assertNotIn("phone", response.data[0])
+
+    @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
+    @patch(
+        "appointments.views.generate_generic_follow_up_text",
+        return_value="Vui lòng liên hệ phòng khám.",
+    )
+    def test_preview_uses_saved_date_and_returns_unsent_message(self, generate_text):
+        response = self.client.post(
+            "/api/ai/generate-reminder",
+            {"medical_record_id": self.record.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(str(response.data["follow_up_date"]), "2026-11-03")
+        self.assertEqual(
+            response.data["message"],
+            "Mời bạn tái khám ngày 03/11. Vui lòng liên hệ phòng khám.",
+        )
+        self.assertEqual(response.data["provider"], "Gemini")
+        self.assertFalse(response.data["sent"])
+        generate_text.assert_called_once_with()
+
+    @patch("appointments.views.generate_generic_follow_up_text")
+    def test_preview_rejects_unconsented_patient(self, generate_text):
+        self.patient.sms_reminder_consent = False
+        self.patient.save(update_fields=["sms_reminder_consent"])
+
+        response = self.client.post(
+            "/api/ai/generate-reminder",
+            {"medical_record_id": self.record.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        generate_text.assert_not_called()
+
+    @patch("appointments.views.generate_generic_follow_up_text")
+    def test_preview_rejects_record_without_follow_up_date(self, generate_text):
+        patient = Patient.objects.create(
+            patient_code="REMINDER-API-004",
+            full_name="No Follow-up Date",
+            sms_reminder_consent=True,
+        )
+        record = self.create_record(patient, None)
+
+        response = self.client.post(
+            "/api/ai/generate-reminder",
+            {"medical_record_id": record.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        generate_text.assert_not_called()
+
+    @patch("appointments.views.generate_generic_follow_up_text")
+    def test_preview_rejects_invalid_ids_and_client_supplied_data(self, generate_text):
+        invalid_id = self.client.post(
+            "/api/ai/generate-reminder",
+            {"medical_record_id": "invalid"},
+            format="json",
+        )
+        extra_data = self.client.post(
+            "/api/ai/generate-reminder",
+            {
+                "medical_record_id": self.record.pk,
+                "follow_up_date": "2099-01-01",
+                "patient_name": "Untrusted Name",
+            },
+            format="json",
+        )
+        missing_id = self.client.post(
+            "/api/ai/generate-reminder",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(invalid_id.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(extra_data.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(missing_id.status_code, status.HTTP_400_BAD_REQUEST)
+        generate_text.assert_not_called()
+
+    @patch("appointments.views.generate_generic_follow_up_text")
+    def test_preview_returns_not_found_for_unknown_record(self, generate_text):
+        response = self.client.post(
+            "/api/ai/generate-reminder",
+            {"medical_record_id": 999999},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        generate_text.assert_not_called()
+
+    @override_settings(GEMINI_API_KEY="")
+    @patch("appointments.ai_services.requests.post")
+    def test_preview_reports_missing_ai_configuration(self, post):
+        response = self.client.post(
+            "/api/ai/generate-reminder",
+            {"medical_record_id": self.record.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        post.assert_not_called()
+
+    @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
+    @patch("appointments.ai_services.requests.post")
+    def test_preview_reports_empty_or_invalid_ai_output(self, post):
+        provider_response = Mock(status_code=200)
+        provider_response.json.return_value = {
+            "candidates": [
+                {"content": {"parts": [{"text": ""}]}}
+            ]
+        }
+        post.return_value = provider_response
+        response = self.client.post(
+            "/api/ai/generate-reminder",
+            {"medical_record_id": self.record.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+    def test_preview_does_not_generate_for_cancelled_appointment(self):
+        patient = Patient.objects.create(
+            patient_code="REMINDER-API-005",
+            full_name="Cancelled Follow-up",
+            sms_reminder_consent=True,
+        )
+        record = self.create_record(patient, date(2026, 11, 6))
+        record.appointment.status = Appointment.Status.CANCELLED
+        record.appointment.save(update_fields=["status"])
+
+        response = self.client.post(
+            "/api/ai/generate-reminder",
+            {"medical_record_id": record.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    @patch(
+        "appointments.views.generate_generic_follow_up_text",
+        return_value="Liên hệ phòng khám để được hỗ trợ thêm nhé.",
+    )
+    def test_preview_rejects_message_over_single_sms_limit(self, generate_text):
+        response = self.client.post(
+            "/api/ai/generate-reminder",
+            {"medical_record_id": self.record.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+    def test_only_receptionist_or_admin_can_manage_follow_up_reminders(self):
+        dentist_role = Role.objects.get(code="DENTIST")
+        dentist = User.objects.create_user(
+            username="reminder-unauthorized-dentist",
+            password="DentistPass123!",
+        )
+        ClinicUser.objects.create(user=dentist, role=dentist_role)
+        dentist_client = APIClient()
+        dentist_client.force_authenticate(dentist)
+
+        list_response = dentist_client.get("/api/v1/follow-up-appointments/")
+        preview_response = dentist_client.post(
+            "/api/ai/generate-reminder",
+            {"medical_record_id": self.record.pk},
+            format="json",
+        )
+
+        self.assertEqual(list_response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(preview_response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_reminder_endpoints_require_authentication(self):
+        client = APIClient()
+
+        list_response = client.get("/api/v1/follow-up-appointments/")
+        preview_response = client.post(
+            "/api/ai/generate-reminder",
+            {"medical_record_id": self.record.pk},
+            format="json",
+        )
+
+        self.assertEqual(list_response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(preview_response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class FollowUpReminderPromptTests(TestCase):
+    @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
+    @patch("appointments.ai_services.requests.post")
+    def test_generic_prompt_is_separate_and_contains_no_patient_or_date_data(self, post):
+        from appointments.ai_services import generate_generic_follow_up_text
+
+        response = Mock(status_code=200)
+        response.json.return_value = {
+            "candidates": [
+                {"content": {"parts": [{"text": "Vui lòng liên hệ phòng khám."}]}}
+            ]
+        }
+        post.return_value = response
+
+        message = generate_generic_follow_up_text()
+
+        self.assertEqual(message, "Vui lòng liên hệ phòng khám.")
+        request_data = post.call_args.kwargs["json"]
+        self.assertIn("system_instruction", request_data)
+        self.assertNotIn("Private Reminder Patient", str(request_data))
+        self.assertNotIn("2026-11-03", str(request_data))
+        self.assertIn("không đưa ra ngày", request_data["contents"][0]["parts"][0]["text"])
+        self.assertEqual(post.call_args.kwargs["timeout"], (5, 30))
+
+    @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
+    @patch("appointments.ai_services.requests.post")
+    def test_generic_prompt_rejects_ai_output_containing_numbers(self, post):
+        from appointments.ai_services import AIServiceError, generate_generic_follow_up_text
+
+        response = Mock(status_code=200)
+        response.json.return_value = {
+            "candidates": [
+                {"content": {"parts": [{"text": "Liên hệ phòng khám số 123."}]}}
+            ]
+        }
+        post.return_value = response
+
+        with self.assertRaises(AIServiceError):
+            generate_generic_follow_up_text()

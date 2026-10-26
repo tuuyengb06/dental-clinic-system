@@ -7,14 +7,22 @@ from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 from rest_framework.throttling import ScopedRateThrottle
+from rest_framework.views import APIView
 
 from .models import Appointment, MedicalRecord
-from .serializers import AppointmentSerializer, MedicalRecordSerializer
+from .serializers import (
+    AppointmentSerializer,
+    FollowUpAppointmentSerializer,
+    FollowUpReminderRequestSerializer,
+    MedicalRecordSerializer,
+)
 from .ai_services import (
     AIServiceConfigurationError,
     AIServiceError,
+    generate_generic_follow_up_text,
     generate_medical_record_summary,
 )
+from .sms_services import SMSServiceError, build_follow_up_message
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +53,20 @@ class IsDentistOrAdmin(BasePermission):
                     and clinic_profile.role.code in ("ADMIN", "DENTIST")
                 )
             )
+        )
+
+
+class IsReceptionistOrAdmin(BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if user.is_superuser:
+            return True
+        clinic_profile = getattr(user, "clinic_profile", None)
+        return bool(
+            clinic_profile
+            and clinic_profile.role.code in ("ADMIN", "RECEPTIONIST")
         )
 
 
@@ -139,3 +161,72 @@ class MedicalRecordViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_502_BAD_GATEWAY,
             )
         return Response({"summary": summary, "provider": "Gemini"})
+
+
+class FollowUpAppointmentViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = FollowUpAppointmentSerializer
+    permission_classes = [IsReceptionistOrAdmin]
+
+    def get_queryset(self):
+        return (
+            MedicalRecord.objects.filter(follow_up_date__isnull=False)
+            .exclude(appointment__status=Appointment.Status.CANCELLED)
+            .select_related(
+                "appointment__patient",
+                "appointment__doctor__clinic_user__user",
+            )
+            .order_by("follow_up_date", "appointment__appointment_date", "id")
+        )
+
+
+class GenerateFollowUpReminderAPIView(APIView):
+    permission_classes = [IsReceptionistOrAdmin]
+
+    def post(self, request):
+        serializer = FollowUpReminderRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        record = MedicalRecord.objects.select_related(
+            "appointment__patient"
+        ).filter(
+            pk=serializer.validated_data["medical_record_id"]
+        ).exclude(
+            appointment__status=Appointment.Status.CANCELLED
+        ).first()
+        if record is None:
+            return Response(
+                {"detail": "Follow-up appointment was not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if record.follow_up_date is None:
+            raise ValidationError(
+                {"follow_up_date": "This record has no follow-up date."}
+            )
+        if not record.appointment.patient.sms_reminder_consent:
+            raise ValidationError(
+                {"consent": "Patient consent for SMS reminders must be recorded first."}
+            )
+
+        try:
+            generic_text = generate_generic_follow_up_text()
+            message = build_follow_up_message(record.follow_up_date, generic_text)
+        except AIServiceConfigurationError as error:
+            return Response(
+                {"detail": str(error)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except (AIServiceError, SMSServiceError) as error:
+            logger.warning("AI follow-up reminder preview could not be generated: %s", error)
+            return Response(
+                {"detail": "Reminder preview could not be generated. Please try again later."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response(
+            {
+                "medical_record_id": record.pk,
+                "follow_up_date": record.follow_up_date,
+                "message": message,
+                "provider": "Gemini",
+                "sent": False,
+            }
+        )

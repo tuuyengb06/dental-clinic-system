@@ -14,6 +14,7 @@ from appointments.sms_services import (
     SMSDeliveryUncertainError,
     SMSServiceConfigurationError,
     SMSServiceError,
+    build_follow_up_message,
     send_sms,
     validate_sms_configuration,
 )
@@ -112,31 +113,24 @@ class Command(BaseCommand):
                     if not claimed:
                         continue
 
-            message = (
-                f"Mời bạn tái khám ngày {scheduled_for:%d/%m}. {generic_text}"
-            )
             unknown_error = None
             error = None
-            if len(message.encode("utf-16-be")) // 2 > 70:
-                error = SMSServiceError(
-                    "Reminder exceeds the single-segment Vietnamese SMS length limit."
-                )
+            try:
+                message = build_follow_up_message(scheduled_for, generic_text)
+                reference = send_sms(record.appointment.patient.phone, message)
+            except SMSDeliveryUncertainError as send_error:
+                unknown_error = send_error
+            except (SMSServiceConfigurationError, SMSServiceError) as send_error:
+                error = send_error
             else:
-                try:
-                    reference = send_sms(record.appointment.patient.phone, message)
-                except SMSDeliveryUncertainError as send_error:
-                    unknown_error = send_error
-                except (SMSServiceConfigurationError, SMSServiceError) as send_error:
-                    error = send_error
-                else:
-                    FollowUpReminder.objects.filter(pk=delivery.pk).update(
-                        status=FollowUpReminder.Status.SENT,
-                        provider_reference=reference,
-                        error_message="",
-                        sent_at=timezone.now(),
-                    )
-                    sent += 1
-                    continue
+                FollowUpReminder.objects.filter(pk=delivery.pk).update(
+                    status=FollowUpReminder.Status.SENT,
+                    provider_reference=reference,
+                    error_message="",
+                    sent_at=timezone.now(),
+                )
+                sent += 1
+                continue
 
             if unknown_error:
                 FollowUpReminder.objects.filter(pk=delivery.pk).update(
