@@ -1,10 +1,12 @@
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 from django.contrib.auth import get_user_model
 from django.db import DatabaseError, IntegrityError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -21,6 +23,7 @@ from .models import (
     InvoiceItem,
     Patient,
     Payment,
+    Radiograph,
     Role,
     Service,
     Tooth,
@@ -43,7 +46,7 @@ class AuthenticationAndManagementApiTests(APITestCase):
         )
         ClinicUser.objects.create(user=self.admin, role=self.admin_role)
         dentist_profile = ClinicUser.objects.create(user=self.dentist, role=self.dentist_role, phone="0901234567")
-        Doctor.objects.create(
+        self.doctor = Doctor.objects.create(
             clinic_user=dentist_profile,
             license_number="DMS-TEST-001",
             specialization="General dentistry",
@@ -159,6 +162,24 @@ class AuthenticationAndManagementApiTests(APITestCase):
                 response = self.client.get("/api/v1/patients/", {"search": query})
                 self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
                 self.assertIn("search", response.data)
+
+    def test_dentist_patient_list_contains_only_assigned_patients(self):
+        other_patient = Patient.objects.create(
+            patient_code="DMS-OTHER-001",
+            full_name="Other Patient",
+        )
+        ScheduledAppointment.objects.create(
+            patient=self.patient,
+            doctor=self.doctor,
+            appointment_date=timezone.now() + timedelta(days=1),
+        )
+        self.authenticate("clinic-dentist", "DentistPass123!")
+
+        response = self.client.get("/api/v1/patients/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual({item["id"] for item in response.data}, {self.patient.pk})
+        self.assertNotIn(other_patient.pk, {item["id"] for item in response.data})
 
     def test_dentist_cannot_write_service_catalog(self):
         self.authenticate("clinic-dentist", "DentistPass123!")
@@ -998,6 +1019,8 @@ class AuthenticationAndManagementApiTests(APITestCase):
         created = self.client.post("/api/v1/appointments/", payload, format="json")
         self.assertEqual(created.status_code, status.HTTP_201_CREATED)
         self.assertEqual(created.data["patient_name"], self.patient.full_name)
+
+
         self.assertEqual(created.data["service_name"], self.service.name)
         self.assertEqual(created.data["notes"], "Routine dental check-up")
         payload["appointment_date"] = timezone.make_aware(
@@ -1279,3 +1302,162 @@ class RevenueVisitDashboardApiTests(APITestCase):
         self.assertEqual(anonymous.status_code, status.HTTP_401_UNAUTHORIZED)
         self.assertEqual(receptionist.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(admin.status_code, status.HTTP_200_OK)
+
+class RadiographApiTests(APITestCase):
+    def setUp(self):
+        self.media_directory = TemporaryDirectory()
+        self.addCleanup(self.media_directory.cleanup)
+        self.media_settings = override_settings(MEDIA_ROOT=self.media_directory.name)
+        self.media_settings.enable()
+        self.addCleanup(self.media_settings.disable)
+
+        admin_role = Role.objects.create(code="ADMIN", name="Administrator")
+        dentist_role = Role.objects.create(code="DENTIST", name="Dentist")
+        receptionist_role = Role.objects.create(code="RECEPTIONIST", name="Receptionist")
+        self.admin = User.objects.create_user(
+            username="radiograph-admin",
+            password="RadiographPass123!",
+        )
+        self.dentist = User.objects.create_user(
+            username="radiograph-dentist",
+            password="RadiographPass123!",
+        )
+        self.receptionist = User.objects.create_user(
+            username="radiograph-receptionist",
+            password="RadiographPass123!",
+        )
+        ClinicUser.objects.create(user=self.admin, role=admin_role)
+        dentist_profile = ClinicUser.objects.create(user=self.dentist, role=dentist_role)
+        ClinicUser.objects.create(user=self.receptionist, role=receptionist_role)
+        self.doctor = Doctor.objects.create(
+            clinic_user=dentist_profile,
+            license_number="RAD-TEST-001",
+        )
+        self.patient = Patient.objects.create(
+            patient_code="RAD-PATIENT-001",
+            full_name="Radiograph Patient",
+        )
+        self.other_patient = Patient.objects.create(
+            patient_code="RAD-PATIENT-002",
+            full_name="Unassigned Patient",
+        )
+        ScheduledAppointment.objects.create(
+            patient=self.patient,
+            doctor=self.doctor,
+            appointment_date=timezone.now() + timedelta(days=1),
+        )
+
+    @staticmethod
+    def png_file(name="xray.png", content=None):
+        return SimpleUploadedFile(
+            name,
+            content or b"\x89PNG\r\n\x1a\n" + b"\x00" * 16,
+            content_type="image/png",
+        )
+
+    def test_dentist_uploads_and_retrieves_assigned_patient_image(self):
+        self.client.force_authenticate(self.dentist)
+        uploaded = self.client.post(
+            "/api/v1/radiographs/",
+            {"patient": self.patient.pk, "image": self.png_file()},
+            format="multipart",
+        )
+
+        self.assertEqual(uploaded.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(uploaded.data["content_type"], "image/png")
+        self.assertEqual(uploaded.data["original_filename"], "xray.png")
+        self.assertEqual(uploaded.data["file_size"], 24)
+        self.assertNotIn("image", uploaded.data)
+
+        listed = self.client.get(
+            "/api/v1/radiographs/",
+            {"patient": self.patient.pk},
+        )
+        image = self.client.get(
+            f"/api/v1/radiographs/{uploaded.data['id']}/image/"
+        )
+        image_content = b"".join(image.streaming_content)
+
+        self.assertEqual(listed.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(listed.data), 1)
+        self.assertEqual(image.status_code, status.HTTP_200_OK)
+        self.assertEqual(image["Content-Type"], "image/png")
+        self.assertEqual(image["Cache-Control"], "private, no-store")
+        self.assertEqual(image["X-Content-Type-Options"], "nosniff")
+        self.assertTrue(image_content.startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertEqual(Radiograph.objects.count(), 1)
+
+    def test_upload_rejects_wrong_format_mismatch_and_oversized_file(self):
+        self.client.force_authenticate(self.admin)
+        wrong_format = self.client.post(
+            "/api/v1/radiographs/",
+            {
+                "patient": self.patient.pk,
+                "image": self.png_file("xray.jpg"),
+            },
+            format="multipart",
+        )
+        unsupported = self.client.post(
+            "/api/v1/radiographs/",
+            {
+                "patient": self.patient.pk,
+                "image": self.png_file("scan.dcm"),
+            },
+            format="multipart",
+        )
+        oversized = self.client.post(
+            "/api/v1/radiographs/",
+            {
+                "patient": self.patient.pk,
+                "image": self.png_file(
+                    content=b"\x89PNG\r\n\x1a\n" + b"\x00" * (10 * 1024 * 1024)
+                ),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(wrong_format.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(unsupported.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(oversized.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(Radiograph.objects.count(), 0)
+
+    def test_dentist_cannot_access_unassigned_patient_image(self):
+        self.client.force_authenticate(self.dentist)
+
+        response = self.client.post(
+            "/api/v1/radiographs/",
+            {"patient": self.other_patient.pk, "image": self.png_file()},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(Radiograph.objects.count(), 0)
+
+    def test_dentist_cannot_retrieve_unassigned_patient_image(self):
+        self.client.force_authenticate(self.admin)
+        uploaded = self.client.post(
+            "/api/v1/radiographs/",
+            {"patient": self.other_patient.pk, "image": self.png_file()},
+            format="multipart",
+        )
+        self.client.force_authenticate(self.dentist)
+
+        response = self.client.get(
+            f"/api/v1/radiographs/{uploaded.data['id']}/image/"
+        )
+
+        self.assertEqual(uploaded.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_receptionist_cannot_access_radiographs(self):
+        self.client.force_authenticate(self.receptionist)
+
+        listed = self.client.get("/api/v1/radiographs/")
+        uploaded = self.client.post(
+            "/api/v1/radiographs/",
+            {"patient": self.patient.pk, "image": self.png_file()},
+            format="multipart",
+        )
+
+        self.assertEqual(listed.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(uploaded.status_code, status.HTTP_403_FORBIDDEN)

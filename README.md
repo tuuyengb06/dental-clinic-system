@@ -26,7 +26,7 @@ python manage.py seed_dental_data
 python manage.py runserver 8000
 ```
 
-Backend chạy tại `http://127.0.0.1:8000`.
+Backend chạy tại `http://127.0.0.1:8000`. Ảnh X-quang local được lưu tại `backend/media`; trên Docker, ảnh dùng volume `dental_media` riêng để tồn tại sau khi container khởi động lại. Cần đưa volume này vào quy trình backup cùng dữ liệu database.
 
 Kiểm tra nhanh: mở `http://127.0.0.1:8000/api/v1/health/` và xác nhận response có `status: ok`.
 
@@ -65,7 +65,7 @@ docker compose up --build -d
 docker compose ps
 ```
 
-Compose build backend Django và frontend React riêng, phục vụ giao diện tại `http://localhost:8080` và chuyển tiếp `/api/` tới backend. Backend tự áp dụng migration và nạp dữ liệu demo theo cách có thể chạy lại; health check chỉ báo sẵn sàng sau khi lệnh khởi tạo thành công. Database SQLite được giữ trong volume `dental_data`. Đăng nhập demo bằng tài khoản `admin` và mật khẩu đã đặt trong `DMS_SEED_ADMIN_PASSWORD`; các tích hợp Gemini, VietQR và Twilio là tùy chọn, mặc định không được bật nếu thiếu cấu hình.
+Compose build backend Django và frontend React riêng, phục vụ giao diện tại `http://localhost:8080` và chuyển tiếp `/api/` tới backend. Backend tự áp dụng migration và nạp dữ liệu demo theo cách có thể chạy lại; health check chỉ báo sẵn sàng sau khi lệnh khởi tạo thành công. Database SQLite được giữ trong volume `dental_data`, ảnh X-quang trong volume `dental_media`. Đăng nhập demo bằng tài khoản `admin` và mật khẩu đã đặt trong `DMS_SEED_ADMIN_PASSWORD`; các tích hợp Gemini, VietQR và Twilio là tùy chọn, mặc định không được bật nếu thiếu cấu hình.
 
 Kiểm tra API sau khi khởi chạy bằng `http://localhost:8080/api/v1/health/`; dừng container bằng `docker compose down` (giữ database). Chỉ xóa dữ liệu demo khi chủ động chạy `docker compose down --volumes`. Cấu hình này dành cho demo/local, không phải triển khai production; không đưa `.env` hoặc thông tin bệnh nhân thật vào Git.
 
@@ -138,6 +138,12 @@ Chạy `python manage.py migrate` để tạo schema từ migration. Sau đó ch
 - `POST /api/v1/appointments/{id}/cancel/` (lễ tân/Admin hủy lịch Pending hoặc Confirmed; lịch Completed hoặc đã Cancelled bị từ chối)
 - `GET/POST /api/v1/schedules/` (xem/đặt ca làm theo bác sĩ, ngày và giờ; không cho phép ca chồng nhau)
 - `GET /api/v1/teeth/` (danh mục răng để lập hồ sơ bệnh án)
+- `GET /api/v1/radiographs/?patient=<id>` (bác sĩ được phân công/Admin xem metadata ảnh)
+- `POST /api/v1/radiographs/` (bác sĩ được phân công/Admin tải ảnh JPG/JPEG/PNG tối đa 10 MB bằng `multipart/form-data`)
+- `GET /api/v1/radiographs/{id}/image/` (trả ảnh riêng tư; cần JWT và đúng quyền bệnh nhân)
+- `GET /api/v1/radiographs/?patient=<id>` (bác sĩ được phân công/Admin xem metadata ảnh)
+- `POST /api/v1/radiographs/` (bác sĩ được phân công/Admin tải ảnh JPG/JPEG/PNG, tối đa 10 MB, dạng `multipart/form-data`)
+- `GET /api/v1/radiographs/{id}/image/` (trả ảnh riêng tư; cần JWT và đúng quyền bệnh nhân)
 - `GET/POST/PATCH /api/v1/medical-records/` (bác sĩ lập/cập nhật chẩn đoán, hướng điều trị, răng và dịch vụ chỉ định; mỗi hồ sơ gắn với một lịch hẹn)
 - `GET /api/v1/invoices/` (lịch sử hóa đơn và thông tin giao dịch, chỉ Admin/Lễ tân)
 - `GET /api/v1/invoices/available-records/` (hồ sơ có dịch vụ được chỉ định nhưng chưa lập hóa đơn, chỉ trả thông tin cần thiết cho thu ngân)
@@ -198,7 +204,7 @@ Dashboard lọc hóa đơn theo trạng thái và thời điểm phát hành, đ
 2. Mở `http://127.0.0.1:5173`.
 3. Chụp Dashboard.
 4. Chọn `Patients` để chụp danh sách hồ sơ.
-5. Chọn `Tooth chart`, thử `Adult · 32` và `Child · 20`, chụp cả hai trạng thái.
+5. Chọn `Radiographs`, tải một ảnh JPG/PNG, đổi hồ sơ bệnh nhân và xác nhận ảnh chỉ hiện với bệnh nhân được chọn.
 6. Đăng nhập role lễ tân/Admin, mở `Reception` để chụp form tiếp nhận; vào `Appointments` để tạo ca làm và đặt hẹn.
 7. Đăng nhập role bác sĩ, mở `EMR`, chọn lịch hẹn để xem bệnh nhân, thông tin dị ứng/tiền sử, nhập chẩn đoán và hướng điều trị, chọn răng trên sơ đồ cung hàm, chọn dịch vụ rồi lưu hoặc cập nhật hồ sơ.
 8. Chọn `Billing` để chụp phần công nợ.
