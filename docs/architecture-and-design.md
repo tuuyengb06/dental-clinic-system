@@ -76,7 +76,7 @@ flowchart LR
 - Nội dung gửi SMS là lời mời chung có ngày tái khám, không gửi bệnh án tới Gemini. Lỗi gửi xác định được đánh dấu `FAILED`; kết quả Twilio không xác định thành `UNKNOWN` và không tự gửi lại.
 - Luồng QR chỉ tạo QR và ghi nhận trạng thái chờ; đối soát hiện là thao tác nhân viên, không phải webhook ngân hàng.
 - VietQR là dịch vụ ngoài dùng để dựng ảnh QR, không phải ngân hàng, cổng nhận tiền hay nguồn xác minh giao dịch.
-- `backend/docker-compose.yml` hiện khai báo PostgreSQL và biến môi trường `DB_*`, trong khi `settings.py` chỉ cấu hình SQLite hoặc SQL Server qua `DMS_DB_*`; không nên xem compose đó là cấu hình triển khai đang hoạt động nếu chưa đồng bộ.
+- `docker-compose.yml` ở thư mục gốc dùng backend Django, frontend Nginx và SQLite trong volume `dental_data` cho demo local. Cấu hình này không phải triển khai production; chạy `docker compose` theo hướng dẫn README và cung cấp secret qua `.env`.
 - `backend/schema.sql` là schema SQLite nền cũ gồm 13 bảng clinic ban đầu, không bao gồm đầy đủ các model/migration hiện tại; dùng migration Django làm nguồn chuẩn cho database mới/cập nhật.
 
 ## 3. ERD theo model hiện tại

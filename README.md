@@ -54,6 +54,21 @@ python manage.py seed_dental_data
 
 Không chạy bước SQL này trên database đã có dữ liệu cần giữ; dùng migration Django thông thường để cập nhật database hiện có.
 
+## Chạy demo bằng Docker
+
+Yêu cầu Docker Engine/Desktop và Docker Compose v2. Từ thư mục gốc, tạo file cấu hình riêng, thay hai giá trị bắt buộc bằng secret/password mạnh, sau đó build và khởi chạy:
+
+```powershell
+Copy-Item .env.example .env
+# Mở .env và thay DMS_SECRET_KEY cùng DMS_SEED_ADMIN_PASSWORD trước khi tiếp tục.
+docker compose up --build -d
+docker compose ps
+```
+
+Compose build backend Django và frontend React riêng, phục vụ giao diện tại `http://localhost:8080` và chuyển tiếp `/api/` tới backend. Backend tự áp dụng migration và nạp dữ liệu demo theo cách có thể chạy lại; health check chỉ báo sẵn sàng sau khi lệnh khởi tạo thành công. Database SQLite được giữ trong volume `dental_data`. Đăng nhập demo bằng tài khoản `admin` và mật khẩu đã đặt trong `DMS_SEED_ADMIN_PASSWORD`; các tích hợp Gemini, VietQR và Twilio là tùy chọn, mặc định không được bật nếu thiếu cấu hình.
+
+Kiểm tra API sau khi khởi chạy bằng `http://localhost:8080/api/v1/health/`; dừng container bằng `docker compose down` (giữ database). Chỉ xóa dữ liệu demo khi chủ động chạy `docker compose down --volumes`. Cấu hình này dành cho demo/local, không phải triển khai production; không đưa `.env` hoặc thông tin bệnh nhân thật vào Git.
+
 ## AI summary và nhắc tái khám qua SMS (tùy chọn)
 
 Tóm tắt AI dùng Gemini API; SMS dùng Twilio. Hai tích hợp mặc định tắt khi chưa có cấu hình. Không commit khóa API hoặc thông tin tài khoản vào Git.

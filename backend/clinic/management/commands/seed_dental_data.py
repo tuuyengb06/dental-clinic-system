@@ -7,7 +7,10 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from appointments.models import Appointment as ScheduledAppointment
+from appointments.models import (
+    Appointment as ScheduledAppointment,
+    MedicalRecord,
+)
 from clinic.models import (
     Appointment,
     ClinicUser,
@@ -15,6 +18,7 @@ from clinic.models import (
     Invoice,
     InvoiceItem,
     Patient,
+    Payment,
     Role,
     Service,
     Tooth,
@@ -135,41 +139,72 @@ class Command(BaseCommand):
                 },
             )
 
-        start = timezone.localtime().replace(hour=9, minute=0, second=0, microsecond=0)
-        if start <= timezone.localtime():
-            start += timedelta(days=1)
-        appointment, _ = Appointment.objects.get_or_create(
+        appointment = Appointment.objects.filter(
             patient=patients["DMS-0001"],
-            start_at=start,
-            defaults={
-                "doctor": staff["doctor1"].doctor_profile,
-                "dentist_name": "Dr. Le Thu Ha",
-                "room": "Room 01",
-                "end_at": start + timedelta(minutes=45),
-                "status": Appointment.CONFIRMED,
-            },
-        )
+            notes="Seeded demo appointment",
+        ).order_by("id").first()
+        if appointment is None:
+            start = timezone.localtime().replace(
+                hour=9,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+            if start <= timezone.localtime():
+                start += timedelta(days=1)
+            appointment = Appointment.objects.create(
+                patient=patients["DMS-0001"],
+                doctor=staff["doctor1"].doctor_profile,
+                dentist_name="Dr. Le Thu Ha",
+                room="Room 01",
+                start_at=start,
+                end_at=start + timedelta(minutes=45),
+                status=Appointment.CONFIRMED,
+                notes="Seeded demo appointment",
+            )
+        local_appointment_start = timezone.localtime(appointment.start_at)
         WorkSchedule.objects.get_or_create(
             doctor=staff["doctor1"].doctor_profile,
-            work_date=start.date(),
-            start_time=start.time(),
-            end_time=start.replace(hour=17).time(),
+            work_date=local_appointment_start.date(),
+            start_time=local_appointment_start.time(),
+            end_time=local_appointment_start.replace(hour=17).time(),
         )
-        ScheduledAppointment.objects.get_or_create(
+        scheduled_appointment = ScheduledAppointment.objects.filter(
             patient=patients["DMS-0001"],
             doctor=staff["doctor1"].doctor_profile,
-            appointment_date=start,
+            notes="Seeded cleaning appointment",
+        ).order_by("id").first()
+        if scheduled_appointment is None:
+            ScheduledAppointment.objects.create(
+                patient=patients["DMS-0001"],
+                doctor=staff["doctor1"].doctor_profile,
+                appointment_date=appointment.start_at,
+                service=services["CLEANING"],
+                status=ScheduledAppointment.Status.CONFIRMED,
+                notes="Seeded cleaning appointment",
+            )
+            scheduled_appointment = ScheduledAppointment.objects.get(
+                patient=patients["DMS-0001"],
+                doctor=staff["doctor1"].doctor_profile,
+                notes="Seeded cleaning appointment",
+            )
+        medical_record, _ = MedicalRecord.objects.get_or_create(
+            appointment=scheduled_appointment,
             defaults={
-                "service": services["CLEANING"],
-                "status": ScheduledAppointment.Status.CONFIRMED,
-                "notes": "Seeded cleaning appointment",
+                "diagnosis": "Routine dental check-up",
+                "treatment_plan": "Scaling and polishing",
+                "prescription": "",
+                "notes": "Seeded demo medical record",
+                "follow_up_date": date.today() + timedelta(days=180),
             },
         )
+        medical_record.services.add(services["CLEANING"])
 
         invoice, _ = Invoice.objects.update_or_create(
             patient=patients["DMS-0001"],
             invoice_number="INV-0001",
             defaults={
+                "medical_record": medical_record,
                 "total_amount": services["CLEANING"].price,
                 "status": Invoice.ISSUED,
             },
@@ -183,6 +218,36 @@ class Command(BaseCommand):
                 "unit_price": Decimal("500000"),
             },
         )
+        paid_invoice, _ = Invoice.objects.update_or_create(
+            patient=patients["DMS-0003"],
+            invoice_number="INV-0002",
+            defaults={
+                "total_amount": services["CONSULT"].price,
+                "paid_amount": services["CONSULT"].price,
+                "status": Invoice.PAID,
+            },
+        )
+        InvoiceItem.objects.get_or_create(
+            invoice=paid_invoice,
+            service=services["CONSULT"],
+            defaults={
+                "description": services["CONSULT"].name,
+                "quantity": 1,
+                "unit_price": services["CONSULT"].price,
+            },
+        )
+        if not Payment.objects.filter(
+            invoice=paid_invoice,
+            status=Payment.COMPLETED,
+        ).exists():
+            Payment.objects.create(
+                invoice=paid_invoice,
+                amount=paid_invoice.total_amount,
+                method=Payment.CASH,
+                status=Payment.COMPLETED,
+                paid_at=timezone.now(),
+            )
+
         plan, _ = TreatmentPlan.objects.get_or_create(
             patient=patients["DMS-0001"],
             title="Routine dental care",
@@ -206,7 +271,8 @@ class Command(BaseCommand):
         self.stdout.write(
             self.style.SUCCESS(
                 "Seed complete: 3 roles, 1 admin, 2 dentists, 1 receptionist, "
-                "5 patients, 5 services, 52 teeth, and related demo records."
+                "5 patients, 5 services, 52 teeth, 1 medical record, 2 invoices, "
+                "1 payment, and related demo records."
             )
         )
         if not User.objects.get(username="admin").has_usable_password():
