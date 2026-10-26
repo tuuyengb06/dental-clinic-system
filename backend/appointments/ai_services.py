@@ -59,17 +59,29 @@ def generate_medical_record_summary(record):
     patient = record.appointment.patient
 
     def redact(text):
-        text = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[redacted]", text)
-        text = re.sub(r"(?<!\w)(?:\+?\d[\d\s().-]{7,}\d)(?!\w)", "[redacted]", text)
+        if not isinstance(text, str):
+            return text
+
         text = re.sub(
-            r"(?<!\w)(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4})(?!\w)",
+            r"(?<![\w.+-])[A-Za-z0-9._%+\-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?![\w.+-])",
+            "[redacted]",
+            text,
+        )
+        text = re.sub(
+            r"(?<!\w)(?:\+?\d[\d\s().-]{7,}\d)(?!\w)",
+            "[redacted]",
+            text,
+        )
+        text = re.sub(
+            r"(?<!\w)(?:\d{4}[./-]\d{1,2}[./-]\d{1,2}|\d{1,2}[./-]\d{1,2}[./-]\d{2,4})(?!\w)",
             "[redacted]",
             text,
         )
         for identifier in (patient.full_name, patient.patient_code, patient.phone):
             if identifier and identifier.strip():
+                cleaned = identifier.strip()
                 text = re.sub(
-                    re.escape(identifier.strip()),
+                    rf"(?<!\w){re.escape(cleaned)}(?!\w)",
                     "[redacted]",
                     text,
                     flags=re.IGNORECASE,
