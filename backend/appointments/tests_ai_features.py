@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 from unittest.mock import Mock, patch
 
+import requests
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import CommandError
@@ -72,6 +73,11 @@ class MedicalRecordAISummaryTests(TestCase):
         self.assertNotIn("0912345678", sent_text)
         self.assertNotIn("1990-01-02", sent_text)
         self.assertNotIn("follow_up_date", sent_text)
+        self.record.refresh_from_db()
+        self.assertEqual(
+            self.record.diagnosis,
+            "An Nguyen, PAT-9001, phone 0912345678: gingivitis",
+        )
         self.assertEqual(
             post.call_args.kwargs["headers"]["x-goog-api-key"],
             "test-key",
@@ -113,6 +119,8 @@ class MedicalRecordAISummaryTests(TestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["code"], "invalid_input")
+        self.assertFalse(response.data["retryable"])
         post.assert_not_called()
 
     @patch("appointments.ai_services.requests.post")
@@ -127,6 +135,7 @@ class MedicalRecordAISummaryTests(TestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data["code"], "invalid_input")
         post.assert_not_called()
 
     @override_settings(GEMINI_API_KEY="")
@@ -139,7 +148,25 @@ class MedicalRecordAISummaryTests(TestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertEqual(response.data["code"], "ai_unavailable")
+        self.assertFalse(response.data["retryable"])
         post.assert_not_called()
+
+    @patch("appointments.views.generate_medical_record_summary")
+    def test_summary_reports_timeout_as_retryable(self, generate_summary):
+        from appointments.ai_services import AIServiceTimeoutError
+
+        generate_summary.side_effect = AIServiceTimeoutError()
+
+        response = self.client.post(
+            f"/api/v1/medical-records/{self.record.pk}/ai-summary/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_504_GATEWAY_TIMEOUT)
+        self.assertEqual(response.data["code"], "ai_timeout")
+        self.assertTrue(response.data["retryable"])
 
 
 @override_settings(
@@ -407,6 +434,7 @@ class FollowUpReminderPreviewTests(TestCase):
         )
         self.assertEqual(response.data["provider"], "Gemini")
         self.assertFalse(response.data["sent"])
+        self.assertFalse(FollowUpReminder.objects.filter(medical_record=self.record).exists())
         generate_text.assert_called_once_with()
 
     @patch("appointments.views.generate_generic_follow_up_text")
@@ -466,6 +494,8 @@ class FollowUpReminderPreviewTests(TestCase):
         self.assertEqual(invalid_id.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(extra_data.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(missing_id.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(invalid_id.data["code"], "invalid_input")
+        self.assertFalse(invalid_id.data["retryable"])
         generate_text.assert_not_called()
 
     @patch("appointments.views.generate_generic_follow_up_text")
@@ -477,6 +507,7 @@ class FollowUpReminderPreviewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data["code"], "record_not_found")
         generate_text.assert_not_called()
 
     @override_settings(GEMINI_API_KEY="")
@@ -489,6 +520,7 @@ class FollowUpReminderPreviewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertEqual(response.data["code"], "ai_unavailable")
         post.assert_not_called()
 
     @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
@@ -508,6 +540,38 @@ class FollowUpReminderPreviewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+    @patch("appointments.views.generate_generic_follow_up_text")
+    def test_preview_reports_temporary_service_failure_as_retryable(self, generate_text):
+        from appointments.ai_services import AIServiceUnavailableError
+
+        generate_text.side_effect = AIServiceUnavailableError()
+
+        response = self.client.post(
+            "/api/ai/generate-reminder",
+            {"medical_record_id": self.record.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertEqual(response.data["code"], "ai_unavailable")
+        self.assertTrue(response.data["retryable"])
+
+    @patch("appointments.views.generate_generic_follow_up_text")
+    def test_preview_reports_timeout_as_retryable(self, generate_text):
+        from appointments.ai_services import AIServiceTimeoutError
+
+        generate_text.side_effect = AIServiceTimeoutError()
+
+        response = self.client.post(
+            "/api/ai/generate-reminder",
+            {"medical_record_id": self.record.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_504_GATEWAY_TIMEOUT)
+        self.assertEqual(response.data["code"], "ai_timeout")
+        self.assertTrue(response.data["retryable"])
 
     def test_preview_does_not_generate_for_cancelled_appointment(self):
         patient = Patient.objects.create(
@@ -596,7 +660,7 @@ class FollowUpReminderPromptTests(TestCase):
         self.assertNotIn("Private Reminder Patient", str(request_data))
         self.assertNotIn("2026-11-03", str(request_data))
         self.assertIn("không đưa ra ngày", request_data["contents"][0]["parts"][0]["text"])
-        self.assertEqual(post.call_args.kwargs["timeout"], (5, 30))
+        self.assertEqual(post.call_args.kwargs["timeout"], (3, 15))
 
     @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
     @patch("appointments.ai_services.requests.post")
@@ -613,3 +677,107 @@ class FollowUpReminderPromptTests(TestCase):
 
         with self.assertRaises(AIServiceError):
             generate_generic_follow_up_text()
+
+
+class AIServiceRetryTests(TestCase):
+    @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
+    @patch("appointments.ai_services.time.sleep")
+    @patch("appointments.ai_services.requests.post")
+    def test_timeout_is_retried_once_then_returns_success(self, post, sleep):
+        from appointments.ai_services import _generate_text
+
+        response = Mock(status_code=200)
+        response.json.return_value = {
+            "candidates": [
+                {"content": {"parts": [{"text": "summary"}]}}
+            ]
+        }
+        post.side_effect = [requests.Timeout(), response]
+
+        self.assertEqual(_generate_text("prompt", 20), "summary")
+
+        self.assertEqual(post.call_count, 2)
+        self.assertEqual(post.call_args.kwargs["timeout"], (3, 15))
+        sleep.assert_called_once_with(0.5)
+
+    @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
+    @patch("appointments.ai_services.time.sleep")
+    @patch("appointments.ai_services.requests.post")
+    def test_timeout_after_maximum_attempts_returns_timeout_error(self, post, sleep):
+        from appointments.ai_services import AIServiceTimeoutError, _generate_text
+
+        post.side_effect = requests.Timeout()
+
+        with self.assertRaises(AIServiceTimeoutError):
+            _generate_text("prompt", 20)
+
+        self.assertEqual(post.call_count, 2)
+        self.assertEqual(sleep.call_count, 1)
+
+    @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
+    @patch("appointments.ai_services.time.sleep")
+    @patch("appointments.ai_services.requests.post")
+    def test_connection_error_is_retried_once_then_returns_success(self, post, sleep):
+        from appointments.ai_services import _generate_text
+
+        response = Mock(status_code=200)
+        response.json.return_value = {
+            "candidates": [
+                {"content": {"parts": [{"text": "reconnected"}]}}
+            ]
+        }
+        post.side_effect = [requests.ConnectionError(), response]
+
+        self.assertEqual(_generate_text("prompt", 20), "reconnected")
+
+        self.assertEqual(post.call_count, 2)
+        sleep.assert_called_once_with(0.5)
+
+    @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
+    @patch("appointments.ai_services.time.sleep")
+    @patch("appointments.ai_services.requests.post")
+    def test_transient_http_error_is_retried_once(self, post, sleep):
+        from appointments.ai_services import _generate_text
+
+        unavailable = Mock(status_code=503)
+        available = Mock(status_code=200)
+        available.json.return_value = {
+            "candidates": [
+                {"content": {"parts": [{"text": "recovered"}]}}
+            ]
+        }
+        post.side_effect = [unavailable, available]
+
+        self.assertEqual(_generate_text("prompt", 20), "recovered")
+
+        self.assertEqual(post.call_count, 2)
+        unavailable.close.assert_called_once()
+        sleep.assert_called_once_with(0.5)
+
+    @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
+    @patch("appointments.ai_services.time.sleep")
+    @patch("appointments.ai_services.requests.post")
+    def test_unavailable_provider_after_maximum_attempts_raises(self, post, sleep):
+        from appointments.ai_services import AIServiceUnavailableError, _generate_text
+
+        post.side_effect = [Mock(status_code=503), Mock(status_code=503)]
+
+        with self.assertRaises(AIServiceUnavailableError):
+            _generate_text("prompt", 20)
+
+        self.assertEqual(post.call_count, 2)
+        self.assertEqual(sleep.call_count, 1)
+
+    @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
+    @patch("appointments.ai_services.time.sleep")
+    @patch("appointments.ai_services.requests.post")
+    def test_permanent_http_error_is_not_retried(self, post, sleep):
+        from appointments.ai_services import AIServiceError, _generate_text
+
+        post.return_value = Mock(status_code=400)
+
+        with self.assertRaises(AIServiceError):
+            _generate_text("prompt", 20)
+
+        post.assert_called_once()
+        sleep.assert_not_called()

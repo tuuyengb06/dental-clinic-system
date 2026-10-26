@@ -34,27 +34,42 @@ async function apiRequest(path, { tokens, onTokens, method = 'GET', body, baseUr
     },
     ...(body ? { body: JSON.stringify(body) } : {})
   });
+  const sendRequest = async (request) => {
+    try {
+      return await request();
+    } catch (requestError) {
+      if (!(requestError instanceof TypeError)) throw requestError;
+      const error = new Error('Không thể kết nối máy chủ. Vui lòng kiểm tra kết nối và thử lại.');
+      error.code = 'network_error';
+      error.retryable = true;
+      throw error;
+    }
+  };
 
-  let response = await sendToBase(tokens?.access);
+  let response = await sendRequest(() => sendToBase(tokens?.access));
   if (response.status === 401 && tokens?.refresh && onTokens) {
-    const refreshed = await fetch(`${API}/auth/token/refresh/`, {
+    const refreshed = await sendRequest(() => fetch(`${API}/auth/token/refresh/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh: tokens.refresh })
-    });
+    }));
     if (!refreshed.ok) {
       onTokens(null);
       throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
     }
     const nextTokens = { ...tokens, ...(await refreshed.json()) };
     onTokens(nextTokens);
-    response = await sendToBase(nextTokens.access);
+    response = await sendRequest(() => sendToBase(nextTokens.access));
   }
 
   const payload = response.status === 204 ? null : await response.json().catch(() => null);
   if (!response.ok) {
     const detail = payload?.detail || Object.values(payload || {}).flat().join(' ') || `Yêu cầu thất bại (${response.status}).`;
-    throw new Error(detail);
+    const error = new Error(detail);
+    error.code = payload?.code;
+    error.retryable = payload?.retryable === true;
+    error.status = response.status;
+    throw error;
   }
   return payload;
 }
@@ -361,27 +376,35 @@ function FollowUpReminders({ records, loading, loadError, onGenerate }) {
   const [preview, setPreview] = useState(null);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState('');
+  const [retryable, setRetryable] = useState(false);
   const [copyStatus, setCopyStatus] = useState('');
+  const generationInFlight = useRef(false);
   const selectedRecord = records.find((record) => String(record.id) === selectedRecordId);
 
   function selectRecord(record) {
+    if (generationInFlight.current) return;
     setSelectedRecordId(String(record.id));
     setPreview(null);
     setError('');
+    setRetryable(false);
     setCopyStatus('');
   }
 
   async function generatePreview() {
-    if (!selectedRecord || !selectedRecord.sms_reminder_consent || generating) return;
+    if (!selectedRecord || !selectedRecord.sms_reminder_consent || generationInFlight.current) return;
+    generationInFlight.current = true;
     setGenerating(true);
     setError('');
+    setRetryable(false);
     setCopyStatus('');
     setPreview(null);
     try {
       setPreview(await onGenerate(selectedRecord.id));
     } catch (requestError) {
       setError(requestError.message || 'Không tạo được tin nhắn nhắc tái khám.');
+      setRetryable(requestError.retryable === true);
     } finally {
+      generationInFlight.current = false;
       setGenerating(false);
     }
   }
@@ -421,9 +444,9 @@ function FollowUpReminders({ records, loading, loadError, onGenerate }) {
               key={record.id}
               className={String(record.id) === selectedRecordId ? 'follow-up-row-selected' : ''}
               aria-selected={String(record.id) === selectedRecordId}
-              onClick={() => selectRecord(record)}
+              onClick={() => !generating && selectRecord(record)}
             >
-              <td><button className="follow-up-select" type="button" onClick={() => selectRecord(record)}>{record.patient_name}</button><small>{record.patient_code}</small></td>
+              <td><button className="follow-up-select" type="button" disabled={generating} onClick={() => selectRecord(record)}>{record.patient_name}</button><small>{record.patient_code}</small></td>
               <td>{new Date(record.appointment_date).toLocaleString('vi-VN')}<small>{record.dentist_name}</small></td>
               <td>{formatDate(record.follow_up_date)}</td>
               <td><span className={`pill ${record.sms_reminder_consent ? 'follow-up-consent-on' : 'inactive'}`}>{record.sms_reminder_consent ? 'Đã đồng ý' : 'Chưa đồng ý'}</span></td>
@@ -438,9 +461,10 @@ function FollowUpReminders({ records, loading, loadError, onGenerate }) {
             <span>Tái khám: {formatDate(selectedRecord.follow_up_date)}</span>
           </div>}
           {selectedRecord && !selectedRecord.sms_reminder_consent && <div className="form-error" role="alert">Chưa ghi nhận SMS consent. Hãy xác nhận consent trước khi tạo bản nháp.</div>}
-          <button className="primary-button" type="button" disabled={!selectedRecord?.sms_reminder_consent || generating} onClick={generatePreview}>
-            <MessageCircle size={16} />{generating ? 'Đang tạo…' : 'Tạo tin nhắn bằng AI'}
+          <button className="primary-button" type="button" disabled={!selectedRecord?.sms_reminder_consent || generating || Boolean(error && !retryable)} onClick={generatePreview}>
+            <MessageCircle size={16} />{generating ? 'Đang xử lý AI…' : retryable ? 'Thử lại' : 'Tạo tin nhắn bằng AI'}
           </button>
+          {generating && <p className="management-state" role="status">Đang chờ dịch vụ AI phản hồi…</p>}
           {error && <div className="form-error" role="alert">{error}</div>}
           {preview && <div className="follow-up-generated">
             <label htmlFor="follow-up-message">Nội dung xem trước</label>
@@ -1348,8 +1372,11 @@ function MedicalRecords({ appointments, patients, services, teeth, records, load
   const [saving, setSaving] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summary, setSummary] = useState('');
+  const [summaryRetryable, setSummaryRetryable] = useState(false);
+  const [summaryError, setSummaryError] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const summaryInFlight = useRef(false);
   const selectedAppointment = eligibleAppointments.find((item) => String(item.id) === appointmentId);
   const selectedPatient = patients.find((patient) => String(patient.id) === String(selectedAppointment?.patient));
   const record = records.find((item) => String(item.appointment) === appointmentId);
@@ -1372,6 +1399,8 @@ function MedicalRecords({ appointments, patients, services, teeth, records, load
     } : { diagnosis: '', treatment_plan: '', prescription: '', notes: '', teeth: [], services: [], follow_up_date: '' });
     setError('');
     setSummary('');
+    setSummaryRetryable(false);
+    setSummaryError('');
   }, [appointmentId, record?.id]);
 
   function toggleSelection(field, id) {
@@ -1403,16 +1432,19 @@ function MedicalRecords({ appointments, patients, services, teeth, records, load
   }
 
   async function requestSummary() {
-    if (!record) return;
+    if (!record || summaryInFlight.current) return;
+    summaryInFlight.current = true;
     setSummaryLoading(true);
-    setError('');
-    setSummary('');
+    setSummaryError('');
+    setSummaryRetryable(false);
     try {
       const result = await onGenerateSummary(record.id);
       setSummary(result.summary);
-    } catch (summaryError) {
-      setError(summaryError.message);
+    } catch (requestError) {
+      setSummaryError(requestError.message);
+      setSummaryRetryable(requestError.retryable === true);
     } finally {
+      summaryInFlight.current = false;
       setSummaryLoading(false);
     }
   }
@@ -1473,7 +1505,9 @@ function MedicalRecords({ appointments, patients, services, teeth, records, load
       <h3>AI summary · Gemini</h3>
       <p>Recorded clinical text is sent to Google Gemini after patient consent; direct identifiers are removed when detected. Review the result; it does not change the medical record or replace clinical judgment.</p>
       {!selectedPatient?.ai_processing_consent && <p role="status">Patient AI-processing consent has not been recorded.</p>}
-      <button className="secondary-button" type="button" disabled={!selectedPatient?.ai_processing_consent || summaryLoading} onClick={requestSummary}>{summaryLoading ? 'Generating…' : 'Generate summary'}</button>
+      <button className="secondary-button" type="button" disabled={!selectedPatient?.ai_processing_consent || summaryLoading || Boolean(summaryError && !summaryRetryable)} onClick={requestSummary}>{summaryLoading ? 'Đang xử lý AI…' : summaryRetryable ? 'Thử lại' : 'Tạo tóm tắt AI'}</button>
+      {summaryLoading && <p className="management-state" role="status">Đang chờ dịch vụ AI phản hồi…</p>}
+      {summaryError && <div className="form-error" role="alert">{summaryError}</div>}
       {summary && <div className="panel" role="status"><strong>AI-generated draft — clinician review required</strong><p>{summary}</p></div>}
     </section>}
   </section>;
