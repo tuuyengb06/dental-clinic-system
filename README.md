@@ -171,6 +171,12 @@ python manage.py test
 
 `appointments.tests_business_workflow` kiểm thử API xuyên suốt từ tiếp nhận bệnh nhân, đặt lịch, lập EMR, tóm tắt/preview AI đến lập hóa đơn và thanh toán tiền mặt hoặc QR. Gemini được giả lập trong kiểm thử; ca lỗi bao gồm thời gian đặt ngoài ca, hồ sơ thiếu dữ liệu, AI tạm lỗi, hóa đơn thiếu dịch vụ và đối soát QR sai số tiền, sau đó xác nhận có thể thử lại mà không làm sai lệch dữ liệu.
 
+## Tối ưu truy vấn báo cáo
+
+Dashboard lọc hóa đơn theo trạng thái và thời điểm phát hành, đồng thời lọc lịch hẹn theo trạng thái và thời gian hẹn. Các chỉ mục ghép tương ứng được khai báo trong model và migration; chỉ mục hóa đơn bao gồm cả `total_amount` để truy vấn tổng doanh thu có thể đọc trực tiếp từ chỉ mục. Danh sách hóa đơn cũng có chỉ mục theo thứ tự mới nhất (`issued_at`, `id`) để tránh sắp xếp tạm. Các khóa ngoại hiện có tiếp tục phục vụ liên kết dữ liệu; danh sách lịch hẹn và hồ sơ khám không thêm chỉ mục không cần thiết vì truy vấn hiện lấy toàn bộ bản ghi và không có điều kiện lọc phù hợp.
+
+Đo trên SQLite với 30.000 hóa đơn và 30.000 lịch hẹn, cùng khoảng thời gian 30 ngày và 30 lần chạy (trung vị, database đã warm): tổng hóa đơn PAID giảm từ 2,251 ms xuống 0,345 ms (kết quả vẫn là 6.000.000); số lịch hẹn Completed giảm từ 3,791 ms xuống 0,060 ms (kết quả vẫn là 169). `EXPLAIN QUERY PLAN` xác nhận cả hai truy vấn báo cáo dùng covering index. Danh sách hóa đơn 30.000 dòng vẫn trả đủ 30.000 dòng; kế hoạch truy vấn mới dùng chỉ mục sắp xếp và không còn temporary B-tree. Đây là số đo cục bộ để so sánh cùng bộ dữ liệu, không phải cam kết hiệu năng production.
+
 ## 7. Chụp ảnh minh chứng
 
 1. Chạy backend ở một terminal và frontend ở terminal thứ hai.
