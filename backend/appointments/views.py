@@ -5,7 +5,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import Throttled, ValidationError
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
@@ -219,6 +219,21 @@ class FollowUpAppointmentViewSet(viewsets.ReadOnlyModelViewSet):
 
 class GenerateFollowUpReminderAPIView(APIView):
     permission_classes = [IsReceptionistOrAdmin]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "ai_reminder_preview"
+
+    def handle_exception(self, exc):
+        if isinstance(exc, Throttled):
+            response = _ai_error_response(
+                "rate_limited",
+                "Đã đạt giới hạn tạo bản nháp AI. Vui lòng chờ rồi thử lại.",
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                retryable=True,
+            )
+            if exc.wait is not None:
+                response["Retry-After"] = str(max(1, round(exc.wait)))
+            return response
+        return super().handle_exception(exc)
 
     def post(self, request):
         serializer = FollowUpReminderRequestSerializer(data=request.data)

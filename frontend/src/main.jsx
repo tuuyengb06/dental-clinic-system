@@ -66,8 +66,8 @@ async function apiRequest(path, { tokens, onTokens, method = 'GET', body, baseUr
   if (!response.ok) {
     const detail = payload?.detail || Object.values(payload || {}).flat().join(' ') || `Yêu cầu thất bại (${response.status}).`;
     const error = new Error(detail);
-    error.code = payload?.code;
-    error.retryable = payload?.retryable === true;
+    error.code = payload?.code || (response.status === 429 ? 'rate_limited' : undefined);
+    error.retryable = payload?.retryable === true || response.status === 429;
     error.status = response.status;
     throw error;
   }
@@ -455,7 +455,7 @@ function FollowUpReminders({ records, loading, loadError, onGenerate }) {
         </section>
         <section className="panel follow-up-preview-panel">
           <div className="panel-heading"><div><span className="eyebrow">AI MESSAGE PREVIEW</span><h3>Tạo tin nhắn</h3></div></div>
-          <p className="management-hint">AI chỉ tạo lời mời chung; ngày tái khám được lấy từ hồ sơ đã lưu và ghép bởi hệ thống. Không gửi thông tin bệnh nhân hoặc bệnh án cho AI.</p>
+          <p className="management-hint">AI chỉ tạo lời mời chung. Không gửi tên, mã bệnh nhân, số điện thoại, ngày tái khám hoặc dữ liệu bệnh án cho Gemini; ngày được ghép từ hồ sơ trong hệ thống. Bản nháp chỉ để xem/sao chép, không tự gửi SMS/Zalo. Giới hạn: 10 lần tạo mỗi người dùng mỗi giờ.</p>
           {selectedRecord && <div className="follow-up-selected">
             <strong>{selectedRecord.patient_name}</strong>
             <span>Tái khám: {formatDate(selectedRecord.follow_up_date)}</span>
@@ -1458,7 +1458,7 @@ function MedicalRecords({ appointments, patients, services, teeth, records, load
     {!loading && !loadError && !eligibleAppointments.length && <div className="panel management-state">No appointments are available for clinical documentation.</div>}
     {!loading && !loadError && eligibleAppointments.length > 0 && selectedAppointment && <form className="panel management-form emr-form" onSubmit={saveRecord}>
       <label className="emr-appointment">Appointment being examined
-        <select value={appointmentId} onChange={(event) => { setAppointmentId(event.target.value); setSuccess(''); }}>
+        <select value={appointmentId} disabled={summaryLoading || saving} onChange={(event) => { setAppointmentId(event.target.value); setSuccess(''); }}>
           {eligibleAppointments.map((item) => <option key={item.id} value={item.id}>{new Date(item.appointment_date || item.start_at).toLocaleString()} · {item.patient_name} · {item.dentist_name}</option>)}
         </select>
       </label>
@@ -1503,7 +1503,7 @@ function MedicalRecords({ appointments, patients, services, teeth, records, load
     </form>}
     {!loading && record && <section className="panel management-form">
       <h3>AI summary · Gemini</h3>
-      <p>Recorded clinical text is sent to Google Gemini after patient consent; direct identifiers are removed when detected. Review the result; it does not change the medical record or replace clinical judgment.</p>
+      <p className="management-hint">Sau khi có consent, Gemini nhận chẩn đoán, kế hoạch điều trị, đơn thuốc, ghi chú, tên dịch vụ và mã răng. Hệ thống lọc tên, mã bệnh nhân, điện thoại, email và các định dạng ngày phổ biến khi phát hiện; không gửi ngày sinh, dị ứng hay tiền sử riêng từ hồ sơ bệnh nhân. Đây là lọc theo mẫu, không bảo đảm ẩn danh hoàn toàn. Bác sĩ cần rà soát kết quả; AI không tự sửa hồ sơ và không thay thế đánh giá chuyên môn.</p>
       {!selectedPatient?.ai_processing_consent && <p role="status">Patient AI-processing consent has not been recorded.</p>}
       <button className="secondary-button" type="button" disabled={!selectedPatient?.ai_processing_consent || summaryLoading || Boolean(summaryError && !summaryRetryable)} onClick={requestSummary}>{summaryLoading ? 'Đang xử lý AI…' : summaryRetryable ? 'Thử lại' : 'Tạo tóm tắt AI'}</button>
       {summaryLoading && <p className="management-state" role="status">Đang chờ dịch vụ AI phản hồi…</p>}

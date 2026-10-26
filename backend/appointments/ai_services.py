@@ -100,50 +100,71 @@ def _generate_text(prompt, max_output_tokens, system_instruction=None):
         ).strip()
     except (KeyError, IndexError, TypeError, ValueError) as error:
         raise AIServiceError("Gemini returned an invalid response.") from error
+    finally:
+        response.close()
     if not text:
         raise AIServiceError("Gemini returned an empty response.")
+    return text
+
+
+def _redact_clinical_text(text, patient):
+    if not isinstance(text, str):
+        return text
+
+    text = re.sub(
+        r"(?<![\w.+-])[A-Za-z0-9._%+\-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?![\w.+-])",
+        "[redacted]",
+        text,
+    )
+    text = re.sub(
+        r"(?<!\w)(?:\+?\d[\d\s().-]{7,}\d)(?!\w)",
+        "[redacted]",
+        text,
+    )
+    text = re.sub(
+        r"(?<!\w)(?:\d{4}[./-]\d{1,2}[./-]\d{1,2}|\d{1,2}[./-]\d{1,2}[./-]\d{2,4})(?!\w)",
+        "[redacted]",
+        text,
+    )
+    identifiers = [patient.full_name, patient.patient_code, patient.phone]
+    if patient.date_of_birth:
+        identifiers.extend(
+            (
+                patient.date_of_birth.isoformat(),
+                patient.date_of_birth.strftime("%d/%m/%Y"),
+                patient.date_of_birth.strftime("%d-%m-%Y"),
+                patient.date_of_birth.strftime("%d.%m.%Y"),
+            )
+        )
+    for identifier in identifiers:
+        if not identifier or not identifier.strip():
+            continue
+        escaped = re.escape(identifier.strip())
+        if identifier == patient.full_name:
+            escaped = r"\s+".join(
+                re.escape(part) for part in identifier.split()
+            )
+        text = re.sub(
+            rf"(?<!\w){escaped}(?!\w)",
+            "[redacted]",
+            text,
+            flags=re.IGNORECASE,
+        )
     return text
 
 
 def generate_medical_record_summary(record):
     patient = record.appointment.patient
 
-    def redact(text):
-        if not isinstance(text, str):
-            return text
-
-        text = re.sub(
-            r"(?<![\w.+-])[A-Za-z0-9._%+\-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?![\w.+-])",
-            "[redacted]",
-            text,
-        )
-        text = re.sub(
-            r"(?<!\w)(?:\+?\d[\d\s().-]{7,}\d)(?!\w)",
-            "[redacted]",
-            text,
-        )
-        text = re.sub(
-            r"(?<!\w)(?:\d{4}[./-]\d{1,2}[./-]\d{1,2}|\d{1,2}[./-]\d{1,2}[./-]\d{2,4})(?!\w)",
-            "[redacted]",
-            text,
-        )
-        for identifier in (patient.full_name, patient.patient_code, patient.phone):
-            if identifier and identifier.strip():
-                cleaned = identifier.strip()
-                text = re.sub(
-                    rf"(?<!\w){re.escape(cleaned)}(?!\w)",
-                    "[redacted]",
-                    text,
-                    flags=re.IGNORECASE,
-                )
-        return text
-
     clinical_data = {
-        "diagnosis_as_recorded": redact(record.diagnosis),
-        "treatment_plan_as_recorded": redact(record.treatment_plan),
-        "prescription_as_recorded": redact(record.prescription or ""),
-        "clinical_notes_as_recorded": redact(record.notes or ""),
-        "services": [redact(name) for name in record.services.values_list("name", flat=True)],
+        "diagnosis_as_recorded": _redact_clinical_text(record.diagnosis, patient),
+        "treatment_plan_as_recorded": _redact_clinical_text(record.treatment_plan, patient),
+        "prescription_as_recorded": _redact_clinical_text(record.prescription or "", patient),
+        "clinical_notes_as_recorded": _redact_clinical_text(record.notes or "", patient),
+        "services": [
+            _redact_clinical_text(name, patient)
+            for name in record.services.values_list("name", flat=True)
+        ],
         "teeth": list(record.teeth.values_list("code", flat=True)),
     }
     prompt = (

@@ -3,6 +3,7 @@ from unittest.mock import Mock, patch
 
 import requests
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
@@ -30,6 +31,7 @@ class MedicalRecordAISummaryTests(TestCase):
             patient_code="PAT-9001",
             full_name="An Nguyen",
             phone="0912345678",
+            date_of_birth=date(1990, 1, 2),
             ai_processing_consent=True,
         )
         appointment = Appointment.objects.create(
@@ -86,8 +88,15 @@ class MedicalRecordAISummaryTests(TestCase):
     @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
     @patch("appointments.ai_services.requests.post")
     def test_summary_redacts_common_date_formats_and_identifiers(self, post):
-        self.record.diagnosis = "Bệnh nhân An Nguyen; mã PAT-9001; DOB 01.02.1990; 090 123 4567; 2024/05/06"
-        self.record.save(update_fields=["diagnosis"])
+        patient = self.record.appointment.patient
+        patient.full_name = "Nguyễn Ánh"
+        patient.save(update_fields=["full_name"])
+        self.record.diagnosis = (
+            "Bệnh nhân Nguyễn Ánh; mã PAT-9001; DOB 01.02.1990; "
+            "090 123 4567; 2024/05/06; email an.nguyen@example.com"
+        )
+        self.record.notes = "Người bệnh Nguyễn   Ánh, sinh 1990.01.02."
+        self.record.save(update_fields=["diagnosis", "notes"])
         response_from_provider = Mock(status_code=200)
         response_from_provider.json.return_value = {
             "candidates": [
@@ -109,6 +118,87 @@ class MedicalRecordAISummaryTests(TestCase):
         self.assertNotIn("01.02.1990", sent_text)
         self.assertNotIn("2024/05/06", sent_text)
         self.assertNotIn("090 123 4567", sent_text)
+        self.assertNotIn("an.nguyen@example.com", sent_text)
+        self.assertNotIn("1990.01.02", sent_text)
+        self.assertNotIn("Nguyễn Ánh", sent_text)
+        self.assertNotIn("Nguyễn   Ánh", sent_text)
+
+    @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
+    @patch("appointments.views.generate_medical_record_summary", return_value="Bản nháp")
+    def test_summary_is_limited_to_dentists_and_admins(self, generate_summary):
+        receptionist_role = Role.objects.create(code="RECEPTIONIST", name="Receptionist")
+        receptionist = User.objects.create_user(
+            username="summary-receptionist",
+            password="test-password",
+        )
+        ClinicUser.objects.create(user=receptionist, role=receptionist_role)
+        receptionist_client = APIClient()
+        receptionist_client.force_authenticate(receptionist)
+
+        response = receptionist_client.post(
+            f"/api/v1/medical-records/{self.record.pk}/ai-summary/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        generate_summary.assert_not_called()
+
+    @patch("appointments.views.generate_medical_record_summary")
+    def test_dentist_cannot_summarize_another_dentists_record(self, generate_summary):
+        dentist_role = Role.objects.get(code="DENTIST")
+        other_user = User.objects.create_user(
+            username="other-summary-dentist",
+            password="test-password",
+        )
+        other_profile = ClinicUser.objects.create(user=other_user, role=dentist_role)
+        other_doctor = Doctor.objects.create(
+            clinic_user=other_profile,
+            license_number="AI-SUMMARY-OTHER",
+        )
+        other_appointment = Appointment.objects.create(
+            patient=self.record.appointment.patient,
+            doctor=other_doctor,
+            appointment_date=timezone.now(),
+        )
+        other_record = MedicalRecord.objects.create(
+            appointment=other_appointment,
+            diagnosis="Private diagnosis",
+            treatment_plan="Private treatment plan",
+        )
+
+        response = self.client.post(
+            f"/api/v1/medical-records/{other_record.pk}/ai-summary/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        generate_summary.assert_not_called()
+
+    @patch("appointments.views.generate_medical_record_summary")
+    def test_summary_failure_logs_do_not_include_patient_or_clinical_data(self, generate_summary):
+        from appointments.ai_services import AIServiceError
+
+        generate_summary.side_effect = AIServiceError("Gemini returned invalid response.")
+
+        with self.assertLogs("appointments.views", level="WARNING") as logs:
+            response = self.client.post(
+                f"/api/v1/medical-records/{self.record.pk}/ai-summary/",
+                {},
+                format="json",
+            )
+
+        log_output = " ".join(logs.output)
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+        for sensitive_value in (
+            "An Nguyen",
+            "PAT-9001",
+            "0912345678",
+            "gingivitis",
+            "Scaling and polishing",
+        ):
+            self.assertNotIn(sensitive_value, log_output)
 
     @patch("appointments.ai_services.requests.post")
     def test_summary_rejects_client_supplied_clinical_content(self, post):
@@ -337,6 +427,7 @@ class TwilioSMSServiceTests(TestCase):
 
 class FollowUpReminderPreviewTests(TestCase):
     def setUp(self):
+        cache.clear()
         receptionist_role = Role.objects.create(
             code="RECEPTIONIST",
             name="Receptionist",
@@ -436,6 +527,105 @@ class FollowUpReminderPreviewTests(TestCase):
         self.assertFalse(response.data["sent"])
         self.assertFalse(FollowUpReminder.objects.filter(medical_record=self.record).exists())
         generate_text.assert_called_once_with()
+
+    @override_settings(GEMINI_API_KEY="test-key", GEMINI_MODEL="gemini-test")
+    @patch("appointments.sms_services.send_sms")
+    @patch("appointments.ai_services.requests.post")
+    def test_preview_api_keeps_patient_and_appointment_data_out_of_ai_request(
+        self, post, send_sms
+    ):
+        provider_response = Mock(status_code=200)
+        provider_response.json.return_value = {
+            "candidates": [
+                {"content": {"parts": [{"text": "Vui lòng liên hệ phòng khám."}]}}
+            ]
+        }
+        post.return_value = provider_response
+
+        response = self.client.post(
+            "/api/ai/generate-reminder",
+            {"medical_record_id": self.record.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data["message"],
+            "Mời bạn tái khám ngày 03/11. Vui lòng liên hệ phòng khám.",
+        )
+        self.assertFalse(response.data["sent"])
+        self.assertFalse(FollowUpReminder.objects.filter(medical_record=self.record).exists())
+        send_sms.assert_not_called()
+        provider_request = str(post.call_args.kwargs["json"])
+        for sensitive_value in (
+            "Private Reminder Patient",
+            "REMINDER-API-001",
+            "0912345678",
+            "2026-11-03",
+            "Private diagnosis",
+            "Private treatment plan",
+        ):
+            self.assertNotIn(sensitive_value, provider_request)
+
+    @patch(
+        "appointments.views.generate_generic_follow_up_text",
+        return_value="Vui lòng liên hệ phòng khám.",
+    )
+    def test_preview_requests_for_multiple_records_keep_dates_isolated(self, generate_text):
+        second_patient = Patient.objects.create(
+            patient_code="REMINDER-API-006",
+            full_name="Second Reminder Patient",
+            sms_reminder_consent=True,
+        )
+        second_record = self.create_record(second_patient, date(2026, 12, 4))
+
+        first_response = self.client.post(
+            "/api/ai/generate-reminder",
+            {"medical_record_id": self.record.pk},
+            format="json",
+        )
+        second_response = self.client.post(
+            "/api/ai/generate-reminder",
+            {"medical_record_id": second_record.pk},
+            format="json",
+        )
+
+        self.assertEqual(first_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(second_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(str(first_response.data["follow_up_date"]), "2026-11-03")
+        self.assertEqual(str(second_response.data["follow_up_date"]), "2026-12-04")
+        self.assertIn("03/11", first_response.data["message"])
+        self.assertIn("04/12", second_response.data["message"])
+        self.assertFalse(FollowUpReminder.objects.exists())
+        self.assertEqual(generate_text.call_count, 2)
+
+    @patch(
+        "appointments.views.generate_generic_follow_up_text",
+        return_value="Vui lòng liên hệ phòng khám.",
+    )
+    def test_preview_is_rate_limited_per_authenticated_user(self, generate_text):
+        for _ in range(10):
+            response = self.client.post(
+                "/api/ai/generate-reminder",
+                {"medical_record_id": self.record.pk},
+                format="json",
+            )
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        limited_response = self.client.post(
+            "/api/ai/generate-reminder",
+            {"medical_record_id": self.record.pk},
+            format="json",
+        )
+
+        self.assertEqual(
+            limited_response.status_code,
+            status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+        self.assertEqual(limited_response.data["code"], "rate_limited")
+        self.assertTrue(limited_response.data["retryable"])
+        self.assertIn("Retry-After", limited_response)
+        self.assertEqual(generate_text.call_count, 10)
 
     @patch("appointments.views.generate_generic_follow_up_text")
     def test_preview_rejects_unconsented_patient(self, generate_text):
@@ -572,6 +762,30 @@ class FollowUpReminderPreviewTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_504_GATEWAY_TIMEOUT)
         self.assertEqual(response.data["code"], "ai_timeout")
         self.assertTrue(response.data["retryable"])
+
+    @patch("appointments.views.generate_generic_follow_up_text")
+    def test_preview_failure_logs_do_not_include_patient_or_clinical_data(self, generate_text):
+        from appointments.ai_services import AIServiceError
+
+        generate_text.side_effect = AIServiceError("Gemini returned invalid response.")
+
+        with self.assertLogs("appointments.views", level="WARNING") as logs:
+            response = self.client.post(
+                "/api/ai/generate-reminder",
+                {"medical_record_id": self.record.pk},
+                format="json",
+            )
+
+        log_output = " ".join(logs.output)
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+        for sensitive_value in (
+            "Private Reminder Patient",
+            "REMINDER-API-001",
+            "0912345678",
+            "Private diagnosis",
+            "Private treatment plan",
+        ):
+            self.assertNotIn(sensitive_value, log_output)
 
     def test_preview_does_not_generate_for_cancelled_appointment(self):
         patient = Patient.objects.create(
