@@ -8,6 +8,32 @@
 - Approvers: Quản lý phòng khám, Tech lead và QA engineer
 - Source documents: `docs/KN2/01_requirements.md` đến `docs/KN2/05_review_testing.md`
 
+## Implementation Status Update (2026-10-26)
+
+Phần bàn giao ban đầu bên dưới được lập ngày 2026-09-08, trước khi có source code. Giữ nguyên nội dung đó làm dấu vết lịch sử; bảng trạng thái và checklist hiện tại trong mục này được ưu tiên khi đánh giá code.
+
+### Feature branches and verification evidence
+
+| Feature | Branch / commit | Current repository status | Verification |
+|---|---|---|---|
+| Radiograph upload and private viewing | `feature/radiograph-upload` / `2323a1d` | Đã merge vào `main` qua PR #29 | 136 backend tests pass tại thời điểm kiểm thử nhánh; frontend build, Django checks, migration check và Compose config pass. |
+| Persistent Tooth Chart | `feature/persist-tooth-chart` / `31cd346` | Đã push; chưa có PR/merge | 139 backend tests pass; frontend build, Django checks, migration check và Compose config pass trên nhánh có Radiographs. |
+| AI explanation for dental services | `feature/rubric-service-explanation` / `82f4f6c` | Đã push; chưa có PR/merge | 139 backend tests pass; frontend build, Django checks, migration check và Compose config pass trên nhánh có Radiographs. |
+
+Các kết quả 139 tests thuộc hai nhánh riêng biệt; chưa phải kết quả của một build tích hợp chứa đồng thời cả ba tính năng. Cần chạy lại suite sau khi các PR được review và hợp nhất.
+
+### Acceptance items still requiring external verification
+
+- Docker Compose syntax đã được kiểm tra, nhưng Docker Engine không chạy trong môi trường kiểm tra này; chưa nghiệm thu khởi chạy container trên môi trường sạch.
+- AI unit/API tests hiện mô phỏng phản hồi Gemini; biến `DMS_GEMINI_API_KEY` không được cấu hình trong phiên kiểm tra, nên chưa có kết quả gọi Gemini thật.
+- Tài liệu hiện có thiết kế test prompt nhưng chưa có nhật ký bằng chứng ba vòng chạy prompt, so sánh đầu ra và review trên mô hình thật; các test tự động không thay thế bằng chứng đó.
+- Các câu hỏi nghiệp vụ đang để `Chưa trả lời` trong `docs/KN1/02_GenAI_SoftwareDevelopment_requirements-qa.md` chưa có xác nhận của PO. Không tự chuyển các giả định thành quyết định đã được phê duyệt.
+- Chưa có bằng chứng staging PostgreSQL, kiểm thử tải, backup/restore drill hoặc nghiệm thu production; các mục này nằm ngoài phạm vi demo đã nêu trong rubric.
+
+### Current acceptance decision
+
+Các tính năng đã triển khai ở trên có kiểm thử tự động đạt theo từng nhánh, nhưng **chưa thể xác nhận toàn bộ dự án đã nghiệm thu hoàn tất**. Điều kiện còn lại là review/merge hai nhánh đang chờ, chạy kiểm thử tích hợp trên kết quả hợp nhất, và xác minh Docker/Gemini/PO ở môi trường hoặc với người có thẩm quyền phù hợp.
+
 ## 2. Delivery Summary
 Bộ tài liệu KN2 đã hoàn tất từ yêu cầu, thiết kế, kế hoạch triển khai, ghi nhận implementation đến review/testing. Baseline mô tả đầy đủ hệ thống DMS gồm quản lý bệnh nhân, lịch hẹn, Tooth Chart 32/20 răng, kế hoạch điều trị, kê đơn và cảnh báo dị ứng, hóa đơn/trả góp, upload X-quang, JWT/RBAC và audit.
 
