@@ -17,8 +17,8 @@ Phần bàn giao ban đầu bên dưới được lập ngày 2026-09-08, trư�
 | Feature | Branch / commit | Current repository status | Verification |
 |---|---|---|---|
 | Radiograph upload and private viewing | `feature/radiograph-upload` / `2323a1d` | Đã merge vào `main` qua PR #29 | 136 backend tests pass tại thời điểm kiểm thử nhánh; frontend build, Django checks, migration check và Compose config pass. |
-| Persistent Tooth Chart | `feature/persist-tooth-chart` / `31cd346` | Đã push; chưa có PR/merge | 139 backend tests pass; frontend build, Django checks, migration check và Compose config pass trên nhánh có Radiographs. |
-| AI explanation for dental services | `feature/rubric-service-explanation` / `82f4f6c` | Đã push; chưa có PR/merge | 139 backend tests pass; frontend build, Django checks, migration check và Compose config pass trên nhánh có Radiographs. |
+| Persistent Tooth Chart | `feature/persist-tooth-chart` / `31cd346` | PR #30 đã mở; chờ review/merge | 139 backend tests pass; frontend build, Django checks, migration check và Compose config pass trên nhánh có Radiographs. |
+| AI explanation for dental services | `feature/rubric-service-explanation` / `82f4f6c` | PR #31 đã mở; chờ review/merge | 139 backend tests pass; frontend build, Django checks, migration check và Compose config pass trên nhánh có Radiographs. |
 
 Các kết quả 139 tests thuộc hai nhánh riêng biệt; chưa phải kết quả của một build tích hợp chứa đồng thời cả ba tính năng. Cần chạy lại suite sau khi các PR được review và hợp nhất.
 
