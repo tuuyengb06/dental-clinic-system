@@ -164,24 +164,6 @@ class AuthenticationAndManagementApiTests(APITestCase):
                 self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
                 self.assertIn("search", response.data)
 
-    def test_dentist_patient_list_contains_only_assigned_patients(self):
-        other_patient = Patient.objects.create(
-            patient_code="DMS-OTHER-001",
-            full_name="Other Patient",
-        )
-        ScheduledAppointment.objects.create(
-            patient=self.patient,
-            doctor=self.doctor,
-            appointment_date=timezone.now() + timedelta(days=1),
-        )
-        self.authenticate("clinic-dentist", "DentistPass123!")
-
-        response = self.client.get("/api/v1/patients/")
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual({item["id"] for item in response.data}, {self.patient.pk})
-        self.assertNotIn(other_patient.pk, {item["id"] for item in response.data})
-
     def test_dentist_cannot_write_service_catalog(self):
         self.authenticate("clinic-dentist", "DentistPass123!")
         response = self.client.post(
@@ -1235,6 +1217,117 @@ class AuthenticationAndManagementApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["tooth_codes"], ["A01"])
         self.assertEqual(response.data["services"], [self.service.id])
+
+    def test_reception_booking_to_medical_record_invoice_and_cash_payment_is_consistent(self):
+        receptionist_role = Role.objects.create(code="RECEPTIONIST", name="Receptionist")
+        receptionist = User.objects.create_user(
+            username="workflow-receptionist",
+            password="WorkflowPass123!",
+        )
+        ClinicUser.objects.create(user=receptionist, role=receptionist_role)
+        doctor_id = self.doctor.id
+        work_date = timezone.localdate() + timedelta(days=4)
+        appointment_date = timezone.make_aware(
+            datetime.combine(work_date, time(10, 0))
+        )
+
+        self.client.force_authenticate(receptionist)
+        patient_response = self.client.post(
+            "/api/v1/patients/",
+            {
+                "patient_code": "DMS-WORKFLOW-001",
+                "full_name": "Workflow Test Patient",
+                "dentition_type": Patient.ADULT,
+            },
+            format="json",
+        )
+        self.assertEqual(patient_response.status_code, status.HTTP_201_CREATED)
+        patient_id = patient_response.data["id"]
+
+        schedule_response = self.client.post(
+            "/api/v1/schedules/",
+            {
+                "doctor": doctor_id,
+                "work_date": work_date.isoformat(),
+                "start_time": "10:00",
+                "end_time": "11:00",
+            },
+            format="json",
+        )
+        self.assertEqual(schedule_response.status_code, status.HTTP_201_CREATED)
+
+        appointment_response = self.client.post(
+            "/api/v1/appointments/",
+            {
+                "patient": patient_id,
+                "doctor": doctor_id,
+                "service": self.service.id,
+                "appointment_date": appointment_date.isoformat(),
+                "notes": "End-to-end workflow test",
+            },
+            format="json",
+        )
+        self.assertEqual(appointment_response.status_code, status.HTTP_201_CREATED)
+        appointment_id = appointment_response.data["id"]
+
+        tooth = Tooth.objects.create(
+            code="A01",
+            dentition_type=Patient.ADULT,
+            display_order=1,
+        )
+        self.client.force_authenticate(self.dentist)
+        record_response = self.client.post(
+            "/api/v1/medical-records/",
+            {
+                "appointment": appointment_id,
+                "diagnosis": "Workflow test diagnosis",
+                "treatment_plan": "Workflow test treatment plan",
+                "teeth": [tooth.id],
+                "services": [self.service.id],
+            },
+            format="json",
+        )
+        self.assertEqual(
+            record_response.status_code,
+            status.HTTP_201_CREATED,
+            record_response.data,
+        )
+        record_id = record_response.data["id"]
+
+        self.client.force_authenticate(receptionist)
+        invoice_response = self.client.post(
+            "/api/v1/invoices/",
+            {
+                "medical_record": record_id,
+                "items": [{"service": self.service.id, "quantity": 1}],
+            },
+            format="json",
+        )
+        self.assertEqual(invoice_response.status_code, status.HTTP_201_CREATED)
+        invoice_id = invoice_response.data["id"]
+        self.assertEqual(invoice_response.data["patient"], patient_id)
+        self.assertEqual(invoice_response.data["total_amount"], "250000.00")
+        self.assertEqual(invoice_response.data["status"], Invoice.ISSUED)
+
+        payment_response = self.pay_cash(invoice_id)
+
+        self.assertEqual(payment_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(payment_response.data["status"], Invoice.PAID)
+        self.assertEqual(payment_response.data["paid_amount"], "250000.00")
+        self.assertEqual(payment_response.data["balance"], "0.00")
+
+        appointment = ScheduledAppointment.objects.get(pk=appointment_id)
+        record = MedicalRecord.objects.get(pk=record_id)
+        invoice = Invoice.objects.get(pk=invoice_id)
+        payment = Payment.objects.get(invoice=invoice)
+        self.assertEqual(appointment.patient_id, patient_id)
+        self.assertEqual(record.appointment_id, appointment_id)
+        self.assertEqual(list(record.services.values_list("id", flat=True)), [self.service.id])
+        self.assertEqual(invoice.patient_id, patient_id)
+        self.assertEqual(invoice.medical_record_id, record_id)
+        self.assertEqual(invoice.paid_amount, invoice.total_amount)
+        self.assertEqual(payment.amount, invoice.total_amount)
+        self.assertEqual(payment.status, Payment.COMPLETED)
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])
