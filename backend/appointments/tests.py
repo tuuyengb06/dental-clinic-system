@@ -2,6 +2,7 @@ from datetime import datetime, time, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
+import requests
 from django.contrib.auth import get_user_model
 from django.db import DatabaseError
 from django.test import TestCase
@@ -193,15 +194,41 @@ class ChatbotApiTests(TestCase):
         self.assertEqual(oversized.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_chatbot_returns_safe_fallback_when_catalog_database_fails(self):
-        with patch(
-            "appointments.chatbot.Service.objects.filter",
-            side_effect=DatabaseError("catalog unavailable"),
-        ):
-            response = self.chat("Giá Dental check-up bao nhiêu?")
+        with self.assertLogs("appointments.chatbot", level="WARNING") as logs:
+            with patch(
+                "appointments.chatbot.Service.objects.filter",
+                side_effect=DatabaseError("Confidential Patient Name"),
+            ):
+                response = self.chat("Giá Dental check-up bao nhiêu?")
 
         self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
         self.assertEqual(response.data["intent"], "unavailable")
         self.assertIn("liên hệ lễ tân", response.data["answer"])
+        self.assertNotIn("Confidential Patient Name", " ".join(logs.output))
+
+    def test_chatbot_returns_safe_fallback_when_schedule_database_fails(self):
+        work_date = timezone.localdate() + timedelta(days=10)
+        question = f"Lịch Dental check-up ngày {work_date:%d/%m/%Y} còn giờ nào?"
+
+        with patch(
+            "appointments.chatbot.WorkSchedule.objects.filter",
+            side_effect=DatabaseError("Confidential Patient Name"),
+        ):
+            response = self.chat(question)
+
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertEqual(response.data["intent"], "unavailable")
+        self.assertIn("thử lại sau", response.data["answer"])
+        self.assertNotIn("Confidential Patient Name", response.data["answer"])
+
+    @patch("appointments.ai_services.requests.post", side_effect=requests.ConnectionError)
+    def test_chatbot_price_lookup_does_not_depend_on_ai_provider(self, provider_post):
+        response = self.chat("Giá Dental check-up bao nhiêu?")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["intent"], "price")
+        self.assertIn("250,000 ₫", response.data["answer"])
+        provider_post.assert_not_called()
 
 
 class AppointmentCancellationApiTests(TestCase):
