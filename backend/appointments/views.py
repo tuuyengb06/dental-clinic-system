@@ -19,6 +19,7 @@ from .serializers import (
 from .ai_services import (
     AIServiceConfigurationError,
     AIServiceError,
+    AIServiceOutputError,
     AIServiceTimeoutError,
     AIServiceUnavailableError,
     generate_generic_follow_up_text,
@@ -191,6 +192,14 @@ class MedicalRecordViewSet(viewsets.ModelViewSet):
                 status.HTTP_503_SERVICE_UNAVAILABLE,
                 retryable=True,
             )
+        except AIServiceOutputError as error:
+            logger.warning("Gemini medical-record summary returned invalid output: %s", error)
+            return _ai_error_response(
+                "ai_generation_failed",
+                "AI trả về nội dung không hợp lệ. Vui lòng thử lại.",
+                status.HTTP_502_BAD_GATEWAY,
+                retryable=True,
+            )
         except AIServiceError as error:
             logger.warning("Gemini medical-record summary request failed: %s", error)
             return _ai_error_response(
@@ -294,6 +303,14 @@ class GenerateFollowUpReminderAPIView(APIView):
                 "ai_unavailable",
                 "Dịch vụ AI đang tạm thời không khả dụng sau số lần thử tối đa. Vui lòng thử lại sau.",
                 status.HTTP_503_SERVICE_UNAVAILABLE,
+                retryable=True,
+            )
+        except AIServiceOutputError as error:
+            logger.warning("Gemini follow-up reminder returned invalid output: %s", error)
+            return _ai_error_response(
+                "ai_generation_failed",
+                "AI trả về nội dung không hợp lệ. Vui lòng thử lại.",
+                status.HTTP_502_BAD_GATEWAY,
                 retryable=True,
             )
         except (AIServiceError, SMSServiceError) as error:
