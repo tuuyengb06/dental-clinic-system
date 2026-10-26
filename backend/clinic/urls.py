@@ -11,6 +11,7 @@ from .views import (
     PatientViewSet,
     RadiographViewSet,
     ToothViewSet,
+    ToothConditionViewSet,
     WorkScheduleViewSet,
 )
 
@@ -18,6 +19,7 @@ router = DefaultRouter()
 router.register(r'patients', PatientViewSet)
 router.register(r'teeth', ToothViewSet)
 router.register(r'radiographs', RadiographViewSet, basename='radiograph')
+router.register(r'tooth-conditions', ToothConditionViewSet, basename='tooth-condition')
 router.register(r'appointments', AppointmentViewSet, basename='appointment')
 router.register(r'medical-records', MedicalRecordViewSet, basename='medical-record')
 router.register(

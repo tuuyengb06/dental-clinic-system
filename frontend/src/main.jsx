@@ -7,8 +7,6 @@ import './app.css';
 const API = import.meta.env.DEV ? '/api/v1' : (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1');
 const API_ROOT = API.replace(/\/v1\/?$/, '');
 const AI_CHAT_API = `${API_ROOT}/ai/chat`;
-const teethAdult = Array.from({ length: 32 }, (_, i) => ({ id: i + 1, code: `A${String(i + 1).padStart(2, '0')}`, state: i === 6 || i === 18 ? 'Needs care' : 'Healthy' }));
-const teethChild = Array.from({ length: 20 }, (_, i) => ({ id: i + 1, code: `C${String(i + 1).padStart(2, '0')}`, state: i === 3 ? 'Monitor' : 'Healthy' }));
 const navigationByRole = {
   ADMIN: [
     ['Overview', LayoutDashboard], ['Patients', Users], ['Appointments', CalendarDays], ['Tooth chart', Stethoscope],
@@ -367,7 +365,16 @@ function App() {
       {section === 'Appointments' && <Appointments appointments={appointments} patients={patients} doctors={doctors} services={services} schedules={schedules} role={role} loading={apiLoading} loadError={apiError} onCreateAppointment={createAppointment} onCreateSchedule={createSchedule} onCancelAppointment={cancelAppointment} />}
       {section === 'Follow-up reminders' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <FollowUpReminders records={followUpAppointments} loading={apiLoading} loadError={apiError} onGenerate={generateFollowUpReminder} />}
       {section === 'EMR' && (role === 'DENTIST' || role === 'ADMIN') && <MedicalRecords appointments={appointments} patients={patients} services={services} teeth={teeth} records={medicalRecords} loading={apiLoading} loadError={apiError} onSave={saveMedicalRecord} onGenerateSummary={generateAiSummary} />}
-      {section === 'Tooth chart' && <ToothChart dentition={dentition} setDentition={setDentition} selectedTooth={selectedTooth} setSelectedTooth={setSelectedTooth} />}
+      {section === 'Tooth chart' && <ToothChart
+        dentition={dentition}
+        setDentition={setDentition}
+        selectedTooth={selectedTooth}
+        setSelectedTooth={setSelectedTooth}
+        patients={patients}
+        teeth={teeth}
+        tokens={tokens}
+        onTokensChanged={updateTokens}
+      />}
       {section === 'Billing' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Billing invoices={invoices} records={invoiceSources} loading={apiLoading} onCreateInvoice={createInvoice} onPayCash={payInvoiceCash} onCreateQr={createInvoiceQr} onReconcileQr={reconcileInvoiceQr} onCancelQr={cancelInvoiceQr} />}
       {section === 'Radiographs' && <Radiographs
         patients={patients}
@@ -1573,8 +1580,175 @@ function MedicalRecords({ appointments, patients, services, teeth, records, load
     </section>}
   </section>;
 }
-function ToothChart({ dentition, setDentition, selectedTooth, setSelectedTooth }) { const teeth = dentition === 'ADULT' ? teethAdult : teethChild; return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">CLINICAL RECORD</span><h2>Interactive tooth chart</h2></div><div className="segmented"><button className={dentition === 'ADULT' ? 'selected' : ''} onClick={() => setDentition('ADULT')}>Adult · 32</button><button className={dentition === 'CHILD' ? 'selected' : ''} onClick={() => setDentition('CHILD')}>Child · 20</button></div></div><div className="chart-layout"><div className="panel tooth-panel"><div className="chart-header"><div><strong>Nguyen Minh Anh</strong><span>DMS-0001 · {dentition === 'ADULT' ? 'Permanent dentition' : 'Primary dentition'}</span></div><span className="status confirmed">In treatment</span></div><div className="mouth-label">UPPER ARCH</div><div className={`teeth-grid ${dentition.toLowerCase()}`}>{teeth.slice(0, Math.ceil(teeth.length / 2)).map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-line" /><div className={`teeth-grid lower ${dentition.toLowerCase()}`}>{teeth.slice(Math.ceil(teeth.length / 2)).reverse().map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-label lower-label">LOWER ARCH</div><div className="chart-legend"><span><i className="dot healthy" />Healthy</span><span><i className="dot care" />Needs care</span><span><i className="dot monitor" />Monitor</span></div></div><aside className="panel tooth-detail"><span className="eyebrow">SELECTED TOOTH</span>{selectedTooth ? <><div className="tooth-number">{teeth.find((tooth) => tooth.id === selectedTooth)?.code}</div><h3>Clinical condition</h3><p>Update this tooth’s condition and add a treatment note for the patient record.</p><select defaultValue="Healthy"><option>Healthy</option><option>Needs care</option><option>Monitor</option><option>Restored</option></select><textarea placeholder="Add a clinical note..." /><button className="primary-button full">Save condition</button></> : <div className="empty-detail"><Stethoscope size={28} /><p>Select a tooth to inspect its clinical record.</p></div>}</aside></div></section>; }
-function Tooth({ tooth, selected, onClick }) { return <button onClick={onClick} className={`tooth ${tooth.state.toLowerCase().replace(' ', '-')} ${selected ? 'selected' : ''}`}><span>{tooth.code.slice(1)}</span><div className="tooth-shape" /></button>; }
+function ToothChart({
+  dentition,
+  setDentition,
+  selectedTooth,
+  setSelectedTooth,
+  patients,
+  teeth,
+  tokens,
+  onTokensChanged
+}) {
+  const [patientId, setPatientId] = useState('');
+  const [conditions, setConditions] = useState([]);
+  const [condition, setCondition] = useState('Healthy');
+  const [note, setNote] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState('');
+  const saveInFlight = useRef(false);
+  const eligiblePatients = patients.filter((patient) => patient.dentition_type === dentition);
+  const selectedPatient = eligiblePatients.find((patient) => String(patient.id) === patientId);
+  const chartTeeth = teeth
+    .filter((tooth) => tooth.dentition_type === dentition)
+    .sort((left, right) => left.display_order - right.display_order);
+  const selectedCondition = conditions.find(
+    (item) => item.tooth === selectedTooth
+  );
+
+  useEffect(() => {
+    if (!eligiblePatients.some((patient) => String(patient.id) === patientId)) {
+      setPatientId(eligiblePatients.length ? String(eligiblePatients[0].id) : '');
+      setSelectedTooth(null);
+    }
+  }, [dentition, patients, patientId, setSelectedTooth]);
+
+  useEffect(() => {
+    if (!selectedPatient) {
+      setConditions([]);
+      setLoading(false);
+      return undefined;
+    }
+
+    let active = true;
+    setLoading(true);
+    setError('');
+    apiRequest(`/tooth-conditions/?patient=${encodeURIComponent(selectedPatient.id)}`, {
+      tokens,
+      onTokens: onTokensChanged
+    }).then((items) => {
+      if (active) setConditions(items);
+    }).catch((loadError) => {
+      if (active) setError(loadError.message);
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
+  }, [selectedPatient?.id, tokens, onTokensChanged]);
+
+  useEffect(() => {
+    setCondition(selectedCondition?.condition || 'Healthy');
+    setNote(selectedCondition?.note || '');
+    setSaved('');
+  }, [selectedTooth, selectedCondition?.condition, selectedCondition?.note]);
+
+  async function saveCondition(event) {
+    event.preventDefault();
+    if (!selectedPatient || !selectedTooth || saveInFlight.current) return;
+
+    saveInFlight.current = true;
+    setSaving(true);
+    setError('');
+    setSaved('');
+    try {
+      const result = await apiRequest('/tooth-conditions/', {
+        tokens,
+        onTokens: onTokensChanged,
+        method: 'POST',
+        body: {
+          patient: selectedPatient.id,
+          tooth: selectedTooth,
+          condition,
+          note
+        }
+      });
+      setConditions((current) => [
+        ...current.filter((item) => item.tooth !== result.tooth),
+        result
+      ]);
+      setSaved(`Đã lưu tình trạng răng ${result.tooth_code}.`);
+    } catch (saveError) {
+      setError(saveError.message);
+    } finally {
+      saveInFlight.current = false;
+      setSaving(false);
+    }
+  }
+
+  function changeDentition(value) {
+    setDentition(value);
+    setSelectedTooth(null);
+  }
+
+  function renderArch(items, lower = false) {
+    const archTeeth = lower ? items.slice(Math.ceil(items.length / 2)).reverse() : items.slice(0, Math.ceil(items.length / 2));
+    return <div className={`teeth-grid ${lower ? 'lower ' : ''}${dentition.toLowerCase()}`}>
+      {archTeeth.map((tooth) => {
+        const savedCondition = conditions.find((item) => item.tooth === tooth.id);
+        const toothState = (savedCondition?.condition || 'Healthy').toLowerCase().replace(/\s+/g, '-');
+        return <Tooth
+          key={tooth.id}
+          tooth={{ ...tooth, state: toothState }}
+          selected={selectedTooth === tooth.id}
+          onClick={() => setSelectedTooth(tooth.id)}
+        />;
+      })}
+    </div>;
+  }
+
+  return <section className="page-section">
+    <div className="section-toolbar">
+      <div><span className="eyebrow">CLINICAL RECORD</span><h2>Interactive tooth chart</h2></div>
+      <div className="segmented">
+        <button type="button" className={dentition === 'ADULT' ? 'selected' : ''} onClick={() => changeDentition('ADULT')}>Adult · 32</button>
+        <button type="button" className={dentition === 'CHILD' ? 'selected' : ''} onClick={() => changeDentition('CHILD')}>Child · 20</button>
+      </div>
+    </div>
+    {patients.length > 0 && <label className="tooth-patient-select">Patient
+      <select value={patientId} onChange={(event) => { setPatientId(event.target.value); setSelectedTooth(null); }}>
+        {eligiblePatients.map((patient) => <option key={patient.id} value={patient.id}>{patient.patient_code} · {patient.full_name}</option>)}
+      </select>
+    </label>}
+    {error && <div className="form-error" role="alert">{error}</div>}
+    {loading && <div className="management-state" role="status">Loading saved tooth conditions…</div>}
+    {!selectedPatient && <div className="panel reception-state">No patient with this dentition is available.</div>}
+    {selectedPatient && <div className="chart-layout">
+      <div className="panel tooth-panel">
+        <div className="chart-header">
+          <div><strong>{selectedPatient.full_name}</strong><span>{selectedPatient.patient_code} · {dentition === 'ADULT' ? 'Permanent dentition' : 'Primary dentition'}</span></div>
+        </div>
+        <div className="mouth-label">UPPER ARCH</div>
+        {renderArch(chartTeeth)}
+        <div className="mouth-line" />
+        {renderArch(chartTeeth, true)}
+        <div className="mouth-label lower-label">LOWER ARCH</div>
+        <div className="chart-legend"><span><i className="dot healthy" />Healthy</span><span><i className="dot care" />Needs care</span><span><i className="dot monitor" />Monitor</span><span><i className="dot restored" />Restored</span></div>
+      </div>
+      <aside className="panel tooth-detail">
+        <span className="eyebrow">SELECTED TOOTH</span>
+        {selectedTooth ? <form onSubmit={saveCondition}>
+          <div className="tooth-number">{chartTeeth.find((tooth) => tooth.id === selectedTooth)?.code}</div>
+          <label>Clinical condition
+            <select value={condition} onChange={(event) => setCondition(event.target.value)} disabled={loading || saving}>
+              <option>Healthy</option><option>Needs care</option><option>Monitor</option><option>Restored</option>
+            </select>
+          </label>
+          <label>Clinical note<textarea rows="4" maxLength={2000} value={note} onChange={(event) => setNote(event.target.value)} disabled={loading || saving} /></label>
+          <button className="primary-button full" type="submit" disabled={loading || saving}>{saving ? 'Saving…' : 'Save condition'}</button>
+          {saved && <p role="status">{saved}</p>}
+        </form> : <div className="empty-detail"><Stethoscope size={28} /><p>Select a tooth to view or update its saved clinical condition.</p></div>}
+      </aside>
+    </div>}
+  </section>;
+}
+
+function Tooth({ tooth, selected, onClick }) {
+  return <button type="button" onClick={onClick} className={`tooth ${tooth.state} ${selected ? 'selected' : ''}`} aria-pressed={selected} aria-label={`${tooth.code}, ${tooth.state.replace('-', ' ')}`}>
+    <span>{tooth.code.slice(1)}</span><div className="tooth-shape" />
+  </button>;
+}
 function Billing({ invoices, records, loading, onCreateInvoice, onPayCash, onCreateQr, onReconcileQr, onCancelQr }) {
   const [recordId, setRecordId] = useState('');
   const [quantities, setQuantities] = useState({});

@@ -138,11 +138,10 @@ Chạy `python manage.py migrate` để tạo schema từ migration. Sau đó ch
 - `POST /api/v1/appointments/{id}/cancel/` (lễ tân/Admin hủy lịch Pending hoặc Confirmed; lịch Completed hoặc đã Cancelled bị từ chối)
 - `GET/POST /api/v1/schedules/` (xem/đặt ca làm theo bác sĩ, ngày và giờ; không cho phép ca chồng nhau)
 - `GET /api/v1/teeth/` (danh mục răng để lập hồ sơ bệnh án)
+- `GET /api/v1/tooth-conditions/?patient=<id>` (bác sĩ chỉ xem răng của bệnh nhân có lịch được phân công; Admin xem toàn bộ)
+- `POST /api/v1/tooth-conditions/` (bác sĩ/Admin lưu hoặc cập nhật một tình trạng theo cặp bệnh nhân-răng; loại răng phải khớp ADULT/CHILD)
 - `GET /api/v1/radiographs/?patient=<id>` (bác sĩ được phân công/Admin xem metadata ảnh)
 - `POST /api/v1/radiographs/` (bác sĩ được phân công/Admin tải ảnh JPG/JPEG/PNG tối đa 10 MB bằng `multipart/form-data`)
-- `GET /api/v1/radiographs/{id}/image/` (trả ảnh riêng tư; cần JWT và đúng quyền bệnh nhân)
-- `GET /api/v1/radiographs/?patient=<id>` (bác sĩ được phân công/Admin xem metadata ảnh)
-- `POST /api/v1/radiographs/` (bác sĩ được phân công/Admin tải ảnh JPG/JPEG/PNG, tối đa 10 MB, dạng `multipart/form-data`)
 - `GET /api/v1/radiographs/{id}/image/` (trả ảnh riêng tư; cần JWT và đúng quyền bệnh nhân)
 - `GET/POST/PATCH /api/v1/medical-records/` (bác sĩ lập/cập nhật chẩn đoán, hướng điều trị, răng và dịch vụ chỉ định; mỗi hồ sơ gắn với một lịch hẹn)
 - `GET /api/v1/invoices/` (lịch sử hóa đơn và thông tin giao dịch, chỉ Admin/Lễ tân)
@@ -204,10 +203,11 @@ Dashboard lọc hóa đơn theo trạng thái và thời điểm phát hành, đ
 2. Mở `http://127.0.0.1:5173`.
 3. Chụp Dashboard.
 4. Chọn `Patients` để chụp danh sách hồ sơ.
-5. Chọn `Radiographs`, tải một ảnh JPG/PNG, đổi hồ sơ bệnh nhân và xác nhận ảnh chỉ hiện với bệnh nhân được chọn.
-6. Đăng nhập role lễ tân/Admin, mở `Reception` để chụp form tiếp nhận; vào `Appointments` để tạo ca làm và đặt hẹn.
-7. Đăng nhập role bác sĩ, mở `EMR`, chọn lịch hẹn để xem bệnh nhân, thông tin dị ứng/tiền sử, nhập chẩn đoán và hướng điều trị, chọn răng trên sơ đồ cung hàm, chọn dịch vụ rồi lưu hoặc cập nhật hồ sơ.
-8. Chọn `Billing` để chụp phần công nợ.
+5. Chọn `Tooth chart`, chọn bệnh nhân, thử hai bộ răng `Adult · 32` và `Child · 20`; lưu tình trạng răng, tải lại trang và xác nhận tình trạng/ghi chú vẫn còn.
+6. Chọn `Radiographs`, tải một ảnh JPG/PNG, đổi hồ sơ bệnh nhân và xác nhận ảnh chỉ hiện với bệnh nhân được chọn.
+7. Đăng nhập role lễ tân/Admin, mở `Reception` để chụp form tiếp nhận; vào `Appointments` để tạo ca làm và đặt hẹn.
+8. Đăng nhập role bác sĩ, mở `EMR`, chọn lịch hẹn để xem bệnh nhân, thông tin dị ứng/tiền sử, nhập chẩn đoán và hướng điều trị, chọn răng trên sơ đồ cung hàm, chọn dịch vụ rồi lưu hoặc cập nhật hồ sơ.
+9. Chọn `Billing` để chụp phần công nợ.
 
 ## Phạm vi MVP
 

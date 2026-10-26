@@ -17,6 +17,7 @@ from .models import (
     Radiograph,
     Service,
     Tooth,
+    ToothCondition,
     WorkSchedule,
 )
 
@@ -156,6 +157,28 @@ class RadiographSerializer(serializers.ModelSerializer):
             file_size=image.size,
             uploaded_by=self.context["request"].user.clinic_profile,
         )
+
+
+class ToothConditionSerializer(serializers.ModelSerializer):
+    tooth_code = serializers.CharField(source="tooth.code", read_only=True)
+    condition = serializers.ChoiceField(
+        choices=("Healthy", "Needs care", "Monitor", "Restored")
+    )
+
+    class Meta:
+        model = ToothCondition
+        fields = ["id", "patient", "tooth", "tooth_code", "condition", "note", "updated_at"]
+        read_only_fields = ["id", "tooth_code", "updated_at"]
+        validators = []
+
+    def validate(self, attrs):
+        patient = attrs.get("patient", self.instance.patient if self.instance else None)
+        tooth = attrs.get("tooth", self.instance.tooth if self.instance else None)
+        if patient and tooth and patient.dentition_type != tooth.dentition_type:
+            raise serializers.ValidationError(
+                {"tooth": "The selected tooth does not match the patient's dentition."}
+            )
+        return attrs
 
 
 class InvoiceItemSerializer(serializers.ModelSerializer):
