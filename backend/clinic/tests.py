@@ -27,6 +27,7 @@ from .models import (
     Role,
     Service,
     Tooth,
+    ToothCondition,
 )
 
 User = get_user_model()
@@ -204,6 +205,125 @@ class AuthenticationAndManagementApiTests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_dentist_patient_list_contains_only_assigned_patients(self):
+        other_patient = Patient.objects.create(
+            patient_code="DMS-OTHER-001",
+            full_name="Other Patient",
+        )
+        ScheduledAppointment.objects.create(
+            patient=self.patient,
+            doctor=self.doctor,
+            appointment_date=timezone.now() + timedelta(days=1),
+        )
+        self.authenticate("clinic-dentist", "DentistPass123!")
+
+        response = self.client.get("/api/v1/patients/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            {item["id"] for item in response.data},
+            {self.patient.pk},
+        )
+        self.assertNotIn(other_patient.pk, {item["id"] for item in response.data})
+
+    def test_dentist_can_create_and_update_assigned_patient_tooth_condition(self):
+        tooth = Tooth.objects.create(
+            code="A01",
+            dentition_type=Patient.ADULT,
+            display_order=1,
+        )
+        ScheduledAppointment.objects.create(
+            patient=self.patient,
+            doctor=self.doctor,
+            appointment_date=timezone.now() + timedelta(days=1),
+        )
+        self.authenticate("clinic-dentist", "DentistPass123!")
+        payload = {
+            "patient": self.patient.pk,
+            "tooth": tooth.pk,
+            "condition": "Needs care",
+            "note": "Review at next visit.",
+        }
+
+        created = self.client.post(
+            "/api/v1/tooth-conditions/",
+            payload,
+            format="json",
+        )
+        updated = self.client.post(
+            "/api/v1/tooth-conditions/",
+            {**payload, "condition": "Restored", "note": "Treatment completed."},
+            format="json",
+        )
+        listed = self.client.get(
+            "/api/v1/tooth-conditions/",
+            {"patient": self.patient.pk},
+        )
+
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(updated.status_code, status.HTTP_200_OK)
+        self.assertEqual(updated.data["condition"], "Restored")
+        self.assertEqual(listed.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(listed.data), 1)
+        self.assertEqual(listed.data[0]["note"], "Treatment completed.")
+        self.assertEqual(ToothCondition.objects.count(), 1)
+
+    def test_tooth_condition_rejects_wrong_dentition_and_unassigned_patient(self):
+        child_tooth = Tooth.objects.create(
+            code="C01",
+            dentition_type=Patient.CHILD,
+            display_order=1,
+        )
+        child_patient = Patient.objects.create(
+            patient_code="DMS-CHART-CHILD",
+            full_name="Child Chart Patient",
+            dentition_type=Patient.CHILD,
+        )
+        other_patient = Patient.objects.create(
+            patient_code="DMS-CHART-OTHER",
+            full_name="Other Chart Patient",
+        )
+        self.authenticate("clinic-dentist", "DentistPass123!")
+        payload = {
+            "tooth": child_tooth.pk,
+            "condition": "Monitor",
+        }
+
+        wrong_dentition = self.client.post(
+            "/api/v1/tooth-conditions/",
+            {**payload, "patient": other_patient.pk},
+            format="json",
+        )
+        unassigned_patient = self.client.post(
+            "/api/v1/tooth-conditions/",
+            {**payload, "patient": child_patient.pk},
+            format="json",
+        )
+
+        self.assertEqual(wrong_dentition.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("tooth", wrong_dentition.data)
+        self.assertEqual(unassigned_patient.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(ToothCondition.objects.count(), 0)
+
+    def test_receptionist_cannot_read_or_write_tooth_conditions(self):
+        receptionist_role = Role.objects.create(code="RECEPTIONIST", name="Receptionist")
+        receptionist = User.objects.create_user(
+            username="chart-receptionist",
+            password="ReceptionPass123!",
+        )
+        ClinicUser.objects.create(user=receptionist, role=receptionist_role)
+        self.client.force_authenticate(receptionist)
+
+        listed = self.client.get("/api/v1/tooth-conditions/")
+        created = self.client.post(
+            "/api/v1/tooth-conditions/",
+            {"patient": self.patient.pk, "tooth": 1, "condition": "Monitor"},
+            format="json",
+        )
+
+        self.assertEqual(listed.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(created.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_deleting_service_deactivates_it_to_preserve_references(self):
         self.authenticate("clinic-admin", "AdminPass123!")

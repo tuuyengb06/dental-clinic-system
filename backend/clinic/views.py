@@ -29,6 +29,7 @@ from .models import (
     Radiograph,
     Service,
     Tooth,
+    ToothCondition,
     WorkSchedule,
 )
 from appointments.views import (
@@ -51,6 +52,7 @@ from .serializers import (
     PaymentSerializer,
     RadiographSerializer,
     ToothSerializer,
+    ToothConditionSerializer,
     WorkScheduleSerializer,
 )
 
@@ -115,6 +117,7 @@ class RadiographViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = Radiograph.objects.select_related("patient", "uploaded_by__user")
+
         patient_id = self.request.query_params.get("patient")
         if patient_id:
             queryset = queryset.filter(patient_id=patient_id)
@@ -150,6 +153,53 @@ class RadiographViewSet(viewsets.ModelViewSet):
         response["Cache-Control"] = "private, no-store"
         response["X-Content-Type-Options"] = "nosniff"
         return response
+
+
+class ToothConditionViewSet(viewsets.ModelViewSet):
+    serializer_class = ToothConditionSerializer
+    permission_classes = [IsDentistOrAdmin]
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        queryset = ToothCondition.objects.select_related("patient", "tooth")
+        patient_id = self.request.query_params.get("patient")
+        if patient_id:
+            queryset = queryset.filter(patient_id=patient_id)
+
+        clinic_profile = getattr(self.request.user, "clinic_profile", None)
+        if clinic_profile and clinic_profile.role.code == "DENTIST":
+            queryset = queryset.filter(
+                patient__patient_appointments__doctor__clinic_user=clinic_profile
+            )
+        return queryset.distinct().order_by("tooth__display_order", "id")
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        patient = serializer.validated_data["patient"]
+        tooth = serializer.validated_data["tooth"]
+        clinic_profile = getattr(request.user, "clinic_profile", None)
+        if clinic_profile and clinic_profile.role.code == "DENTIST":
+            get_object_or_404(
+                Patient.objects.filter(
+                    patient_appointments__doctor__clinic_user=clinic_profile
+                ),
+                pk=patient.pk,
+            )
+        with transaction.atomic():
+            condition, created = ToothCondition.objects.update_or_create(
+                patient=patient,
+                tooth=tooth,
+                defaults={
+                    "condition": serializer.validated_data["condition"],
+                    "note": serializer.validated_data.get("note", ""),
+                },
+            )
+        response = self.get_serializer(condition)
+        return Response(
+            response.data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
 
 
 class DoctorViewSet(viewsets.ReadOnlyModelViewSet):
