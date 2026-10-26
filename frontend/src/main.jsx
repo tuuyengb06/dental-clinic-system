@@ -25,14 +25,15 @@ const navigationByRole = {
 
 const TOKEN_STORAGE_KEY = 'dms.auth.tokens';
 
-async function apiRequest(path, { tokens, onTokens, method = 'GET', body, baseUrl = API } = {}) {
+async function apiRequest(path, { tokens, onTokens, method = 'GET', body, baseUrl = API, responseType = 'json' } = {}) {
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
   const sendToBase = (accessToken) => fetch(`${baseUrl}${path}`, {
     method,
     headers: {
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...(body && !isFormData ? { 'Content-Type': 'application/json' } : {}),
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
     },
-    ...(body ? { body: JSON.stringify(body) } : {})
+    ...(body ? { body: isFormData ? body : JSON.stringify(body) } : {})
   });
   const sendRequest = async (request) => {
     try {
@@ -62,7 +63,11 @@ async function apiRequest(path, { tokens, onTokens, method = 'GET', body, baseUr
     response = await sendRequest(() => sendToBase(nextTokens.access));
   }
 
-  const payload = response.status === 204 ? null : await response.json().catch(() => null);
+  const payload = response.status === 204
+    ? null
+    : response.ok && responseType === 'blob'
+      ? await response.blob()
+      : await response.json().catch(() => null);
   if (!response.ok) {
     const detail = payload?.detail || Object.values(payload || {}).flat().join(' ') || `Yêu cầu thất bại (${response.status}).`;
     const error = new Error(detail);
@@ -364,7 +369,11 @@ function App() {
       {section === 'EMR' && (role === 'DENTIST' || role === 'ADMIN') && <MedicalRecords appointments={appointments} patients={patients} services={services} teeth={teeth} records={medicalRecords} loading={apiLoading} loadError={apiError} onSave={saveMedicalRecord} onGenerateSummary={generateAiSummary} />}
       {section === 'Tooth chart' && <ToothChart dentition={dentition} setDentition={setDentition} selectedTooth={selectedTooth} setSelectedTooth={setSelectedTooth} />}
       {section === 'Billing' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Billing invoices={invoices} records={invoiceSources} loading={apiLoading} onCreateInvoice={createInvoice} onPayCash={payInvoiceCash} onCreateQr={createInvoiceQr} onReconcileQr={reconcileInvoiceQr} onCancelQr={cancelInvoiceQr} />}
-      {section === 'Radiographs' && <Radiographs />}
+      {section === 'Radiographs' && <Radiographs
+        patients={patients}
+        tokens={tokens}
+        onTokensChanged={updateTokens}
+      />}
       {section === 'Services' && role === 'ADMIN' && <ServiceManagement tokens={tokens} onTokensChanged={updateTokens} />}
       {section === 'Doctors' && role === 'ADMIN' && <DoctorDirectory tokens={tokens} onTokensChanged={updateTokens} />}
     </main>
@@ -1827,6 +1836,144 @@ function Billing({ invoices, records, loading, onCreateInvoice, onPayCash, onCre
     </div>}
   </section>;
 }
-function Radiographs() { return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">IMAGING</span><h2>Radiograph gallery</h2></div><button className="primary-button"><FileImage size={17} /> Upload image</button></div><div className="upload-placeholder"><FileImage size={30} /><h3>No radiographs uploaded yet</h3><p>Attach X-ray images to a patient record from the clinical visit.</p><button className="secondary-button">Choose file</button></div></section>; }
+function Radiographs({ patients, tokens, onTokensChanged }) {
+  const [patientId, setPatientId] = useState('');
+  const [radiographs, setRadiographs] = useState([]);
+  const [imageUrls, setImageUrls] = useState({});
+  const [file, setFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const uploadInFlight = useRef(false);
+
+  useEffect(() => {
+    if (!patients.some((patient) => String(patient.id) === patientId)) {
+      setPatientId(patients.length ? String(patients[0].id) : '');
+    }
+  }, [patients, patientId]);
+
+  useEffect(() => {
+    if (!patientId) {
+      setRadiographs([]);
+      setLoading(false);
+      return undefined;
+    }
+
+    let active = true;
+    setLoading(true);
+    setError('');
+    setRadiographs([]);
+    apiRequest(`/radiographs/?patient=${encodeURIComponent(patientId)}`, {
+      tokens,
+      onTokens: onTokensChanged
+    }).then((items) => {
+      if (active) setRadiographs(items);
+    }).catch((loadError) => {
+      if (active) setError(loadError.message);
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
+  }, [patientId, tokens, onTokensChanged]);
+
+  useEffect(() => {
+    let active = true;
+    const createdUrls = [];
+    setImageUrls({});
+    Promise.all(radiographs.map(async (radiograph) => {
+      const image = await apiRequest(
+        `/radiographs/${radiograph.id}/image/`,
+        { tokens, onTokens: onTokensChanged, responseType: 'blob' }
+      );
+      const url = URL.createObjectURL(image);
+      createdUrls.push(url);
+      return [radiograph.id, url];
+    })).then((entries) => {
+      if (active) setImageUrls(Object.fromEntries(entries));
+    }).catch((loadError) => {
+      if (active) setError(loadError.message);
+    });
+    return () => {
+      active = false;
+      createdUrls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [radiographs, tokens, onTokensChanged]);
+
+  async function uploadRadiograph(event) {
+    event.preventDefault();
+    if (!patientId || !file || uploadInFlight.current) return;
+
+    const form = event.currentTarget;
+    uploadInFlight.current = true;
+    setUploading(true);
+    setError('');
+    setNotice('');
+    const formData = new FormData();
+    formData.append('patient', patientId);
+    formData.append('image', file);
+    try {
+      const created = await apiRequest('/radiographs/', {
+        tokens,
+        onTokens: onTokensChanged,
+        method: 'POST',
+        body: formData
+      });
+      setRadiographs((current) => [created, ...current]);
+      setFile(null);
+      form.reset();
+      setNotice('Đã tải ảnh X-quang lên và lưu vào hồ sơ bệnh nhân.');
+    } catch (uploadError) {
+      setError(uploadError.message);
+    } finally {
+      uploadInFlight.current = false;
+      setUploading(false);
+    }
+  }
+
+  const selectedPatient = patients.find((patient) => String(patient.id) === patientId);
+  return <section className="page-section">
+    <div className="section-toolbar">
+      <div><span className="eyebrow">IMAGING</span><h2>Radiograph gallery</h2></div>
+    </div>
+    <section className="panel radiograph-upload-panel">
+      <h3>Upload a patient X-ray</h3>
+      <p>Only JPG, JPEG or PNG images up to 10 MB are accepted. Images are private and visible only to the assigned dentist and administrators.</p>
+      <form onSubmit={uploadRadiograph}>
+        <label>Patient
+          <select value={patientId} onChange={(event) => setPatientId(event.target.value)} disabled={uploading || patients.length === 0}>
+            {patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.patient_code} · {patient.full_name}</option>)}
+          </select>
+        </label>
+        <label>X-ray image
+          <input
+            type="file"
+            accept="image/jpeg,image/png,.jpg,.jpeg,.png"
+            onChange={(event) => setFile(event.target.files?.[0] || null)}
+            disabled={uploading || patients.length === 0}
+          />
+        </label>
+        {file && <p className="management-hint">{file.name} · {(file.size / (1024 * 1024)).toFixed(2)} MB</p>}
+        <button className="primary-button" type="submit" disabled={!selectedPatient || !file || uploading}>
+          <FileImage size={17} />{uploading ? 'Uploading…' : 'Upload image'}
+        </button>
+      </form>
+    </section>
+    {error && <div className="form-error" role="alert">{error}</div>}
+    {notice && <div className="form-success" role="status">{notice}</div>}
+    {loading && <div className="management-state" role="status">Loading radiographs…</div>}
+    {!loading && selectedPatient && radiographs.length === 0 && !error && <div className="upload-placeholder">
+      <FileImage size={30} /><h3>No radiographs uploaded yet</h3><p>Uploaded images for {selectedPatient.full_name} will appear here.</p>
+    </div>}
+    {radiographs.length > 0 && <div className="radiograph-grid">
+      {radiographs.map((radiograph) => <article className="panel radiograph-card" key={radiograph.id}>
+        {imageUrls[radiograph.id]
+          ? <img src={imageUrls[radiograph.id]} alt={`Radiograph for ${selectedPatient?.full_name}`} />
+          : <div className="radiograph-image-loading" role="status">Loading image…</div>}
+        <div><strong>{radiograph.original_filename}</strong><span>{new Date(radiograph.uploaded_at).toLocaleString()}</span></div>
+      </article>)}
+    </div>}
+  </section>;
+}
 
 createRoot(document.getElementById('root')).render(<App />);

@@ -4,6 +4,7 @@ from decimal import Decimal
 from urllib.parse import quote, urlencode
 
 from django.conf import settings
+from django.http import FileResponse
 from django.db.models import Q
 from django.db import DatabaseError, IntegrityError, transaction
 from django.shortcuts import get_object_or_404
@@ -12,6 +13,7 @@ from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -24,6 +26,7 @@ from .models import (
     Invoice,
     Patient,
     Payment,
+    Radiograph,
     Service,
     Tooth,
     WorkSchedule,
@@ -31,6 +34,7 @@ from .models import (
 from appointments.views import (
     AppointmentViewSet,
     IsAppointmentStaff,
+    IsDentistOrAdmin,
     IsScheduleStaff,
     MedicalRecordViewSet,
 )
@@ -45,6 +49,7 @@ from .serializers import (
     ManualQrReconciliationSerializer,
     PatientSerializer,
     PaymentSerializer,
+    RadiographSerializer,
     ToothSerializer,
     WorkScheduleSerializer,
 )
@@ -74,6 +79,11 @@ class PatientViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = super().get_queryset()
+        clinic_profile = getattr(self.request.user, "clinic_profile", None)
+        if clinic_profile and clinic_profile.role.code == "DENTIST":
+            queryset = queryset.filter(
+                patient_appointments__doctor__clinic_user=clinic_profile
+            ).distinct()
         if "search" not in self.request.query_params:
             return queryset
 
@@ -95,6 +105,51 @@ class ToothViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Tooth.objects.all()
     serializer_class = ToothSerializer
     permission_classes = [IsAuthenticated]
+
+
+class RadiographViewSet(viewsets.ModelViewSet):
+    serializer_class = RadiographSerializer
+    permission_classes = [IsDentistOrAdmin]
+    parser_classes = [MultiPartParser, FormParser]
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        queryset = Radiograph.objects.select_related("patient", "uploaded_by__user")
+        patient_id = self.request.query_params.get("patient")
+        if patient_id:
+            queryset = queryset.filter(patient_id=patient_id)
+
+        clinic_profile = getattr(self.request.user, "clinic_profile", None)
+        if clinic_profile and clinic_profile.role.code == "DENTIST":
+            queryset = queryset.filter(
+                patient__patient_appointments__doctor__clinic_user=clinic_profile
+            )
+        return queryset.distinct()
+
+    def perform_create(self, serializer):
+        patient = serializer.validated_data["patient"]
+        clinic_profile = getattr(self.request.user, "clinic_profile", None)
+        if clinic_profile and clinic_profile.role.code == "DENTIST":
+            get_object_or_404(
+                Patient.objects.filter(
+                    patient_appointments__doctor__clinic_user=clinic_profile
+                ),
+                pk=patient.pk,
+            )
+        serializer.save()
+
+    @action(detail=True, methods=["get"], url_path="image")
+    def image(self, request, pk=None):
+        radiograph = self.get_object()
+        response = FileResponse(
+            radiograph.image.open("rb"),
+            content_type=radiograph.content_type,
+            as_attachment=False,
+            filename=f"radiograph-{radiograph.pk}",
+        )
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
 
 
 class DoctorViewSet(viewsets.ReadOnlyModelViewSet):

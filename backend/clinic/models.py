@@ -1,4 +1,7 @@
+import uuid
 from decimal import Decimal
+from pathlib import Path
+
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
@@ -76,6 +79,32 @@ class ToothCondition(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["patient", "tooth"], name="unique_patient_tooth")]
+
+
+def radiograph_upload_path(instance, filename):
+    extension = Path(filename).suffix.lower()
+    return f"radiographs/{uuid.uuid4().hex}{extension}"
+
+
+class Radiograph(models.Model):
+    patient = models.ForeignKey(
+        Patient,
+        on_delete=models.CASCADE,
+        related_name="radiographs",
+    )
+    image = models.FileField(upload_to=radiograph_upload_path)
+    original_filename = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=30)
+    file_size = models.PositiveIntegerField()
+    uploaded_by = models.ForeignKey(
+        ClinicUser,
+        on_delete=models.PROTECT,
+        related_name="radiographs_uploaded",
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-uploaded_at", "-id"]
 
 
 class Service(models.Model):

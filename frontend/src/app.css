@@ -348,3 +348,18 @@ button:disabled{cursor:not-allowed;opacity:.62}
   .sidebar-backdrop{display:block;position:fixed;inset:0;z-index:4;background:#14232188}
   .sidebar{z-index:5}
 }
+
+.radiograph-upload-panel{padding:20px;margin-bottom:18px}
+.radiograph-upload-panel>p{max-width:760px;color:var(--muted);font-size:12px;line-height:1.6}
+.radiograph-upload-panel form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:end}
+.radiograph-upload-panel label{display:grid;gap:6px;color:var(--deep);font-size:12px;font-weight:700}
+.radiograph-upload-panel select,.radiograph-upload-panel input[type=file]{width:100%;min-width:0;padding:9px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink)}
+.radiograph-upload-panel .primary-button{justify-self:start}
+.radiograph-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
+.radiograph-card{overflow:hidden}
+.radiograph-card img,.radiograph-image-loading{display:grid;width:100%;height:210px;object-fit:contain;background:#172321}
+.radiograph-image-loading{place-items:center;color:#fff;font-size:12px}
+.radiograph-card>div:last-child{display:grid;gap:5px;padding:12px}
+.radiograph-card strong{overflow-wrap:anywhere;color:var(--deep);font-size:12px}
+.radiograph-card span{color:var(--muted);font-size:10px}
+@media(max-width:700px){.radiograph-upload-panel form{grid-template-columns:1fr}.radiograph-upload-panel .primary-button{width:100%;justify-content:center}}

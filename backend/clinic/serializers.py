@@ -1,6 +1,7 @@
 import uuid
 from collections.abc import Mapping
 from decimal import Decimal
+from pathlib import Path, PureWindowsPath
 
 from django.db import transaction
 from django.utils import timezone
@@ -13,6 +14,7 @@ from .models import (
     InvoiceItem,
     Patient,
     Payment,
+    Radiograph,
     Service,
     Tooth,
     WorkSchedule,
@@ -92,6 +94,68 @@ class ToothSerializer(serializers.ModelSerializer):
     class Meta:
         model = Tooth
         fields = ["id", "code", "dentition_type", "display_order"]
+
+
+class RadiographSerializer(serializers.ModelSerializer):
+    image = serializers.FileField(write_only=True)
+
+    class Meta:
+        model = Radiograph
+        fields = [
+            "id",
+            "patient",
+            "image",
+            "original_filename",
+            "content_type",
+            "file_size",
+            "uploaded_at",
+        ]
+        read_only_fields = [
+            "id",
+            "original_filename",
+            "content_type",
+            "file_size",
+            "uploaded_at",
+        ]
+
+    def validate_image(self, uploaded):
+        if uploaded.size > 10 * 1024 * 1024:
+            raise serializers.ValidationError("Ảnh X-quang không được vượt quá 10 MB.")
+        if uploaded.size < 12:
+            raise serializers.ValidationError("Tệp ảnh quá ngắn hoặc không hợp lệ.")
+
+        windows_name = PureWindowsPath(uploaded.name).name
+        filename = Path(windows_name).name
+        extension = Path(filename).suffix.lower()
+        if extension not in {".jpg", ".jpeg", ".png"}:
+            raise serializers.ValidationError("Chỉ chấp nhận ảnh JPG, JPEG hoặc PNG.")
+
+        signature = uploaded.read(8)
+        uploaded.seek(0)
+        if signature.startswith(b"\x89PNG\r\n\x1a\n"):
+            detected_type = "image/png"
+        elif signature.startswith(b"\xff\xd8\xff"):
+            detected_type = "image/jpeg"
+        else:
+            raise serializers.ValidationError("Tệp tải lên không phải ảnh PNG hoặc JPEG hợp lệ.")
+
+        if extension == ".png" and detected_type != "image/png":
+            raise serializers.ValidationError("Phần mở rộng tệp không khớp định dạng ảnh.")
+        if extension in {".jpg", ".jpeg"} and detected_type != "image/jpeg":
+            raise serializers.ValidationError("Phần mở rộng tệp không khớp định dạng ảnh.")
+        uploaded._radiograph_content_type = detected_type
+        uploaded._radiograph_original_filename = filename
+        return uploaded
+
+    def create(self, validated_data):
+        image = validated_data["image"]
+        return Radiograph.objects.create(
+            **validated_data,
+            original_filename=image._radiograph_original_filename,
+            content_type=image._radiograph_content_type,
+            file_size=image.size,
+            uploaded_by=self.context["request"].user.clinic_profile,
+        )
 
 
 class InvoiceItemSerializer(serializers.ModelSerializer):

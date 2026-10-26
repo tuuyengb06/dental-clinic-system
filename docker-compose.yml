@@ -20,6 +20,7 @@ services:
       DMS_TWILIO_FROM_NUMBER: ${DMS_TWILIO_FROM_NUMBER:-}
     volumes:
       - dental_data:/data
+      - dental_media:/app/media
     healthcheck:
       test:
         - CMD
@@ -51,3 +52,4 @@ services:
 
 volumes:
   dental_data:
+  dental_media:
