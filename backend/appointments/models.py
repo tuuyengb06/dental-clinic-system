@@ -18,6 +18,14 @@ class Appointment(models.Model):
     notes = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["status", "appointment_date"],
+                name="appt_status_date_idx",
+            ),
+        ]
+
     def __str__(self):
         date_str = self.appointment_date.strftime('%d/%m/%Y %H:%M') if self.appointment_date else ''
         return f"Lịch hẹn: {self.patient} - {date_str}"

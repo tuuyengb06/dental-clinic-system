@@ -169,6 +169,18 @@ class Invoice(models.Model):
     status = models.CharField(max_length=20, default=DRAFT)
     issued_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["status", "issued_at", "total_amount"],
+                name="inv_status_issued_idx",
+            ),
+            models.Index(
+                fields=["-issued_at", "-id"],
+                name="inv_recent_idx",
+            ),
+        ]
+
     @property
     def balance(self):
         return self.total_amount - self.paid_amount
