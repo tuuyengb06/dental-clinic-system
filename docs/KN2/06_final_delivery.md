@@ -23,14 +23,14 @@ Phần bàn giao ban đầu bên dưới được lập ngày 2026-09-08, trư�
 | AI explanation for dental services | `feature/rubric-service-explanation` / `82f4f6c` | Đã merge vào `main` qua PR #31 | 139 backend tests pass trên nhánh tích hợp với Radiographs; frontend build, Django checks, migration check và Compose config pass. |
 | Updated acceptance evidence | `feature/update-acceptance-status` / `a796930` | Đã merge vào `main` qua PR #32 | Ghi nhận trạng thái hiện hành và phân biệt rõ báo cáo lịch sử. |
 
-Kiểm thử tích hợp local sau khi kết hợp ba tính năng: toàn bộ **142 backend tests** pass, frontend production build pass, Django checks, migration check và cấu hình Compose pass. Sau đó các PR #30-#32 đã được merge vào `main`; kiểm thử Docker runtime bên dưới được chạy trên commit `9e7db87`.
+Sau khi các PR #30-#32 được merge, đã kiểm tra trực tiếp checkout trùng `origin/main` tại commit `9e7db87`: toàn bộ **142 backend tests** pass, frontend production build pass, Django system check và migration check pass, cấu hình Compose hợp lệ.
 
 ### Docker runtime verification (2026-10-26)
 
-- Docker Desktop/WSL hoạt động sau khi khởi động lại Windows; hai dịch vụ Compose (`backend`, `frontend`) đều ở trạng thái `healthy`.
+- Docker Desktop/WSL hoạt động sau khi khởi động lại Windows; build và khởi chạy Compose từ checkout của `main`, hai dịch vụ (`backend`, `frontend`) đều ở trạng thái `healthy`.
 - Khởi tạo thành công trên volume mới: migrations hoàn tất; seed tạo 3 roles, 2 dentists, 1 receptionist, 5 patients, 5 services, 52 teeth, hồ sơ khám, hóa đơn và thanh toán demo.
 - Frontend `http://localhost:8080/` trả HTTP 200; `/api/v1/health/` trả HTTP 200 với `{"status":"ok"}`.
-- Đăng nhập Admin và smoke test API xác nhận đọc được bệnh nhân, lịch hẹn, dịch vụ, danh mục răng, Tooth Chart, Radiographs và hóa đơn.
+- Đăng nhập Admin thành công; các API bệnh nhân, lịch hẹn, dịch vụ, răng, Tooth Chart, Radiographs và hóa đơn đều trả HTTP 200.
 - Chatbot giải thích dịch vụ khi chưa cấu hình Gemini trả HTTP 503 có kiểm soát; ứng dụng và các API không phụ thuộc AI vẫn hoạt động.
 - Dữ liệu thử nghiệm được lưu ở Docker volumes `dental-clinic-system_dental_data` và `dental-clinic-system_dental_media`. Tệp cấu hình demo có credentials được giữ ngoài repository tại máy phát triển, không commit.
 
@@ -44,7 +44,7 @@ Kiểm thử tích hợp local sau khi kết hợp ba tính năng: toàn bộ **
 
 ### Current acceptance decision
 
-Các tính năng đã merge, suite tích hợp và Docker demo đều được kiểm tra đạt trong phạm vi local. **Chưa thể xác nhận nghiệm thu nghiệp vụ hoàn tất** vì Gemini thật và các câu hỏi PO còn mở; chưa có kiểm thử staging, tải hoặc nghiệm thu production. Các mục ngoài rubric demo không được xem là điều kiện hoàn tất demo.
+Các tính năng đã merge, full suite post-merge và Docker demo đều được kiểm tra đạt trong phạm vi local. **Chưa thể xác nhận nghiệm thu nghiệp vụ tuyệt đối** vì Gemini thật và câu hỏi PO còn mở. Chưa có staging, kiểm thử tải hay nghiệm thu production; đây không phải các mục nằm trong phạm vi demo đã nêu của rubric.
 
 ## 2. Delivery Summary
 Bộ tài liệu KN2 đã hoàn tất từ yêu cầu, thiết kế, kế hoạch triển khai, ghi nhận implementation đến review/testing. Baseline mô tả đầy đủ hệ thống DMS gồm quản lý bệnh nhân, lịch hẹn, Tooth Chart 32/20 răng, kế hoạch điều trị, kê đơn và cảnh báo dị ứng, hóa đơn/trả góp, upload X-quang, JWT/RBAC và audit.
