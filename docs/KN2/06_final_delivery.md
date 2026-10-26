@@ -19,16 +19,24 @@ Phần bàn giao ban đầu bên dưới được lập ngày 2026-09-08, trư�
 | Feature | Branch / commit | Current repository status | Verification |
 |---|---|---|---|
 | Radiograph upload and private viewing | `feature/radiograph-upload` / `2323a1d` | Đã merge vào `main` qua PR #29 | 136 backend tests pass tại thời điểm kiểm thử nhánh; frontend build, Django checks, migration check và Compose config pass. |
-| Persistent Tooth Chart | `feature/persist-tooth-chart` / `31cd346` | PR #30 đã mở; chờ review/merge | 139 backend tests pass; frontend build, Django checks, migration check và Compose config pass trên nhánh có Radiographs. |
-| AI explanation for dental services | `feature/rubric-service-explanation` / `82f4f6c` | PR #31 đã mở; chờ review/merge | 139 backend tests pass; frontend build, Django checks, migration check và Compose config pass trên nhánh có Radiographs. |
+| Persistent Tooth Chart | `feature/persist-tooth-chart` / `31cd346` | Đã merge vào `main` qua PR #30 | 139 backend tests pass trên nhánh tích hợp với Radiographs; frontend build, Django checks, migration check và Compose config pass. |
+| AI explanation for dental services | `feature/rubric-service-explanation` / `82f4f6c` | Đã merge vào `main` qua PR #31 | 139 backend tests pass trên nhánh tích hợp với Radiographs; frontend build, Django checks, migration check và Compose config pass. |
+| Updated acceptance evidence | `feature/update-acceptance-status` / `a796930` | Đã merge vào `main` qua PR #32 | Ghi nhận trạng thái hiện hành và phân biệt rõ báo cáo lịch sử. |
 
-Các kết quả 139 tests thuộc hai nhánh riêng biệt; chưa phải kết quả của một build tích hợp chứa đồng thời cả ba tính năng. Cần chạy lại suite sau khi các PR được review và hợp nhất.
+Sau khi các PR #30-#32 được merge, đã kiểm tra trực tiếp checkout trùng `origin/main` tại commit `9e7db87`: toàn bộ **142 backend tests** pass, frontend production build pass, Django system check và migration check pass, cấu hình Compose hợp lệ.
 
-Kiểm tra tích hợp bổ sung tại máy phát triển: tạo nhánh local không push, hợp nhất lần lượt hai commit tính năng Tooth Chart và AI lên `origin/main`; toàn bộ **142 backend tests** pass, frontend production build pass, Django checks, migration check và cấu hình Compose pass. Đây là bằng chứng tích hợp của các commit hiện tại, nhưng chưa thay thế việc kiểm tra lại sau khi PR được hợp nhất trên GitHub.
+### Docker runtime verification (2026-10-26)
+
+- Docker Desktop/WSL hoạt động sau khi khởi động lại Windows; build và khởi chạy Compose từ checkout của `main`, hai dịch vụ (`backend`, `frontend`) đều ở trạng thái `healthy`.
+- Khởi tạo thành công trên volume mới: migrations hoàn tất; seed tạo 3 roles, 2 dentists, 1 receptionist, 5 patients, 5 services, 52 teeth, hồ sơ khám, hóa đơn và thanh toán demo.
+- Frontend `http://localhost:8080/` trả HTTP 200; `/api/v1/health/` trả HTTP 200 với `{"status":"ok"}`.
+- Đăng nhập Admin thành công; các API bệnh nhân, lịch hẹn, dịch vụ, răng, Tooth Chart, Radiographs và hóa đơn đều trả HTTP 200.
+- Chatbot giải thích dịch vụ khi chưa cấu hình Gemini trả HTTP 503 có kiểm soát; ứng dụng và các API không phụ thuộc AI vẫn hoạt động.
+- Dữ liệu thử nghiệm được lưu ở Docker volumes `dental-clinic-system_dental_data` và `dental-clinic-system_dental_media`. Tệp cấu hình demo có credentials được giữ ngoài repository tại máy phát triển, không commit.
 
 ### Acceptance items still requiring external verification
 
-- Docker Compose syntax đã được kiểm tra, nhưng Docker Engine không chạy trong môi trường kiểm tra này; chưa nghiệm thu khởi chạy container trên môi trường sạch.
+- Demo Docker đã khởi chạy và smoke test thành công trên máy phát triển; chưa có nghiệm thu ở một máy/môi trường staging độc lập.
 - AI unit/API tests hiện mô phỏng phản hồi Gemini; biến `DMS_GEMINI_API_KEY` không được cấu hình trong phiên kiểm tra, nên chưa có kết quả gọi Gemini thật.
 - Tài liệu hiện có thiết kế test prompt nhưng chưa có nhật ký bằng chứng ba vòng chạy prompt, so sánh đầu ra và review trên mô hình thật; các test tự động không thay thế bằng chứng đó.
 - Các câu hỏi nghiệp vụ đang để `Chưa trả lời` trong `docs/KN1/02_GenAI_SoftwareDevelopment_requirements-qa.md` chưa có xác nhận của PO. Không tự chuyển các giả định thành quyết định đã được phê duyệt.
@@ -36,12 +44,12 @@ Kiểm tra tích hợp bổ sung tại máy phát triển: tạo nhánh local kh
 
 ### Current acceptance decision
 
-Các tính năng đã triển khai ở trên có kiểm thử tự động đạt theo từng nhánh, nhưng **chưa thể xác nhận toàn bộ dự án đã nghiệm thu hoàn tất**. Điều kiện còn lại là review/merge hai nhánh đang chờ, chạy kiểm thử tích hợp trên kết quả hợp nhất, và xác minh Docker/Gemini/PO ở môi trường hoặc với người có thẩm quyền phù hợp.
+Các tính năng đã merge, full suite post-merge và Docker demo đều được kiểm tra đạt trong phạm vi local. **Chưa thể xác nhận nghiệm thu nghiệp vụ tuyệt đối** vì Gemini thật và câu hỏi PO còn mở. Chưa có staging, kiểm thử tải hay nghiệm thu production; đây không phải các mục nằm trong phạm vi demo đã nêu của rubric.
 
 ## 2. Delivery Summary
 Bộ tài liệu KN2 đã hoàn tất từ yêu cầu, thiết kế, kế hoạch triển khai, ghi nhận implementation đến review/testing. Baseline mô tả đầy đủ hệ thống DMS gồm quản lý bệnh nhân, lịch hẹn, Tooth Chart 32/20 răng, kế hoạch điều trị, kê đơn và cảnh báo dị ứng, hóa đơn/trả góp, upload X-quang, JWT/RBAC và audit.
 
-Tuy nhiên, theo kiểm tra thực tế ở `04_implementation.md`, các thư mục `backend/`, `frontend/`, `database/` và `config/` chưa có source code, package manifest, migration hoặc test runner. Vì vậy lần bàn giao này là bàn giao tài liệu và baseline triển khai, chưa phải release runtime để đưa vào vận hành. `STATUS: PASS` ở cuối tài liệu xác nhận báo cáo bàn giao đã được lập và kiểm tra, không thay thế điều kiện nghiệm thu code.
+Phần bàn giao bên dưới là baseline lịch sử ngày 2026-09-08, trước khi source ứng dụng hiện tại hoàn thiện. Trạng thái runtime mới nhất được ghi ở mục “Implementation Status Update” phía trên; các trạng thái `Pending`, `Not implemented` và `Not accepted` trong bảng lịch sử không mô tả hiện trạng.
 
 ## 3. Delivered Items
 | Item | Description | Version / Location | Status |
