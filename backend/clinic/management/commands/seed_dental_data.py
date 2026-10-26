@@ -121,18 +121,49 @@ class Command(BaseCommand):
             )
 
         service_specs = [
-            ("CONSULT", "Dental consultation", Decimal("200000"), 30),
-            ("CLEANING", "Scaling and polishing", Decimal("500000"), 45),
-            ("FILLING", "Tooth filling", Decimal("800000"), 60),
-            ("EXTRACTION", "Simple extraction", Decimal("700000"), 45),
-            ("XRAY", "Dental X-ray", Decimal("150000"), 15),
+            (
+                "CONSULT",
+                "Dental consultation",
+                "Bác sĩ kiểm tra tình trạng răng miệng và trao đổi với bệnh nhân về nhu cầu khám.",
+                Decimal("200000"),
+                30,
+            ),
+            (
+                "CLEANING",
+                "Scaling and polishing",
+                "Làm sạch cao răng và đánh bóng bề mặt răng theo chỉ định của bác sĩ.",
+                Decimal("500000"),
+                45,
+            ),
+            (
+                "FILLING",
+                "Tooth filling",
+                "Sử dụng vật liệu nha khoa để phục hồi phần răng bị tổn thương phù hợp với đánh giá của bác sĩ.",
+                Decimal("800000"),
+                60,
+            ),
+            (
+                "EXTRACTION",
+                "Simple extraction",
+                "Thủ thuật lấy răng được bác sĩ đánh giá là có thể nhổ đơn giản.",
+                Decimal("700000"),
+                45,
+            ),
+            (
+                "XRAY",
+                "Dental X-ray",
+                "Chụp hình ảnh X-quang răng để hỗ trợ bác sĩ kiểm tra cấu trúc răng và vùng liên quan.",
+                Decimal("150000"),
+                15,
+            ),
         ]
         services = {}
-        for code, name, price, duration in service_specs:
+        for code, name, description, price, duration in service_specs:
             services[code], _ = Service.objects.update_or_create(
                 code=code,
                 defaults={
                     "name": name,
+                    "description": description,
                     "price": price,
                     "duration_minutes": duration,
                     "is_active": True,

@@ -1,6 +1,6 @@
 from datetime import datetime, time, timedelta
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import requests
 from django.contrib.auth import get_user_model
@@ -35,6 +35,7 @@ class ChatbotApiTests(TestCase):
         self.service = Service.objects.create(
             code="CHAT-CHECKUP",
             name="Dental check-up",
+            description="Bác sĩ kiểm tra tình trạng răng miệng.",
             price=Decimal("250000.00"),
             duration_minutes=30,
         )
@@ -182,6 +183,77 @@ class ChatbotApiTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["intent"], "handoff")
         self.assertIn("không tư vấn y tế", response.data["answer"])
+
+    @patch("appointments.ai_services.requests.post")
+    def test_chatbot_explains_service_without_sending_user_question_to_gemini(self, post):
+        response_from_provider = Mock(status_code=200)
+        response_from_provider.json.return_value = {
+            "candidates": [
+                {"content": {"parts": [{"text": "Dịch vụ hỗ trợ phục hồi răng."}]}}
+            ]
+        }
+        post.return_value = response_from_provider
+        service = Service.objects.create(
+            code="FILLING",
+            name="Tooth filling",
+            description="Sử dụng vật liệu nha khoa để phục hồi phần răng bị tổn thương.",
+            price=Decimal("800000.00"),
+        )
+        question = "Giải thích dịch vụ trám răng cho Nguyen Van A, số 0912345678"
+
+        with patch(
+            "appointments.ai_services.settings.GEMINI_API_KEY",
+            "test-key",
+        ), patch(
+            "appointments.ai_services.settings.GEMINI_MODEL",
+            "gemini-test",
+        ):
+            response = self.chat(question)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["intent"], "service_explanation")
+        self.assertIn("phục hồi răng", response.data["answer"])
+        self.assertIn("không thay thế tư vấn hoặc chẩn đoán", response.data["answer"])
+        provider_request = str(post.call_args.kwargs["json"])
+        self.assertIn(service.description, provider_request)
+        self.assertNotIn(question, provider_request)
+        self.assertNotIn("Nguyen Van A", provider_request)
+        self.assertNotIn("0912345678", provider_request)
+
+    @patch("appointments.chatbot.generate_service_explanation")
+    def test_chatbot_does_not_call_ai_without_catalog_description(self, explain):
+        service = Service.objects.create(
+            code="FILLING",
+            name="Tooth filling",
+            description="",
+            price=Decimal("800000.00"),
+        )
+
+        response = self.chat("Giải thích dịch vụ trám răng")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["intent"], "service_explanation")
+        self.assertIn("chưa có mô tả", response.data["answer"])
+        explain.assert_not_called()
+
+    @patch("appointments.chatbot.generate_service_explanation")
+    def test_chatbot_reports_ai_timeout_as_retryable(self, explain):
+        from .ai_services import AIServiceTimeoutError
+
+        Service.objects.create(
+            code="FILLING",
+            name="Tooth filling",
+            description="Sử dụng vật liệu nha khoa để phục hồi răng.",
+            price=Decimal("800000.00"),
+        )
+        explain.side_effect = AIServiceTimeoutError("provider detail")
+
+        response = self.chat("Giải thích dịch vụ trám răng")
+
+        self.assertEqual(response.status_code, status.HTTP_504_GATEWAY_TIMEOUT)
+        self.assertEqual(response.data["code"], "ai_timeout")
+        self.assertTrue(response.data["retryable"])
+        self.assertNotIn("provider detail", str(response.data))
 
     def test_chatbot_rejects_extra_patient_data_and_oversized_question(self):
         extra_data = self.chat(
