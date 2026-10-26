@@ -345,18 +345,19 @@ function App() {
   const role = String(profile.role || '').toUpperCase() === 'DOCTOR' ? 'DENTIST' : String(profile.role || '').toUpperCase();
   const nav = navigationByRole[role] || navigationByRole.RECEPTIONIST;
   return <div className="app-shell">
+    {mobileOpen && <button type="button" className="sidebar-backdrop" aria-label="Đóng menu điều hướng" onClick={() => setMobileOpen(false)} />}
     <aside className={`sidebar ${mobileOpen ? 'open' : ''}`}>
-      <div className="brand"><div className="brand-mark">D</div><div><strong>DMS</strong><span>Dental management</span></div><button className="icon-button close-menu" onClick={() => setMobileOpen(false)}><X size={18} /></button></div>
+      <div className="brand"><div className="brand-mark">D</div><div><strong>DMS</strong><span>Dental management</span></div><button type="button" className="icon-button close-menu" aria-label="Đóng menu điều hướng" onClick={() => setMobileOpen(false)}><X size={18} /></button></div>
       <div className="workspace"><span className="eyebrow">Workspace</span><button className="workspace-button">Lotus Dental Clinic <ChevronDown size={15} /></button></div>
       <nav aria-label="Main navigation">{nav.map(([name, Icon]) => <button key={name} className={section === name ? 'nav-item active' : 'nav-item'} aria-current={section === name ? 'page' : undefined} onClick={() => { setSection(name); setMobileOpen(false); }}><Icon size={18} /><span>{name}</span>{name === 'Appointments' && <b>3</b>}</button>)}</nav>
     </aside>
     <main className="main-content">
-      <header className="topbar"><button className="icon-button menu-button" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><div><span className="eyebrow">Tuesday, 08 September 2026</span><h1>{section === 'Overview' ? `Good morning, ${profile.display_name}` : section}</h1></div><div className="topbar-actions"><span className={`api-status ${apiLive ? 'live' : ''}`}><span />{apiLive ? 'Live API' : 'Connecting'}</span><button className="icon-button"><Activity size={19} /></button><div className="user-card"><div className="avatar">{profile.display_name.split(' ').map((part) => part[0]).slice(-2).join('')}</div><div><strong>{profile.display_name}</strong><span>{role}</span></div><button className="secondary-button" onClick={logout}>Log out</button></div></div></header>
+      <header className="topbar"><button type="button" className="icon-button menu-button" aria-label="Mở menu điều hướng" aria-expanded={mobileOpen} onClick={() => setMobileOpen(true)}><Menu size={20} /></button><div><span className="eyebrow">Tuesday, 08 September 2026</span><h1>{section === 'Overview' ? `Good morning, ${profile.display_name}` : section}</h1></div><div className="topbar-actions"><span className={`api-status ${apiLive ? 'live' : ''}`}><span />{apiLive ? 'Live API' : 'Connecting'}</span><button className="icon-button"><Activity size={19} /></button><div className="user-card"><div className="avatar">{profile.display_name.split(' ').map((part) => part[0]).slice(-2).join('')}</div><div><strong>{profile.display_name}</strong><span>{role}</span></div><button className="secondary-button" onClick={logout}>Log out</button></div></div></header>
       {apiError && section !== 'Appointments' && <div className="api-error" role="alert">{apiError}</div>}
       {section === 'Overview' && (role === 'ADMIN'
         ? <RevenueDashboard tokens={tokens} onTokensChanged={updateTokens} />
         : <Overview appointments={appointments} patients={patients} setSection={setSection} />)}
-      {section === 'Patients' && <Patients patients={visiblePatients} query={query} setQuery={setQuery} onCreatePatient={createPatient} onUpdatePatient={updatePatient} canCreate={role === 'ADMIN' || role === 'RECEPTIONIST'} />}
+      {section === 'Patients' && <Patients patients={visiblePatients} query={query} setQuery={setQuery} onCreatePatient={createPatient} onUpdatePatient={updatePatient} canCreate={role === 'ADMIN' || role === 'RECEPTIONIST'} loading={apiLoading} />}
       {section === 'Reception' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Reception tokens={tokens} onTokensChanged={updateTokens} appointments={appointments} setSection={setSection} />}
       {section === 'Appointments' && <Appointments appointments={appointments} patients={patients} doctors={doctors} services={services} schedules={schedules} role={role} loading={apiLoading} loadError={apiError} onCreateAppointment={createAppointment} onCreateSchedule={createSchedule} onCancelAppointment={cancelAppointment} />}
       {section === 'Follow-up reminders' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <FollowUpReminders records={followUpAppointments} loading={apiLoading} loadError={apiError} onGenerate={generateFollowUpReminder} />}
@@ -491,6 +492,7 @@ function ChatWidget() {
   ]);
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef(null);
+  const requestInFlight = useRef(false);
 
   useEffect(() => {
     if (open) messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -499,8 +501,9 @@ function ChatWidget() {
   async function sendQuestion(event) {
     event.preventDefault();
     const trimmedQuestion = question.trim();
-    if (!trimmedQuestion || loading) return;
+    if (!trimmedQuestion || requestInFlight.current) return;
 
+    requestInFlight.current = true;
     setQuestion('');
     setMessages((current) => [...current, { role: 'user', text: trimmedQuestion }].slice(-21));
     setLoading(true);
@@ -522,6 +525,7 @@ function ChatWidget() {
         { role: 'assistant', text: `${error.message || 'Không kết nối được chatbot.'} Nếu cần hỗ trợ gấp, vui lòng liên hệ lễ tân.` }
       ].slice(-21));
     } finally {
+      requestInFlight.current = false;
       setLoading(false);
     }
   }
@@ -533,7 +537,7 @@ function ChatWidget() {
         <button type="button" className="chatbot-close" aria-label="Đóng chatbot" onClick={() => setOpen(false)}><X size={18} /></button>
       </header>
       <div className="chatbot-scope-note">Chỉ tra cứu giá và lịch hiện có; không tư vấn y tế hoặc đặt lịch trong hội thoại.</div>
-      <div className="chatbot-messages" aria-live="polite" aria-relevant="additions text">
+      <div className="chatbot-messages" aria-live="polite" aria-relevant="additions text" aria-busy={loading}>
         {messages.map((message, index) => <div key={`${index}-${message.role}`} className={`chatbot-message ${message.role}`}><p>{message.text}</p></div>)}
         {loading && <div className="chatbot-message assistant"><p role="status">Đang tra cứu…</p></div>}
         <div ref={messagesEndRef} />
@@ -556,9 +560,12 @@ function LoginPage({ onLogin, initialError }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState(initialError);
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
 
   async function handleSubmit(event) {
     event.preventDefault();
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     setError('');
     try {
@@ -566,6 +573,7 @@ function LoginPage({ onLogin, initialError }) {
     } catch (loginError) {
       setError(loginError.message);
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
@@ -595,7 +603,9 @@ function ServiceManagement({ tokens, onTokensChanged }) {
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
   const [error, setError] = useState('');
+  const mutationInFlight = useRef(false);
 
   async function loadServices() {
     setLoading(true);
@@ -634,6 +644,8 @@ function ServiceManagement({ tokens, onTokensChanged }) {
 
   async function saveService(event) {
     event.preventDefault();
+    if (mutationInFlight.current) return;
+    mutationInFlight.current = true;
     setSaving(true);
     setError('');
     try {
@@ -648,18 +660,25 @@ function ServiceManagement({ tokens, onTokensChanged }) {
     } catch (saveError) {
       setError(saveError.message);
     } finally {
+      mutationInFlight.current = false;
       setSaving(false);
     }
   }
 
   async function deleteService(service) {
+    if (mutationInFlight.current) return;
     if (!window.confirm(`Deactivate service "${service.name}"?`)) return;
+    mutationInFlight.current = true;
+    setDeletingId(service.id);
     setError('');
     try {
       await apiRequest(`/services/${service.id}/`, { tokens, onTokens: onTokensChanged, method: 'DELETE' });
       await loadServices();
     } catch (deleteError) {
       setError(deleteError.message);
+    } finally {
+      mutationInFlight.current = false;
+      setDeletingId(null);
     }
   }
 
@@ -688,7 +707,7 @@ function ServiceManagement({ tokens, onTokensChanged }) {
             <td><code>{service.code}</code></td><td><strong>{service.name}</strong><small className="table-description">{service.description || '—'}</small></td>
             <td>{Number(service.price).toLocaleString('vi-VN')} ₫</td><td>{service.duration_minutes} min</td>
             <td><span className={`pill ${service.is_active ? '' : 'inactive'}`}>{service.is_active ? 'Active' : 'Inactive'}</span></td>
-            <td><div className="row-actions"><button className="icon-button" aria-label={`Edit ${service.name}`} onClick={() => startEdit(service)}><Pencil size={16} /></button>{service.is_active && <button className="icon-button danger-button" aria-label={`Deactivate ${service.name}`} onClick={() => deleteService(service)}><Trash2 size={16} /></button>}</div></td>
+            <td><div className="row-actions"><button className="icon-button" aria-label={`Edit ${service.name}`} disabled={saving || deletingId !== null} onClick={() => startEdit(service)}><Pencil size={16} /></button>{service.is_active && <button className="icon-button danger-button" aria-label={`Deactivate ${service.name}`} disabled={saving || deletingId !== null} onClick={() => deleteService(service)}><Trash2 size={16} /></button>}</div></td>
           </tr>)}</tbody>
         </table>}
     </div>
@@ -868,14 +887,17 @@ const emptyPatient = {
   sms_reminder_consent: false
 };
 
-function Patients({ patients, query, setQuery, onCreatePatient, onUpdatePatient, canCreate }) {
+function Patients({ patients, query, setQuery, onCreatePatient, onUpdatePatient, canCreate, loading }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyPatient);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [consentForm, setConsentForm] = useState({ ai_processing_consent: false, sms_reminder_consent: false });
   const [consentSaving, setConsentSaving] = useState(false);
+  const savingRef = useRef(false);
+  const consentSavingRef = useRef(false);
 
   useEffect(() => {
     setConsentForm({
@@ -886,8 +908,11 @@ function Patients({ patients, query, setQuery, onCreatePatient, onUpdatePatient,
 
   async function savePatient(event) {
     event.preventDefault();
+    if (savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     setError('');
+    setSuccess('');
     try {
       const patient = await onCreatePatient({
         ...form,
@@ -896,22 +921,29 @@ function Patients({ patients, query, setQuery, onCreatePatient, onUpdatePatient,
       setSelectedPatient(patient);
       setForm(emptyPatient);
       setShowForm(false);
+      setSuccess(`Patient profile for ${patient.full_name} was created successfully.`);
     } catch (saveError) {
       setError(saveError.message);
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
 
   async function saveConsents(event) {
     event.preventDefault();
+    if (!selectedPatient || consentSavingRef.current) return;
+    consentSavingRef.current = true;
     setConsentSaving(true);
     setError('');
+    setSuccess('');
     try {
       setSelectedPatient(await onUpdatePatient(selectedPatient.id, consentForm));
+      setSuccess('Consent settings were saved successfully.');
     } catch (saveError) {
       setError(saveError.message);
     } finally {
+      consentSavingRef.current = false;
       setConsentSaving(false);
     }
   }
@@ -919,10 +951,11 @@ function Patients({ patients, query, setQuery, onCreatePatient, onUpdatePatient,
   return <section className="page-section management-page">
     <div className="section-toolbar">
       <div><span className="eyebrow">PATIENT DIRECTORY</span><h2>Patient records</h2></div>
-      {canCreate && <button className="primary-button" onClick={() => { setShowForm(!showForm); setError(''); }}>
+      {canCreate && <button className="primary-button" onClick={() => { setShowForm(!showForm); setError(''); setSuccess(''); }}>
         <UserRound size={17} /> {showForm ? 'Cancel' : 'New patient'}
       </button>}
     </div>
+    {success && <div className="form-success" role="status">{success}</div>}
     {error && <div className="form-error" role="alert">{error}</div>}
     {showForm && <form className="panel management-form" onSubmit={savePatient}>
       <h3>New patient profile</h3>
@@ -957,8 +990,8 @@ function Patients({ patients, query, setQuery, onCreatePatient, onUpdatePatient,
       </form>}
     </section>}
     <div className="search-field"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, patient code or phone" /></div>
-    <div className="panel table-panel">
-      {patients.length === 0 ? <p className="management-state">{query ? 'No matching patients.' : 'No patient records found.'}</p> :
+    <div className="panel table-panel" aria-busy={loading}>
+      {loading ? <p className="management-state" role="status">Loading patient records…</p> : patients.length === 0 ? <p className="management-state">{query ? 'No matching patients.' : 'No patient records found.'}</p> :
         <table><thead><tr><th>Patient</th><th>Code</th><th>Phone</th><th>Dental profile</th><th>Allergy note</th><th>Profile</th></tr></thead>
           <tbody>{patients.map((patient) => <tr key={patient.id}>
             <td><div className="table-person"><div className="small-avatar">{patient.full_name.split(' ').map((part) => part[0]).slice(-2).join('')}</div><strong>{patient.full_name}</strong></div></td>
@@ -989,6 +1022,8 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
   const [cancellationTarget, setCancellationTarget] = useState(null);
   const [cancelling, setCancelling] = useState(false);
   const [cancellationError, setCancellationError] = useState('');
+  const savingRef = useRef(false);
+  const cancellationRef = useRef(false);
   const monday = new Date(calendarDate);
   monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
   const days = Array.from({ length: calendarMode === 'day' ? 1 : 7 }, (_, index) => {
@@ -1026,11 +1061,13 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
 
   async function submitBooking(event) {
     event.preventDefault();
+    if (savingRef.current) return;
     const reason = booking.notes.trim();
     if (!booking.patient || !booking.doctor || !booking.service || !booking.date || !booking.time || !reason) {
       setError('Complete all required fields, including the reason for the visit.');
       return;
     }
+    savingRef.current = true;
     setSaving(true);
     setError('');
     setSuccess('');
@@ -1053,14 +1090,18 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
         ? 'Could not connect to the clinic API. Check your connection and try again.'
         : saveError.message || 'Could not submit the appointment request. Try again.');
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
 
   async function submitSchedule(event) {
     event.preventDefault();
+    if (savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     setError('');
+    setSuccess('');
     try {
       await onCreateSchedule({
         doctor: Number(schedule.doctor),
@@ -1069,15 +1110,18 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
         end_time: schedule.end_time
       });
       setScheduleOpen(false);
+      setSuccess('Dentist work shift saved successfully.');
     } catch (saveError) {
       setError(saveError.message);
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
 
   async function confirmCancellation() {
-    if (!cancellationTarget) return;
+    if (!cancellationTarget || cancellationRef.current) return;
+    cancellationRef.current = true;
     setCancelling(true);
     setCancellationError('');
     try {
@@ -1089,6 +1133,7 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
         ? 'Could not connect to the clinic API. Check your connection and try again.'
         : cancelError.message || 'Could not cancel this appointment. Try again.');
     } finally {
+      cancellationRef.current = false;
       setCancelling(false);
     }
   }
@@ -1111,8 +1156,8 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
     <div className="section-toolbar">
       <div><span className="eyebrow">CLINIC TIMETABLE</span><h2>Appointments & work shifts</h2></div>
       <div className="calendar-actions">
-        {isReceptionRole && <button className="secondary-button" onClick={() => { setScheduleOpen(!scheduleOpen); setError(''); }}>{scheduleOpen ? 'Close shift form' : 'Add work shift'}</button>}
-        {isReceptionRole && <button className="primary-button" onClick={() => openBooking(calendarDate, '09:00')}><CalendarDays size={17} /> Book appointment</button>}
+        {isReceptionRole && <button className="secondary-button" disabled={saving} onClick={() => { setScheduleOpen(!scheduleOpen); setError(''); setSuccess(''); }}>{scheduleOpen ? 'Close shift form' : 'Add work shift'}</button>}
+        {isReceptionRole && <button className="primary-button" disabled={saving} onClick={() => openBooking(calendarDate, '09:00')}><CalendarDays size={17} /> Book appointment</button>}
       </div>
     </div>
     {success && <div className="form-success" role="status">{success}</div>}
@@ -1137,7 +1182,7 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
         <label>Start time<input required type="time" value={schedule.start_time} onChange={(event) => setSchedule({ ...schedule, start_time: event.target.value })} /></label>
         <label>End time<input required type="time" value={schedule.end_time} onChange={(event) => setSchedule({ ...schedule, end_time: event.target.value })} /></label>
       </div>
-      <div className="form-actions"><button className="primary-button" disabled={saving}>{saving ? 'Saving…' : 'Save work shift'}</button></div>
+      <div className="form-actions"><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save work shift'}</button><button className="secondary-button" type="button" disabled={saving} onClick={() => setScheduleOpen(false)}>Cancel</button></div>
     </form>}
     {bookingOpen && <form className="panel management-form" onSubmit={submitBooking}>
       <h3>Request an appointment</h3>
@@ -1150,7 +1195,7 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
         <label className="booking-reason">Reason for visit<textarea required maxLength={1000} value={booking.notes} onChange={(event) => setBooking({ ...booking, notes: event.target.value })} /></label>
       </div>
       <p className="management-hint">The selected dentist must be scheduled for the full service duration. Overlapping appointments are rejected by the API.</p>
-      <div className="form-actions"><button className="primary-button" disabled={saving}>{saving ? 'Booking…' : 'Confirm booking'}</button><button className="secondary-button" type="button" onClick={() => setBookingOpen(false)}>Cancel</button></div>
+      <div className="form-actions"><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Booking…' : 'Confirm booking'}</button><button className="secondary-button" type="button" disabled={saving} onClick={() => setBookingOpen(false)}>Cancel</button></div>
     </form>}
     <div className="calendar-toolbar panel">
       <div className="calendar-navigation">
@@ -1228,7 +1273,7 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
           </div>
         </div>
         <div className="panel appointment-list-panel"><div className="panel-heading"><div><span className="eyebrow">SELECTED {calendarMode.toUpperCase()}</span><h3>Appointments in this view</h3></div></div>
-          {visibleAppointments.length ? <div className="appointment-list">{[...visibleAppointments].sort((a, b) => new Date(a.appointment_date || a.start_at) - new Date(b.appointment_date || b.start_at)).map((item) => <AppointmentRow key={item.id} item={item} canCancel={isReceptionRole} onCancel={(target) => { setCancellationTarget(target); setCancellationError(''); setSuccess(''); }} />)}</div> : <p className="management-state">No appointments in this {calendarMode}.</p>}
+          {visibleAppointments.length ? <div className="appointment-list">{[...visibleAppointments].sort((a, b) => new Date(a.appointment_date || a.start_at) - new Date(b.appointment_date || b.start_at)).map((item) => <AppointmentRow key={item.id} item={item} canCancel={isReceptionRole} cancelling={cancelling} onCancel={(target) => { setCancellationTarget(target); setCancellationError(''); setSuccess(''); }} />)}</div> : <p className="management-state">No appointments in this {calendarMode}.</p>}
         </div>
       </>}
   </section>;
@@ -1377,6 +1422,7 @@ function MedicalRecords({ appointments, patients, services, teeth, records, load
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const summaryInFlight = useRef(false);
+  const savingRef = useRef(false);
   const selectedAppointment = eligibleAppointments.find((item) => String(item.id) === appointmentId);
   const selectedPatient = patients.find((patient) => String(patient.id) === String(selectedAppointment?.patient));
   const record = records.find((item) => String(item.appointment) === appointmentId);
@@ -1414,6 +1460,8 @@ function MedicalRecords({ appointments, patients, services, teeth, records, load
 
   async function saveRecord(event) {
     event.preventDefault();
+    if (savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     setError('');
     setSuccess('');
@@ -1427,6 +1475,7 @@ function MedicalRecords({ appointments, patients, services, teeth, records, load
     } catch (saveError) {
       setError(saveError.message);
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
@@ -1531,6 +1580,7 @@ function Billing({ invoices, records, loading, onCreateInvoice, onPayCash, onCre
   const [cashError, setCashError] = useState('');
   const [qrError, setQrError] = useState('');
   const [success, setSuccess] = useState('');
+  const savingRef = useRef(false);
   const selectedRecord = records.find((record) => String(record.id) === recordId);
   const selectedInvoice = invoices.find((invoice) => String(invoice.id) === selectedInvoiceId);
   const hasPendingQr = selectedInvoice?.payments?.some((payment) => payment.method === 'BANK_TRANSFER' && payment.status === 'PENDING') || false;
@@ -1553,7 +1603,8 @@ function Billing({ invoices, records, loading, onCreateInvoice, onPayCash, onCre
 
   async function createInvoice(event) {
     event.preventDefault();
-    if (!selectedRecord) return;
+    if (!selectedRecord || savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     setError('');
     setSuccess('');
@@ -1570,12 +1621,14 @@ function Billing({ invoices, records, loading, onCreateInvoice, onPayCash, onCre
     } catch (saveError) {
       setError(saveError.message);
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
 
   async function confirmCashPayment() {
-    if (!selectedInvoice || cashMethod !== 'CASH') return;
+    if (!selectedInvoice || cashMethod !== 'CASH' || savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     setCashError('');
     setError('');
@@ -1587,12 +1640,14 @@ function Billing({ invoices, records, loading, onCreateInvoice, onPayCash, onCre
     } catch (paymentError) {
       setCashError(paymentError.message);
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
 
   async function showQrPayment() {
-    if (!selectedInvoice) return;
+    if (!selectedInvoice || savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     setQrError('');
     setError('');
@@ -1609,13 +1664,15 @@ function Billing({ invoices, records, loading, onCreateInvoice, onPayCash, onCre
     } catch (paymentError) {
       setQrError(paymentError.message);
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
 
   async function confirmQrPayment(event) {
     event.preventDefault();
-    if (!selectedInvoice || !bankReference.trim() || !qrVerified) return;
+    if (!selectedInvoice || !bankReference.trim() || !qrVerified || savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     setQrError('');
     try {
@@ -1631,12 +1688,14 @@ function Billing({ invoices, records, loading, onCreateInvoice, onPayCash, onCre
     } catch (verificationError) {
       setQrError(verificationError.message);
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
 
   async function cancelPendingQr() {
-    if (!selectedInvoice || !qrCancellationChecked) return;
+    if (!selectedInvoice || !qrCancellationChecked || savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     setQrError('');
     try {
@@ -1647,6 +1706,7 @@ function Billing({ invoices, records, loading, onCreateInvoice, onPayCash, onCre
     } catch (cancellationError) {
       setQrError(cancellationError.message);
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
