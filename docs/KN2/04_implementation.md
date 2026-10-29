@@ -1,5 +1,7 @@
 # 04. Implementation
 
+> **Lưu ý về thời điểm:** Đây là ảnh chụp trạng thái triển khai ngày 2026-09-08. Các nhận định “chưa có source/0%/Not started” bên dưới chỉ mô tả repository tại thời điểm lập tài liệu, không phải trạng thái hiện tại. Hãy đối chiếu source, test và hướng dẫn chạy hiện hành trong README trước khi nghiệm thu.
+
 ## 1. Document Information
 - Project: Dental Management System (DMS)
 - Version: 1.0
@@ -7,6 +9,8 @@
 - Contributors: Nhóm phát triển DMS
 - Source documents: `docs/KN2/01_requirements.md`, `docs/KN2/02_design.md`, `docs/KN2/03_implementation_plan.md`
 - Repository assessment date: 2026-09-08
+
+> **Historical baseline:** This report records the repository state on 2026-09-08, when implementation had not started. Its `Not started` and `Blocked` entries are not the current code status. See [06_final_delivery.md](./06_final_delivery.md#implementation-status-update-2026-10-26) for the evidence-based update dated 2026-10-26.
 
 ## 2. Implementation Summary
 Đợt rà soát này ghi nhận trạng thái triển khai thực tế theo thiết kế và kế hoạch đã được phê duyệt. Hiện workspace mới có các thư mục khung `backend/`, `frontend/`, `database/`, `config/` và `ai_services/`; các thư mục này chưa chứa source code, migration, serializer, view hoặc component. `README.md` cũng đang trống. Vì vậy chưa có task code nào có thể đánh dấu Done; các nội dung bên dưới phân biệt rõ artifact đã kiểm tra với artifact cần tạo ở các bước tiếp theo.

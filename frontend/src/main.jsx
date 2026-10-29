@@ -1,122 +1,84 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Activity, CalendarDays, ChevronDown, CircleDollarSign, ClipboardPlus, FileImage, LayoutDashboard, Menu, Pencil, Plus, Search, ShieldCheck, Stethoscope, Trash2, UserRound, Users, X } from 'lucide-react';
+import { Activity, CalendarDays, ChevronDown, CircleDollarSign, ClipboardPlus, Copy, FileImage, LayoutDashboard, Menu, MessageCircle, Pencil, Plus, Search, Send, ShieldCheck, Stethoscope, Trash2, UserRound, Users, X } from 'lucide-react';
 import './styles.css';
 import './app.css';
 
 const API = import.meta.env.DEV ? '/api/v1' : (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1');
-const AUTH_API_ROOT = API.replace(/\/v1\/?$/, '');
-const teethAdult = Array.from({ length: 32 }, (_, i) => ({ id: i + 1, code: `A${String(i + 1).padStart(2, '0')}`, state: i === 6 || i === 18 ? 'Needs care' : 'Healthy' }));
-const teethChild = Array.from({ length: 20 }, (_, i) => ({ id: i + 1, code: `C${String(i + 1).padStart(2, '0')}`, state: i === 3 ? 'Monitor' : 'Healthy' }));
+const API_ROOT = API.replace(/\/v1\/?$/, '');
+const AI_CHAT_API = `${API_ROOT}/ai/chat`;
 const navigationByRole = {
   ADMIN: [
-    ['Tổng quan', LayoutDashboard], ['Bệnh nhân', Users], ['Lịch hẹn', CalendarDays], ['Sơ đồ răng', Stethoscope],
-    ['Thanh toán', CircleDollarSign], ['X-quang', FileImage], ['Dịch vụ', ClipboardPlus], ['Bác sĩ', UserRound], ['Lễ tân', UserRound]
+    ['Overview', LayoutDashboard], ['Patients', Users], ['Appointments', CalendarDays], ['Tooth chart', Stethoscope],
+    ['Follow-up reminders', MessageCircle], ['Billing', CircleDollarSign], ['Radiographs', FileImage], ['Services', ClipboardPlus], ['Doctors', UserRound], ['Reception', UserRound], ['EMR', ClipboardPlus]
   ],
   DENTIST: [
-    ['Tổng quan', LayoutDashboard], ['Bệnh nhân', Users], ['Lịch hẹn', CalendarDays],
-    ['Sơ đồ răng', Stethoscope], ['X-quang', FileImage], ['Bệnh án điện tử', ClipboardPlus]
+    ['Overview', LayoutDashboard], ['Patients', Users], ['Appointments', CalendarDays],
+    ['Tooth chart', Stethoscope], ['Radiographs', FileImage], ['EMR', ClipboardPlus]
   ],
   RECEPTIONIST: [
-    ['Tổng quan', LayoutDashboard], ['Lễ tân', UserRound], ['Lịch hẹn', CalendarDays], ['Bệnh nhân', Users], ['Thanh toán', CircleDollarSign]
+    ['Overview', LayoutDashboard], ['Reception', UserRound], ['Appointments', CalendarDays], ['Follow-up reminders', MessageCircle], ['Patients', Users], ['Billing', CircleDollarSign]
   ]
 };
 
 const TOKEN_STORAGE_KEY = 'dms.auth.tokens';
-const roleLabels = {
-  ADMIN: 'Quản trị viên',
-  DENTIST: 'Bác sĩ',
-  DOCTOR: 'Bác sĩ',
-  RECEPTIONIST: 'Lễ tân',
-  PATIENT: 'Bệnh nhân'
-};
 
-function displayRole(role) {
-  const normalizedRole = String(role || '').toUpperCase();
-  return roleLabels[normalizedRole] || role || 'Chưa xác định';
-}
-
-function displayAppointmentStatus(status) {
-  const labels = {
-    pending: 'Chờ xác nhận',
-    confirmed: 'Đã xác nhận',
-    completed: 'Đã hoàn thành',
-    cancelled: 'Đã hủy',
-    scheduled: 'Đã lên lịch',
-    draft: 'Bản nháp',
-    active: 'Đang thực hiện',
-    issued: 'Đã phát hành',
-    paid: 'Đã thanh toán',
-    unpaid: 'Chưa thanh toán',
-    partially_paid: 'Đã thanh toán một phần',
-    in_progress: 'Đang thực hiện',
-    planned: 'Đã lên kế hoạch',
-    done: 'Hoàn tất'
-  };
-  const normalizedStatus = String(status || '').toLowerCase().replace(/[\s-]+/g, '_');
-  return labels[normalizedStatus] || status || 'Chưa xác định';
-}
-
-function displayToothState(state) {
-  return ({
-    Healthy: 'Khỏe mạnh',
-    'Needs care': 'Cần điều trị',
-    Monitor: 'Cần theo dõi',
-    Restored: 'Đã phục hồi'
-  })[state] || state;
-}
-
-function displayDentition(type) {
-  return type === 'CHILD' ? 'Răng trẻ em · 20 răng' : 'Răng người lớn · 32 răng';
-}
-
-async function fetchApi(url, options) {
-  try {
-    return await fetch(url, options);
-  } catch (error) {
-    if (error instanceof TypeError) {
-      throw new Error('Không thể kết nối đến hệ thống phòng khám. Vui lòng kiểm tra kết nối.');
-    }
-    throw error;
-  }
-}
-
-async function apiRequest(path, { tokens, onTokens, method = 'GET', body } = {}, baseUrl = API) {
-  const send = (accessToken) => fetchApi(`${baseUrl}${path}`, {
+async function apiRequest(path, { tokens, onTokens, method = 'GET', body, baseUrl = API, responseType = 'json' } = {}) {
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+  const sendToBase = (accessToken) => fetch(`${baseUrl}${path}`, {
     method,
     headers: {
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...(body && !isFormData ? { 'Content-Type': 'application/json' } : {}),
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
     },
-    ...(body ? { body: JSON.stringify(body) } : {})
+    ...(body ? { body: isFormData ? body : JSON.stringify(body) } : {})
   });
+  const sendRequest = async (request) => {
+    try {
+      return await request();
+    } catch (requestError) {
+      if (!(requestError instanceof TypeError)) throw requestError;
+      const error = new Error('Không thể kết nối máy chủ. Vui lòng kiểm tra kết nối và thử lại.');
+      error.code = 'network_error';
+      error.retryable = true;
+      throw error;
+    }
+  };
 
-  let response = await send(tokens?.access);
+  let response = await sendRequest(() => sendToBase(tokens?.access));
   if (response.status === 401 && tokens?.refresh && onTokens) {
-    const refreshed = await fetchApi(`${AUTH_API_ROOT}/auth/token/refresh/`, {
+    const refreshed = await sendRequest(() => fetch(`${API}/auth/token/refresh/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh: tokens.refresh })
-    });
+    }));
     if (!refreshed.ok) {
       onTokens(null);
       throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
     }
     const nextTokens = { ...tokens, ...(await refreshed.json()) };
     onTokens(nextTokens);
-    response = await send(nextTokens.access);
+    response = await sendRequest(() => sendToBase(nextTokens.access));
   }
 
-  const payload = response.status === 204 ? null : await response.json().catch(() => null);
+  const payload = response.status === 204
+    ? null
+    : response.ok && responseType === 'blob'
+      ? await response.blob()
+      : await response.json().catch(() => null);
   if (!response.ok) {
     const detail = payload?.detail || Object.values(payload || {}).flat().join(' ') || `Yêu cầu thất bại (${response.status}).`;
-    throw new Error(detail);
+    const error = new Error(detail);
+    error.code = payload?.code || (response.status === 429 ? 'rate_limited' : undefined);
+    error.retryable = payload?.retryable === true || response.status === 429;
+    error.status = response.status;
+    throw error;
   }
   return payload;
 }
 
 function App() {
-  const [section, setSection] = useState('Tổng quan');
+  const [section, setSection] = useState('Overview');
   const [patients, setPatients] = useState([]);
   const [appointments, setAppointments] = useState([]);
   const [doctors, setDoctors] = useState([]);
@@ -124,6 +86,9 @@ function App() {
   const [schedules, setSchedules] = useState([]);
   const [teeth, setTeeth] = useState([]);
   const [medicalRecords, setMedicalRecords] = useState([]);
+  const [followUpAppointments, setFollowUpAppointments] = useState([]);
+  const [invoices, setInvoices] = useState([]);
+  const [invoiceSources, setInvoiceSources] = useState([]);
   const [tokens, setTokens] = useState(null);
   const [profile, setProfile] = useState(null);
   const [authReady, setAuthReady] = useState(false);
@@ -165,7 +130,7 @@ function App() {
             localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(nextTokens));
             if (active) setTokens(nextTokens);
           }
-        }, AUTH_API_ROOT);
+        });
         if (active) {
           setTokens(currentTokens);
           setProfile(currentUser);
@@ -188,6 +153,15 @@ function App() {
     const recordRequest = currentRole === 'DENTIST' || currentRole === 'ADMIN'
       ? apiRequest('/medical-records/', { tokens, onTokens: updateTokens })
       : Promise.resolve([]);
+    const billingRequest = currentRole === 'ADMIN' || currentRole === 'RECEPTIONIST'
+      ? Promise.all([
+        apiRequest('/invoices/', { tokens, onTokens: updateTokens }),
+        apiRequest('/invoices/available-records/', { tokens, onTokens: updateTokens })
+      ])
+      : Promise.resolve([[], []]);
+    const followUpRequest = currentRole === 'ADMIN' || currentRole === 'RECEPTIONIST'
+      ? apiRequest('/follow-up-appointments/', { tokens, onTokens: updateTokens })
+      : Promise.resolve([]);
     Promise.all([
       apiRequest('/patients/', { tokens, onTokens: updateTokens }),
       apiRequest('/appointments/', { tokens, onTokens: updateTokens }),
@@ -195,8 +169,10 @@ function App() {
       apiRequest('/services/', { tokens, onTokens: updateTokens }),
       apiRequest('/schedules/', { tokens, onTokens: updateTokens }),
       apiRequest('/teeth/', { tokens, onTokens: updateTokens }),
-      recordRequest
-    ]).then(([patientData, appointmentData, doctorData, serviceData, scheduleData, toothData, recordData]) => {
+      recordRequest,
+      billingRequest,
+      followUpRequest
+    ]).then(([patientData, appointmentData, doctorData, serviceData, scheduleData, toothData, recordData, billingData, followUpData]) => {
       setPatients(patientData);
       setAppointments(appointmentData);
       setDoctors(doctorData);
@@ -204,6 +180,9 @@ function App() {
       setSchedules(scheduleData);
       setTeeth(toothData);
       setMedicalRecords(recordData);
+      setFollowUpAppointments(followUpData);
+      setInvoices(billingData[0]);
+      setInvoiceSources(billingData[1]);
       setApiLive(true);
       setApiError('');
     }).catch((error) => {
@@ -235,6 +214,17 @@ function App() {
     });
     setPatients((currentPatients) => [createdPatient, ...currentPatients]);
     return createdPatient;
+  }
+
+  async function updatePatient(patientId, updates) {
+    const updated = await apiRequest(`/patients/${patientId}/`, {
+      tokens,
+      onTokens: updateTokens,
+      method: 'PATCH',
+      body: updates
+    });
+    setPatients((current) => current.map((patient) => patient.id === updated.id ? updated : patient));
+    return updated;
   }
 
   async function createAppointment(appointment) {
@@ -274,92 +264,335 @@ function App() {
     return saved;
   }
 
+  async function createInvoice(invoice) {
+    const created = await apiRequest('/invoices/', {
+      tokens, onTokens: updateTokens, method: 'POST', body: invoice
+    });
+    setInvoices((current) => [created, ...current]);
+    setInvoiceSources((current) => current.filter((record) => record.id !== created.medical_record));
+    return created;
+  }
+
+  async function payInvoiceCash(invoiceId) {
+    const paid = await apiRequest(`/invoices/${invoiceId}/pay-cash/`, {
+      tokens, onTokens: updateTokens, method: 'POST', body: { method: 'CASH' }
+    });
+    setInvoices((current) => current.map((invoice) => invoice.id === paid.id ? paid : invoice));
+    return paid;
+  }
+
+  async function createInvoiceQr(invoiceId) {
+    const result = await apiRequest(`/invoices/${invoiceId}/pay-qr/`, {
+      tokens, onTokens: updateTokens, method: 'POST'
+    });
+    setInvoices((current) => current.map((invoice) => invoice.id === result.invoice.id ? result.invoice : invoice));
+    return result;
+  }
+
+  async function reconcileInvoiceQr(invoiceId, verification) {
+    const invoice = await apiRequest(`/invoices/${invoiceId}/reconcile-qr/`, {
+      tokens, onTokens: updateTokens, method: 'POST', body: verification
+    });
+    setInvoices((current) => current.map((item) => item.id === invoice.id ? invoice : item));
+    return invoice;
+  }
+
+  async function cancelInvoiceQr(invoiceId) {
+    const invoice = await apiRequest(`/invoices/${invoiceId}/cancel-qr/`, {
+      tokens, onTokens: updateTokens, method: 'POST', body: { checked_no_payment: true }
+    });
+    setInvoices((current) => current.map((item) => item.id === invoice.id ? invoice : item));
+    return invoice;
+  }
+
+  async function generateAiSummary(recordId) {
+    return apiRequest(`/medical-records/${recordId}/ai-summary/`, {
+      tokens,
+      onTokens: updateTokens,
+      method: 'POST',
+      body: {}
+    });
+  }
+
+  async function generateFollowUpReminder(recordId) {
+    return apiRequest('/ai/generate-reminder', {
+      tokens,
+      onTokens: updateTokens,
+      method: 'POST',
+      body: { medical_record_id: recordId },
+      baseUrl: API_ROOT
+    });
+  }
+
   async function login(username, password) {
-    const nextTokens = await apiRequest('/auth/login/', { method: 'POST', body: { username, password } }, AUTH_API_ROOT);
-    const currentUser = await apiRequest('/auth/me/', { tokens: nextTokens }, AUTH_API_ROOT);
+    const nextTokens = await apiRequest('/auth/token/', { method: 'POST', body: { username, password } });
+    const currentUser = await apiRequest('/auth/me/', { tokens: nextTokens });
     localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify(nextTokens));
     setTokens(nextTokens);
     setProfile(currentUser);
     setAuthError('');
   }
 
-  async function register(account) {
-    await apiRequest('/auth/register/', { method: 'POST', body: account }, AUTH_API_ROOT);
-    await login(account.username, account.password);
-  }
-
   function logout() {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
     setTokens(null);
     setProfile(null);
-    setSection('Tổng quan');
+    setSection('Overview');
     setAuthError('');
   }
 
-  if (!authReady) return <div className="auth-loading">Đang kiểm tra phiên đăng nhập…</div>;
-  if (!profile) return <LoginPage onLogin={login} onRegister={register} initialError={authError} />;
+  if (!authReady) return <><div className="auth-loading">Checking your session…</div><ChatWidget /></>;
+  if (!profile) return <><LoginPage onLogin={login} initialError={authError} /><ChatWidget /></>;
 
   const visiblePatients = patients.filter((patient) => `${patient.full_name} ${patient.patient_code} ${patient.phone}`.toLowerCase().includes(query.toLowerCase()));
   const role = String(profile.role || '').toUpperCase() === 'DOCTOR' ? 'DENTIST' : String(profile.role || '').toUpperCase();
   const nav = navigationByRole[role] || navigationByRole.RECEPTIONIST;
   return <div className="app-shell">
+    {mobileOpen && <button type="button" className="sidebar-backdrop" aria-label="Đóng menu điều hướng" onClick={() => setMobileOpen(false)} />}
     <aside className={`sidebar ${mobileOpen ? 'open' : ''}`}>
-      <div className="brand"><div className="brand-mark">D</div><div><strong>DMS</strong><span>Quản lý nha khoa</span></div><button className="icon-button close-menu" aria-label="Đóng menu" onClick={() => setMobileOpen(false)}><X size={18} /></button></div>
-      <div className="workspace"><span className="eyebrow">Không gian làm việc</span><button className="workspace-button">Phòng khám nha khoa Lotus <ChevronDown size={15} /></button></div>
-      <nav aria-label="Điều hướng chính">{nav.map(([name, Icon]) => <button key={name} className={section === name ? 'nav-item active' : 'nav-item'} aria-current={section === name ? 'page' : undefined} onClick={() => { setSection(name); setMobileOpen(false); }}><Icon size={18} /><span>{name}</span>{name === 'Lịch hẹn' && <b>3</b>}</button>)}</nav>
+      <div className="brand"><div className="brand-mark">D</div><div><strong>DMS</strong><span>Dental management</span></div><button type="button" className="icon-button close-menu" aria-label="Đóng menu điều hướng" onClick={() => setMobileOpen(false)}><X size={18} /></button></div>
+      <div className="workspace"><span className="eyebrow">Workspace</span><button className="workspace-button">Lotus Dental Clinic <ChevronDown size={15} /></button></div>
+      <nav aria-label="Main navigation">{nav.map(([name, Icon]) => <button key={name} className={section === name ? 'nav-item active' : 'nav-item'} aria-current={section === name ? 'page' : undefined} onClick={() => { setSection(name); setMobileOpen(false); }}><Icon size={18} /><span>{name}</span>{name === 'Appointments' && <b>3</b>}</button>)}</nav>
     </aside>
     <main className="main-content">
-      <header className="topbar"><button className="icon-button menu-button" aria-label="Mở menu" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><div><span className="eyebrow">{new Date().toLocaleDateString('vi-VN', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}</span><h1>{section === 'Tổng quan' ? `Xin chào, ${profile.display_name}` : section}</h1></div><div className="topbar-actions"><span className={`api-status ${apiLive ? 'live' : ''}`}><span />{apiLive ? 'Đã kết nối' : 'Đang kết nối'}</span><button className="icon-button" aria-label="Hoạt động"><Activity size={19} /></button><div className="user-card"><div className="avatar">{profile.display_name.split(' ').map((part) => part[0]).slice(-2).join('')}</div><div><strong>{profile.display_name}</strong><span>{displayRole(role)}</span></div><button className="secondary-button" onClick={logout}>Đăng xuất</button></div></div></header>
-      {apiError && section !== 'Lịch hẹn' && <div className="api-error" role="alert">{apiError}</div>}
-      {section === 'Tổng quan' && <Overview appointments={appointments} patients={patients} setSection={setSection} />}
-      {section === 'Bệnh nhân' && <Patients patients={visiblePatients} query={query} setQuery={setQuery} onCreatePatient={createPatient} canCreate={role === 'ADMIN' || role === 'RECEPTIONIST'} />}
-      {section === 'Lễ tân' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Reception tokens={tokens} onTokensChanged={updateTokens} appointments={appointments} setSection={setSection} />}
-      {section === 'Lịch hẹn' && <Appointments appointments={appointments} patients={patients} doctors={doctors} services={services} schedules={schedules} role={role} loading={apiLoading} loadError={apiError} onCreateAppointment={createAppointment} onCreateSchedule={createSchedule} onCancelAppointment={cancelAppointment} />}
-      {section === 'Bệnh án điện tử' && (role === 'DENTIST' || role === 'ADMIN') && <MedicalRecords appointments={appointments} patients={patients} services={services} teeth={teeth} records={medicalRecords} loading={apiLoading} loadError={apiError} onSave={saveMedicalRecord} />}
-      {section === 'Sơ đồ răng' && <ToothChart dentition={dentition} setDentition={setDentition} selectedTooth={selectedTooth} setSelectedTooth={setSelectedTooth} />}
-      {section === 'Thanh toán' && <Billing patients={patients} />}
-      {section === 'X-quang' && <Radiographs />}
-      {section === 'Dịch vụ' && role === 'ADMIN' && <ServiceManagement tokens={tokens} onTokensChanged={updateTokens} />}
-      {section === 'Bác sĩ' && role === 'ADMIN' && <DoctorDirectory tokens={tokens} onTokensChanged={updateTokens} />}
+      <header className="topbar"><button type="button" className="icon-button menu-button" aria-label="Mở menu điều hướng" aria-expanded={mobileOpen} onClick={() => setMobileOpen(true)}><Menu size={20} /></button><div><span className="eyebrow">Tuesday, 08 September 2026</span><h1>{section === 'Overview' ? `Good morning, ${profile.display_name}` : section}</h1></div><div className="topbar-actions"><span className={`api-status ${apiLive ? 'live' : ''}`}><span />{apiLive ? 'Live API' : 'Connecting'}</span><button className="icon-button"><Activity size={19} /></button><div className="user-card"><div className="avatar">{profile.display_name.split(' ').map((part) => part[0]).slice(-2).join('')}</div><div><strong>{profile.display_name}</strong><span>{role}</span></div><button className="secondary-button" onClick={logout}>Log out</button></div></div></header>
+      {apiError && section !== 'Appointments' && <div className="api-error" role="alert">{apiError}</div>}
+      {section === 'Overview' && (role === 'ADMIN'
+        ? <RevenueDashboard tokens={tokens} onTokensChanged={updateTokens} />
+        : <Overview appointments={appointments} patients={patients} setSection={setSection} />)}
+      {section === 'Patients' && <Patients patients={visiblePatients} query={query} setQuery={setQuery} onCreatePatient={createPatient} onUpdatePatient={updatePatient} canCreate={role === 'ADMIN' || role === 'RECEPTIONIST'} loading={apiLoading} />}
+      {section === 'Reception' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Reception tokens={tokens} onTokensChanged={updateTokens} appointments={appointments} setSection={setSection} />}
+      {section === 'Appointments' && <Appointments appointments={appointments} patients={patients} doctors={doctors} services={services} schedules={schedules} role={role} loading={apiLoading} loadError={apiError} onCreateAppointment={createAppointment} onCreateSchedule={createSchedule} onCancelAppointment={cancelAppointment} />}
+      {section === 'Follow-up reminders' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <FollowUpReminders records={followUpAppointments} loading={apiLoading} loadError={apiError} onGenerate={generateFollowUpReminder} />}
+      {section === 'EMR' && (role === 'DENTIST' || role === 'ADMIN') && <MedicalRecords appointments={appointments} patients={patients} services={services} teeth={teeth} records={medicalRecords} loading={apiLoading} loadError={apiError} onSave={saveMedicalRecord} onGenerateSummary={generateAiSummary} />}
+      {section === 'Tooth chart' && <ToothChart
+        dentition={dentition}
+        setDentition={setDentition}
+        selectedTooth={selectedTooth}
+        setSelectedTooth={setSelectedTooth}
+        patients={patients}
+        teeth={teeth}
+        tokens={tokens}
+        onTokensChanged={updateTokens}
+      />}
+      {section === 'Billing' && (role === 'ADMIN' || role === 'RECEPTIONIST') && <Billing invoices={invoices} records={invoiceSources} loading={apiLoading} onCreateInvoice={createInvoice} onPayCash={payInvoiceCash} onCreateQr={createInvoiceQr} onReconcileQr={reconcileInvoiceQr} onCancelQr={cancelInvoiceQr} />}
+      {section === 'Radiographs' && <Radiographs
+        patients={patients}
+        tokens={tokens}
+        onTokensChanged={updateTokens}
+      />}
+      {section === 'Services' && role === 'ADMIN' && <ServiceManagement tokens={tokens} onTokensChanged={updateTokens} />}
+      {section === 'Doctors' && role === 'ADMIN' && <DoctorDirectory tokens={tokens} onTokensChanged={updateTokens} />}
     </main>
+    <ChatWidget />
   </div>;
 }
 
-function LoginPage({ onLogin, onRegister, initialError }) {
-  const [mode, setMode] = useState('login');
+function FollowUpReminders({ records, loading, loadError, onGenerate }) {
+  const [selectedRecordId, setSelectedRecordId] = useState('');
+  const [preview, setPreview] = useState(null);
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState('');
+  const [retryable, setRetryable] = useState(false);
+  const [copyStatus, setCopyStatus] = useState('');
+  const generationInFlight = useRef(false);
+  const selectedRecord = records.find((record) => String(record.id) === selectedRecordId);
+
+  function selectRecord(record) {
+    if (generationInFlight.current) return;
+    setSelectedRecordId(String(record.id));
+    setPreview(null);
+    setError('');
+    setRetryable(false);
+    setCopyStatus('');
+  }
+
+  async function generatePreview() {
+    if (!selectedRecord || !selectedRecord.sms_reminder_consent || generationInFlight.current) return;
+    generationInFlight.current = true;
+    setGenerating(true);
+    setError('');
+    setRetryable(false);
+    setCopyStatus('');
+    setPreview(null);
+    try {
+      setPreview(await onGenerate(selectedRecord.id));
+    } catch (requestError) {
+      setError(requestError.message || 'Không tạo được tin nhắn nhắc tái khám.');
+      setRetryable(requestError.retryable === true);
+    } finally {
+      generationInFlight.current = false;
+      setGenerating(false);
+    }
+  }
+
+  async function copyPreview() {
+    if (!preview?.message) return;
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('Trình duyệt không hỗ trợ sao chép tự động. Hãy chọn nội dung để sao chép.');
+      }
+      await navigator.clipboard.writeText(preview.message);
+      setCopyStatus('Đã sao chép tin nhắn.');
+    } catch (copyError) {
+      setCopyStatus(copyError.message || 'Không thể sao chép tin nhắn.');
+    }
+  }
+
+  function formatDate(value) {
+    return value ? new Date(`${value}T00:00:00`).toLocaleDateString('vi-VN') : '—';
+  }
+
+  return <section className="page-section management-page">
+    <div className="section-toolbar">
+      <div><span className="eyebrow">FOLLOW-UP APPOINTMENTS</span><h2>Follow-up reminders</h2></div>
+      <span className="pill">{records.length} records</span>
+    </div>
+    <p className="management-hint follow-up-intro">Chọn hồ sơ có ngày tái khám để tạo bản nháp. Chỉ hồ sơ đã có SMS consent mới được tạo; nội dung không tự gửi qua SMS/Zalo.</p>
+    {loadError && <div className="form-error" role="alert">{loadError}</div>}
+    {loading ? <p className="management-state" role="status">Đang tải lịch tái khám…</p> : !records.length
+      ? <div className="panel management-state">Chưa có hồ sơ nào được ghi ngày tái khám.</div>
+      : <div className="follow-up-layout">
+        <section className="panel table-panel management-table follow-up-list-panel">
+          <div className="panel-heading"><div><span className="eyebrow">EMR FOLLOW-UP DATES</span><h3>Danh sách lịch tái khám</h3></div></div>
+          <div className="follow-up-table-scroll"><table aria-label="Danh sách lịch tái khám">
+            <thead><tr><th>Bệnh nhân</th><th>Lịch khám</th><th>Ngày tái khám</th><th>SMS consent</th></tr></thead>
+            <tbody>{records.map((record) => <tr
+              key={record.id}
+              className={String(record.id) === selectedRecordId ? 'follow-up-row-selected' : ''}
+              aria-selected={String(record.id) === selectedRecordId}
+              onClick={() => !generating && selectRecord(record)}
+            >
+              <td><button className="follow-up-select" type="button" disabled={generating} onClick={() => selectRecord(record)}>{record.patient_name}</button><small>{record.patient_code}</small></td>
+              <td>{new Date(record.appointment_date).toLocaleString('vi-VN')}<small>{record.dentist_name}</small></td>
+              <td>{formatDate(record.follow_up_date)}</td>
+              <td><span className={`pill ${record.sms_reminder_consent ? 'follow-up-consent-on' : 'inactive'}`}>{record.sms_reminder_consent ? 'Đã đồng ý' : 'Chưa đồng ý'}</span></td>
+            </tr>)}</tbody>
+          </table></div>
+        </section>
+        <section className="panel follow-up-preview-panel">
+          <div className="panel-heading"><div><span className="eyebrow">AI MESSAGE PREVIEW</span><h3>Tạo tin nhắn</h3></div></div>
+          <p className="management-hint">AI chỉ tạo lời mời chung. Không gửi tên, mã bệnh nhân, số điện thoại, ngày tái khám hoặc dữ liệu bệnh án cho Gemini; ngày được ghép từ hồ sơ trong hệ thống. Bản nháp chỉ để xem/sao chép, không tự gửi SMS/Zalo. Giới hạn: 10 lần tạo mỗi người dùng mỗi giờ.</p>
+          {selectedRecord && <div className="follow-up-selected">
+            <strong>{selectedRecord.patient_name}</strong>
+            <span>Tái khám: {formatDate(selectedRecord.follow_up_date)}</span>
+          </div>}
+          {selectedRecord && !selectedRecord.sms_reminder_consent && <div className="form-error" role="alert">Chưa ghi nhận SMS consent. Hãy xác nhận consent trước khi tạo bản nháp.</div>}
+          <button className="primary-button" type="button" disabled={!selectedRecord?.sms_reminder_consent || generating || Boolean(error && !retryable)} onClick={generatePreview}>
+            <MessageCircle size={16} />{generating ? 'Đang xử lý AI…' : retryable ? 'Thử lại' : 'Tạo tin nhắn bằng AI'}
+          </button>
+          {generating && <p className="management-state" role="status">Đang chờ dịch vụ AI phản hồi…</p>}
+          {error && <div className="form-error" role="alert">{error}</div>}
+          {preview && <div className="follow-up-generated">
+            <label htmlFor="follow-up-message">Nội dung xem trước</label>
+            <textarea id="follow-up-message" readOnly value={preview.message} rows={3} />
+            <div className="follow-up-preview-actions">
+              <span>{preview.message.length}/70 ký tự · Chưa gửi</span>
+              <button className="secondary-button" type="button" onClick={copyPreview}><Copy size={15} />Sao chép</button>
+            </div>
+          </div>}
+          {copyStatus && <div className={copyStatus.startsWith('Đã') ? 'form-success' : 'form-error'} role="status">{copyStatus}</div>}
+        </section>
+      </div>}
+  </section>;
+}
+
+function ChatWidget() {
+  const [open, setOpen] = useState(false);
+  const [question, setQuestion] = useState('');
+  const [messages, setMessages] = useState([
+    {
+      role: 'assistant',
+      text: 'Xin chào! Bạn có thể hỏi giá, giờ khám còn trống hoặc yêu cầu giải thích một dịch vụ. Khi hỏi lịch, vui lòng ghi ngày và tên dịch vụ.'
+    }
+  ]);
+  const [loading, setLoading] = useState(false);
+  const messagesEndRef = useRef(null);
+  const requestInFlight = useRef(false);
+
+  useEffect(() => {
+    if (open) messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, loading, open]);
+
+  async function sendQuestion(event) {
+    event.preventDefault();
+    const trimmedQuestion = question.trim();
+    if (!trimmedQuestion || requestInFlight.current) return;
+
+    requestInFlight.current = true;
+    setMessages((current) => [...current, { role: 'user', text: trimmedQuestion }].slice(-21));
+    setLoading(true);
+    try {
+      const response = await fetch(AI_CHAT_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: trimmedQuestion })
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = payload?.answer || payload?.detail || 'Hiện chatbot chưa trả lời được. Bạn vui lòng thử lại hoặc liên hệ lễ tân.';
+        throw new Error(message);
+      }
+      if (typeof payload?.answer !== 'string' || !payload.answer.trim()) {
+        throw new Error('Chatbot chưa trả được câu trả lời hợp lệ. Câu hỏi vẫn được giữ lại để bạn thử lại.');
+      }
+      setMessages((current) => [...current, { role: 'assistant', text: payload.answer }].slice(-21));
+      setQuestion('');
+    } catch (error) {
+      setMessages((current) => [
+        ...current,
+        { role: 'assistant', text: `${error.message || 'Không kết nối được chatbot.'} Nếu cần hỗ trợ gấp, vui lòng liên hệ lễ tân.` }
+      ].slice(-21));
+    } finally {
+      requestInFlight.current = false;
+      setLoading(false);
+    }
+  }
+
+  return <div className="chatbot-widget">
+    {open && <section className="chatbot-panel" role="dialog" aria-modal="false" aria-labelledby="chatbot-title">
+      <header className="chatbot-header">
+        <div><strong id="chatbot-title">Tư vấn dịch vụ & lịch khám</strong><span>Dựa trên dữ liệu phòng khám</span></div>
+        <button type="button" className="chatbot-close" aria-label="Đóng chatbot" onClick={() => setOpen(false)}><X size={18} /></button>
+      </header>
+      <div className="chatbot-scope-note">Có thể giải thích dịch vụ dựa trên danh mục, tra giá và giờ khám. Không chẩn đoán, tư vấn điều trị hoặc đặt lịch. Không nhập thông tin cá nhân hay bệnh án.</div>
+      <div className="chatbot-messages" aria-live="polite" aria-relevant="additions text" aria-busy={loading}>
+        {messages.map((message, index) => <div key={`${index}-${message.role}`} className={`chatbot-message ${message.role}`}><p>{message.text}</p></div>)}
+        {loading && <div className="chatbot-message assistant"><p role="status">Đang tra cứu…</p></div>}
+        <div ref={messagesEndRef} />
+      </div>
+      <form className="chatbot-form" onSubmit={sendQuestion}>
+        <label className="sr-only" htmlFor="chatbot-question">Câu hỏi</label>
+        <input id="chatbot-question" maxLength={500} value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Hỏi giá, lịch hoặc giải thích dịch vụ…" disabled={loading} />
+        <button type="submit" aria-label="Gửi câu hỏi" disabled={loading || !question.trim()}><Send size={17} /></button>
+      </form>
+    </section>}
+    <button type="button" className="chatbot-launcher" aria-label={open ? 'Đóng tư vấn' : 'Mở chatbot tư vấn'} aria-expanded={open} onClick={() => setOpen((current) => !current)}>
+      {open ? <X size={21} /> : <MessageCircle size={21} />}
+      <span>{open ? 'Đóng' : 'Tư vấn'}</span>
+    </button>
+  </div>;
+}
+
+function LoginPage({ onLogin, initialError }) {
   const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
   const [password, setPassword] = useState('');
-  const [passwordConfirmation, setPasswordConfirmation] = useState('');
   const [error, setError] = useState(initialError);
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
 
   async function handleSubmit(event) {
     event.preventDefault();
-    setError('');
-    if (mode === 'register' && password !== passwordConfirmation) {
-      setError('Mật khẩu xác nhận chưa khớp.');
-      return;
-    }
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
+    setError('');
     try {
-      if (mode === 'register') {
-        await onRegister({
-          username: username.trim(),
-          email: email.trim(),
-          first_name: firstName.trim(),
-          last_name: lastName.trim(),
-          password,
-          role: 'Patient'
-        });
-      } else {
-        await onLogin(username.trim(), password);
-      }
-    } catch (authError) {
-      setError(authError.message);
+      await onLogin(username.trim(), password);
+    } catch (loginError) {
+      setError(loginError.message);
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
@@ -367,32 +600,15 @@ function LoginPage({ onLogin, onRegister, initialError }) {
   return <main className="login-screen">
     <form className="login-card" onSubmit={handleSubmit}>
       <div className="brand-mark">D</div>
-      <span className="eyebrow">PHÒNG KHÁM NHA KHOA LOTUS</span>
-      <h1>{mode === 'login' ? 'Chào mừng bạn trở lại' : 'Tạo tài khoản bệnh nhân'}</h1>
-      <p>{mode === 'login' ? 'Đăng nhập để tiếp tục chăm sóc sức khỏe răng miệng.' : 'Đăng ký tài khoản để thuận tiện theo dõi và đặt lịch khám.'}</p>
-      <div className="auth-tabs" role="tablist" aria-label="Chọn hình thức xác thực">
-        <button type="button" role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'active' : ''} onClick={() => { setMode('login'); setError(''); }}>Đăng nhập</button>
-        <button type="button" role="tab" aria-selected={mode === 'register'} className={mode === 'register' ? 'active' : ''} onClick={() => { setMode('register'); setError(''); }}>Đăng ký</button>
-      </div>
-      {mode === 'register' && <>
-        <label htmlFor="register-first-name">Họ và tên đệm</label>
-        <input id="register-first-name" autoComplete="family-name" required value={firstName} onChange={(event) => setFirstName(event.target.value)} />
-        <label htmlFor="register-last-name">Tên</label>
-        <input id="register-last-name" autoComplete="given-name" required value={lastName} onChange={(event) => setLastName(event.target.value)} />
-        <label htmlFor="register-email">Địa chỉ email</label>
-        <input id="register-email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} />
-      </>}
-      <label htmlFor="login-username">Tên đăng nhập</label>
+      <span className="eyebrow">LOTUS DENTAL CLINIC</span>
+      <h1>Sign in to your clinic</h1>
+      <p>Use your clinic account to continue.</p>
+      <label htmlFor="login-username">Username</label>
       <input id="login-username" autoComplete="username" required value={username} onChange={(event) => setUsername(event.target.value)} />
-      <label htmlFor="login-password">Mật khẩu</label>
-      <input id="login-password" type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={mode === 'register' ? 8 : undefined} required value={password} onChange={(event) => setPassword(event.target.value)} />
-      {mode === 'register' && <>
-        <label htmlFor="register-password-confirmation">Xác nhận mật khẩu</label>
-        <input id="register-password-confirmation" type="password" autoComplete="new-password" minLength={8} required value={passwordConfirmation} onChange={(event) => setPasswordConfirmation(event.target.value)} />
-      </>}
+      <label htmlFor="login-password">Password</label>
+      <input id="login-password" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} />
       {error && <div className="form-error" role="alert">{error}</div>}
-      <button className="primary-button login-submit" type="submit" disabled={submitting}>{submitting ? 'Đang xử lý…' : mode === 'login' ? 'Đăng nhập' : 'Đăng ký tài khoản'}</button>
-      <span className="auth-note">Chăm sóc nụ cười khỏe mạnh bắt đầu từ hôm nay.</span>
+      <button className="primary-button login-submit" type="submit" disabled={submitting}>{submitting ? 'Signing in…' : 'Sign in'}</button>
     </form>
   </main>;
 }
@@ -406,7 +622,9 @@ function ServiceManagement({ tokens, onTokensChanged }) {
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
   const [error, setError] = useState('');
+  const mutationInFlight = useRef(false);
 
   async function loadServices() {
     setLoading(true);
@@ -445,6 +663,8 @@ function ServiceManagement({ tokens, onTokensChanged }) {
 
   async function saveService(event) {
     event.preventDefault();
+    if (mutationInFlight.current) return;
+    mutationInFlight.current = true;
     setSaving(true);
     setError('');
     try {
@@ -459,47 +679,54 @@ function ServiceManagement({ tokens, onTokensChanged }) {
     } catch (saveError) {
       setError(saveError.message);
     } finally {
+      mutationInFlight.current = false;
       setSaving(false);
     }
   }
 
   async function deleteService(service) {
-    if (!window.confirm(`Bạn có chắc muốn ngừng cung cấp dịch vụ "${service.name}" không?`)) return;
+    if (mutationInFlight.current) return;
+    if (!window.confirm(`Deactivate service "${service.name}"?`)) return;
+    mutationInFlight.current = true;
+    setDeletingId(service.id);
     setError('');
     try {
       await apiRequest(`/services/${service.id}/`, { tokens, onTokens: onTokensChanged, method: 'DELETE' });
       await loadServices();
     } catch (deleteError) {
       setError(deleteError.message);
+    } finally {
+      mutationInFlight.current = false;
+      setDeletingId(null);
     }
   }
 
   return <section className="page-section management-page">
     <div className="section-toolbar">
-      <div><span className="eyebrow">DANH MỤC PHÒNG KHÁM</span><h2>Danh mục dịch vụ</h2></div>
-      {!showForm && <button className="primary-button" onClick={startCreate}><Plus size={16} /> Thêm dịch vụ</button>}
+      <div><span className="eyebrow">CLINIC CATALOG</span><h2>Service catalog</h2></div>
+      {!showForm && <button className="primary-button" onClick={startCreate}><Plus size={16} /> Add service</button>}
     </div>
     {error && <div className="form-error" role="alert">{error}</div>}
     {showForm && <form className="panel management-form" onSubmit={saveService}>
-      <h3>{editingId ? 'Chỉnh sửa dịch vụ' : 'Dịch vụ mới'}</h3>
+      <h3>{editingId ? 'Edit service' : 'New service'}</h3>
       <div className="form-grid">
-        <label>Mã dịch vụ<input required maxLength="30" value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value.toUpperCase() })} /></label>
-        <label>Tên dịch vụ<input required maxLength="160" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
-        <label>Giá (VNĐ)<input required type="number" min="0" step="1000" value={form.price} onChange={(event) => setForm({ ...form, price: event.target.value })} /></label>
-        <label>Thời lượng (phút)<input required type="number" min="1" value={form.duration_minutes} onChange={(event) => setForm({ ...form, duration_minutes: event.target.value })} /></label>
-        <label className="form-wide">Mô tả<textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
-        <label className="checkbox-field"><input type="checkbox" checked={form.is_active} onChange={(event) => setForm({ ...form, is_active: event.target.checked })} /> Cho phép đặt lịch</label>
+        <label>Service code<input required maxLength="30" value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value.toUpperCase() })} /></label>
+        <label>Service name<input required maxLength="160" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+        <label>Price (VND)<input required type="number" min="0" step="1000" value={form.price} onChange={(event) => setForm({ ...form, price: event.target.value })} /></label>
+        <label>Duration (minutes)<input required type="number" min="1" value={form.duration_minutes} onChange={(event) => setForm({ ...form, duration_minutes: event.target.value })} /></label>
+        <label className="form-wide">Description<textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
+        <label className="checkbox-field"><input type="checkbox" checked={form.is_active} onChange={(event) => setForm({ ...form, is_active: event.target.checked })} /> Available for booking</label>
       </div>
-      <div className="form-actions"><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Đang lưu…' : 'Lưu dịch vụ'}</button><button className="secondary-button" type="button" onClick={() => setShowForm(false)}>Hủy</button></div>
+      <div className="form-actions"><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save service'}</button><button className="secondary-button" type="button" onClick={() => setShowForm(false)}>Cancel</button></div>
     </form>}
     <div className="panel table-panel management-table">
-      {loading ? <p className="management-state">Đang tải dịch vụ…</p> : services.length === 0 ? <p className="management-state">Chưa có dịch vụ nào. Hãy thêm dịch vụ để bắt đầu.</p> :
-        <table><thead><tr><th>Mã</th><th>Dịch vụ</th><th>Giá</th><th>Thời lượng</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+      {loading ? <p className="management-state">Loading services…</p> : services.length === 0 ? <p className="management-state">No services found. Add a service to get started.</p> :
+        <table><thead><tr><th>Code</th><th>Service</th><th>Price</th><th>Duration</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>{services.map((service) => <tr key={service.id}>
             <td><code>{service.code}</code></td><td><strong>{service.name}</strong><small className="table-description">{service.description || '—'}</small></td>
-            <td>{Number(service.price).toLocaleString('vi-VN')} ₫</td><td>{service.duration_minutes} phút</td>
-            <td><span className={`pill ${service.is_active ? '' : 'inactive'}`}>{service.is_active ? 'Đang hoạt động' : 'Ngừng hoạt động'}</span></td>
-            <td><div className="row-actions"><button className="icon-button" aria-label={`Sửa ${service.name}`} onClick={() => startEdit(service)}><Pencil size={16} /></button>{service.is_active && <button className="icon-button danger-button" aria-label={`Ngừng dịch vụ ${service.name}`} onClick={() => deleteService(service)}><Trash2 size={16} /></button>}</div></td>
+            <td>{Number(service.price).toLocaleString('vi-VN')} ₫</td><td>{service.duration_minutes} min</td>
+            <td><span className={`pill ${service.is_active ? '' : 'inactive'}`}>{service.is_active ? 'Active' : 'Inactive'}</span></td>
+            <td><div className="row-actions"><button className="icon-button" aria-label={`Edit ${service.name}`} disabled={saving || deletingId !== null} onClick={() => startEdit(service)}><Pencil size={16} /></button>{service.is_active && <button className="icon-button danger-button" aria-label={`Deactivate ${service.name}`} disabled={saving || deletingId !== null} onClick={() => deleteService(service)}><Trash2 size={16} /></button>}</div></td>
           </tr>)}</tbody>
         </table>}
     </div>
@@ -521,14 +748,14 @@ function DoctorDirectory({ tokens, onTokensChanged }) {
   }, [tokens, onTokensChanged]);
 
   return <section className="page-section management-page">
-    <div className="section-toolbar"><div><span className="eyebrow">ĐỘI NGŨ PHÒNG KHÁM</span><h2>Danh sách bác sĩ</h2></div><span className="pill">{doctors.length} bác sĩ</span></div>
+    <div className="section-toolbar"><div><span className="eyebrow">CLINIC TEAM</span><h2>Dentist directory</h2></div><span className="pill">{doctors.length} dentists</span></div>
     {error && <div className="form-error" role="alert">{error}</div>}
     <div className="panel table-panel management-table">
-      {loading ? <p className="management-state">Đang tải danh sách bác sĩ…</p> : doctors.length === 0 ? <p className="management-state">Không tìm thấy bác sĩ.</p> :
-        <table><thead><tr><th>Bác sĩ</th><th>Số giấy phép</th><th>Chuyên môn</th><th>Điện thoại</th><th>Vai trò</th></tr></thead>
+      {loading ? <p className="management-state">Loading dentist directory…</p> : doctors.length === 0 ? <p className="management-state">No dentists found.</p> :
+        <table><thead><tr><th>Dentist</th><th>License</th><th>Specialization</th><th>Phone</th><th>Role</th></tr></thead>
           <tbody>{doctors.map((doctor) => <tr key={doctor.id}>
             <td><div className="table-person"><div className="small-avatar">{doctor.full_name.split(' ').map((part) => part[0]).slice(-2).join('')}</div><strong>{doctor.full_name}</strong></div></td>
-            <td><code>{doctor.license_number}</code></td><td>{doctor.specialization || '—'}</td><td>{doctor.phone || '—'}</td><td><span className="pill">{displayRole(doctor.role)}</span></td>
+            <td><code>{doctor.license_number}</code></td><td>{doctor.specialization || '—'}</td><td>{doctor.phone || '—'}</td><td><span className="pill">{doctor.role}</span></td>
           </tr>)}</tbody>
         </table>}
     </div>
@@ -536,23 +763,135 @@ function DoctorDirectory({ tokens, onTokensChanged }) {
 }
 
 function Overview({ appointments, patients, setSection }) { return <>
-  <section className="hero-band"><div><span className="eyebrow warm">TỔNG QUAN HÔM NAY</span><h2>Chăm sóc tận tâm, mỗi ngày.</h2><p>Phòng khám đã sẵn sàng cho một ngày làm việc hiệu quả. Hôm nay có ba lịch hẹn.</p></div><button className="primary-button" onClick={() => setSection('Lịch hẹn')}><CalendarDays size={17} /> Xem lịch làm việc</button></section>
-  <section className="metric-grid"><Metric label="Lịch hẹn hôm nay" value="12" detail="3 bệnh nhân đang chờ" accent="blue" icon={CalendarDays} /><Metric label="Bệnh nhân đang theo dõi" value="248" detail="+18 trong tháng này" accent="sage" icon={Users} /><Metric label="Số dư chưa thanh toán" value="₫42,8 triệu" detail="7 kế hoạch thanh toán" accent="gold" icon={CircleDollarSign} /><Metric label="Kế hoạch điều trị" value="36" detail="8 cần xem xét" accent="coral" icon={ClipboardPlus} /></section>
-  <div className="content-grid"><section className="panel schedule-panel"><div className="panel-heading"><div><span className="eyebrow">LỊCH HẸN</span><h3>Lịch khám hôm nay</h3></div><button className="text-button" onClick={() => setSection('Lịch hẹn')}>Xem lịch <span>→</span></button></div><div className="appointment-list">{appointments.map((item) => <AppointmentRow key={item.id} item={item} />)}</div></section><section className="panel focus-panel"><div className="panel-heading"><div><span className="eyebrow">HOẠT ĐỘNG PHÒNG KHÁM</span><h3>Tình hình chung</h3></div><ShieldCheck size={19} color="#1d6857" /></div><div className="focus-stat"><span className="focus-icon green"><UserRound size={18} /></span><div><strong>{patients.length} hồ sơ bệnh nhân</strong><span>Đã số hóa và có thể tra cứu</span></div></div><div className="focus-stat"><span className="focus-icon peach"><Stethoscope size={18} /></span><div><strong>2 cảnh báo điều trị</strong><span>Cần bác sĩ xem xét</span></div></div><div className="alert-box"><strong>Kiểm tra thuốc</strong><p>Cần xác nhận dị ứng trước khi kê một đơn thuốc.</p><button onClick={() => setSection('Bệnh nhân')}>Xem hồ sơ →</button></div></section></div>
+  <section className="hero-band"><div><span className="eyebrow warm">TODAY AT A GLANCE</span><h2>Care that keeps moving.</h2><p>Your clinic is ready for a focused day. Three appointments are on deck.</p></div><button className="primary-button" onClick={() => setSection('Appointments')}><CalendarDays size={17} /> View schedule</button></section>
+  <section className="metric-grid"><Metric label="Today's appointments" value="12" detail="3 waiting now" accent="blue" icon={CalendarDays} /><Metric label="Active patients" value="248" detail="+18 this month" accent="sage" icon={Users} /><Metric label="Outstanding balance" value="₫42.8m" detail="7 payment plans" accent="gold" icon={CircleDollarSign} /><Metric label="Care plans" value="36" detail="8 need review" accent="coral" icon={ClipboardPlus} /></section>
+  <div className="content-grid"><section className="panel schedule-panel"><div className="panel-heading"><div><span className="eyebrow">APPOINTMENTS</span><h3>Today’s schedule</h3></div><button className="text-button" onClick={() => setSection('Appointments')}>View calendar <span>→</span></button></div><div className="appointment-list">{appointments.map((item) => <AppointmentRow key={item.id} item={item} />)}</div></section><section className="panel focus-panel"><div className="panel-heading"><div><span className="eyebrow">CLINIC FOCUS</span><h3>At a glance</h3></div><ShieldCheck size={19} color="#1d6857" /></div><div className="focus-stat"><span className="focus-icon green"><UserRound size={18} /></span><div><strong>{patients.length} patient records</strong><span>Digitized and searchable</span></div></div><div className="focus-stat"><span className="focus-icon peach"><Stethoscope size={18} /></span><div><strong>2 care alerts</strong><span>Need dentist review</span></div></div><div className="alert-box"><strong>Medication check</strong><p>One prescription needs allergy confirmation before signing.</p><button onClick={() => setSection('Patients')}>Review record →</button></div></section></div>
 </>; }
 function Metric({ label, value, detail, accent, icon: Icon }) { return <div className={`metric-card ${accent}`}><div className="metric-icon"><Icon size={18} /></div><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>; }
+
+function localDateInputValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatDashboardPeriod(period, groupBy) {
+  if (groupBy === 'month') {
+    const [year, month] = period.split('-');
+    return `${month}/${year}`;
+  }
+  const [, month, day] = period.split('-');
+  return `${day}/${month}`;
+}
+
+function RevenueDashboard({ tokens, onTokensChanged }) {
+  const today = localDateInputValue(new Date());
+  const [startDate, setStartDate] = useState(`${today.slice(0, 7)}-01`);
+  const [endDate, setEndDate] = useState(today);
+  const [requestedGroup, setRequestedGroup] = useState('auto');
+  const [dashboard, setDashboard] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!startDate || !endDate) return undefined;
+    if (endDate < startDate) {
+      setDashboard(null);
+      setError('Ngày kết thúc phải từ ngày bắt đầu trở đi.');
+      return undefined;
+    }
+
+    let active = true;
+    const query = new URLSearchParams({
+      start_date: startDate,
+      end_date: endDate,
+      group_by: requestedGroup
+    });
+    setLoading(true);
+    setError('');
+    setDashboard(null);
+    apiRequest(`/dashboard/analytics/?${query.toString()}`, { tokens, onTokens: onTokensChanged })
+      .then((result) => {
+        if (active) setDashboard(result);
+      })
+      .catch((requestError) => {
+        if (active) setError(requestError.message || 'Không tải được thống kê. Vui lòng thử lại.');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
+  }, [startDate, endDate, requestedGroup, tokens, onTokensChanged]);
+
+  const revenue = Number(dashboard?.total_revenue || 0);
+  const visits = Number(dashboard?.total_visits || 0);
+  const series = dashboard?.series || [];
+
+  return <section className="page-section management-page revenue-dashboard">
+    <div className="section-toolbar">
+      <div><span className="eyebrow">FINANCE & CLINICAL ACTIVITY</span><h2>Revenue and visits</h2></div>
+      <span className="dashboard-timezone">Asia/Ho_Chi_Minh</span>
+    </div>
+    <section className="panel dashboard-filter-panel" aria-label="Statistics date filters">
+      <label>From<input type="date" value={startDate} max={endDate || today} onChange={(event) => setStartDate(event.target.value)} /></label>
+      <label>To<input type="date" value={endDate} min={startDate} max={today} onChange={(event) => setEndDate(event.target.value)} /></label>
+      <label>Chart interval<select value={requestedGroup} onChange={(event) => setRequestedGroup(event.target.value)}>
+        <option value="auto">Automatic</option>
+        <option value="day">Daily</option>
+        <option value="month">Monthly</option>
+      </select></label>
+      {dashboard && <p className="dashboard-filter-summary">{dashboard.group_by === 'day' ? 'Daily' : 'Monthly'} totals · both selected dates included</p>}
+    </section>
+    {error && <div className="form-error" role="alert">{error}</div>}
+    {loading && <p className="management-state" role="status">Loading revenue and visit statistics…</p>}
+    <section className="metric-grid dashboard-metrics" aria-label="Statistics summary" aria-busy={loading}>
+      <Metric label="Revenue from paid invoices" value={`${revenue.toLocaleString('vi-VN', { maximumFractionDigits: 2 })} ₫`} detail="Paid invoice total, grouped by issue date" accent="sage" icon={CircleDollarSign} />
+      <Metric label="Completed visits" value={visits.toLocaleString('vi-VN')} detail="Completed appointments, grouped by appointment date" accent="blue" icon={CalendarDays} />
+    </section>
+    {!loading && !error && dashboard && <>
+      <TrendChart title="Revenue by period" series={series} valueKey="revenue" groupBy={dashboard.group_by} formatValue={(value) => `${Number(value).toLocaleString('vi-VN', { maximumFractionDigits: 2 })} ₫`} color="revenue" />
+      <TrendChart title="Completed visits by period" series={series} valueKey="visits" groupBy={dashboard.group_by} formatValue={(value) => Number(value).toLocaleString('vi-VN')} color="visits" />
+      <p className="dashboard-definition">Revenue counts each <code>PAID</code> invoice’s total once using its issue date; pending transfers and unpaid invoices are excluded. Visits count <code>Completed</code> appointments, not invoices. Empty dates/periods are shown as zero.</p>
+    </>}
+  </section>;
+}
+
+function TrendChart({ title, series, valueKey, groupBy, formatValue, color }) {
+  const values = series.map((point) => Number(point[valueKey]));
+  const maximum = Math.max(...values, 0);
+  const labelEvery = series.length > 24 ? Math.ceil(series.length / 12) : 1;
+
+  return <section className="panel dashboard-chart-panel">
+    <div className="panel-heading"><div><span className="eyebrow">{valueKey === 'revenue' ? 'IN VND' : 'APPOINTMENTS'}</span><h3>{title}</h3></div></div>
+    {!series.length ? <p className="management-state">No periods are available for this date range.</p> : maximum === 0
+      ? <p className="dashboard-empty-chart">No {valueKey === 'revenue' ? 'revenue' : 'completed visits'} in this period.</p>
+      : <div className="dashboard-chart-scroll"><div className="dashboard-bars" role="img" aria-label={`${title} from ${formatDashboardPeriod(series[0].period, groupBy)} to ${formatDashboardPeriod(series.at(-1).period, groupBy)}`}>
+        {series.map((point, index) => {
+          const value = Number(point[valueKey]);
+          const height = maximum ? (value / maximum) * 100 : 0;
+          return <div className="dashboard-bar-column" key={point.period} title={`${formatDashboardPeriod(point.period, groupBy)}: ${formatValue(value)}`}>
+            <span className="dashboard-bar-value">{formatValue(value)}</span>
+            <div className="dashboard-bar-track"><div className={`dashboard-bar ${color}`} style={{ height: `${height}%` }} /></div>
+            {(index % labelEvery === 0 || index === series.length - 1) && <span className="dashboard-bar-label">{formatDashboardPeriod(point.period, groupBy)}</span>}
+          </div>;
+        })}
+      </div></div>}
+  </section>;
+}
+
 function AppointmentRow({ item, canCancel = false, onCancel, cancelling = false }) {
   const appointmentDate = item.appointment_date || item.start_at;
   const time = appointmentDate && appointmentDate.includes('T')
-    ? new Date(appointmentDate).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+    ? new Date(appointmentDate).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
     : appointmentDate;
   const status = String(item.status || '').toLowerCase();
   return <div className="appointment-row">
     <div className="time">{time}</div>
-    <div className="appointment-avatar">{(item.patient_name || 'Bệnh nhân').split(' ').map((part) => part[0]).slice(-2).join('')}</div>
-    <div className="appointment-info"><strong>{item.patient_name}</strong><span>{item.service_name || item.type || 'Khám răng tổng quát'} · {item.dentist_name}</span></div>
-    <span className={`status ${status === 'confirmed' ? 'confirmed' : status === 'completed' ? 'paid' : status === 'cancelled' ? 'inactive' : 'scheduled'}`}>{displayAppointmentStatus(item.status)}</span>
-    {canCancel && ['pending', 'confirmed'].includes(status) && <button className="secondary-button cancel-appointment-button" type="button" disabled={cancelling} onClick={() => onCancel?.(item)}>{cancelling ? 'Đang hủy…' : 'Hủy lịch hẹn'}</button>}
+    <div className="appointment-avatar">{(item.patient_name || 'Patient').split(' ').map((part) => part[0]).slice(-2).join('')}</div>
+    <div className="appointment-info"><strong>{item.patient_name}</strong><span>{item.service_name || item.type || 'Dental consultation'} · {item.dentist_name}</span></div>
+    <span className={`status ${status === 'confirmed' ? 'confirmed' : status === 'completed' ? 'paid' : status === 'cancelled' ? 'inactive' : 'scheduled'}`}>{item.status}</span>
+    {canCancel && ['pending', 'confirmed'].includes(status) && <button className="secondary-button cancel-appointment-button" type="button" disabled={cancelling} onClick={() => onCancel?.(item)}>{cancelling ? 'Cancelling…' : 'Cancel appointment'}</button>}
   </div>;
 }
 const emptyPatient = {
@@ -562,20 +901,37 @@ const emptyPatient = {
   date_of_birth: '',
   dentition_type: 'ADULT',
   medical_history: '',
-  allergies: ''
+  allergies: '',
+  ai_processing_consent: false,
+  sms_reminder_consent: false
 };
 
-function Patients({ patients, query, setQuery, onCreatePatient, canCreate }) {
+function Patients({ patients, query, setQuery, onCreatePatient, onUpdatePatient, canCreate, loading }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyPatient);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [consentForm, setConsentForm] = useState({ ai_processing_consent: false, sms_reminder_consent: false });
+  const [consentSaving, setConsentSaving] = useState(false);
+  const savingRef = useRef(false);
+  const consentSavingRef = useRef(false);
+
+  useEffect(() => {
+    setConsentForm({
+      ai_processing_consent: Boolean(selectedPatient?.ai_processing_consent),
+      sms_reminder_consent: Boolean(selectedPatient?.sms_reminder_consent)
+    });
+  }, [selectedPatient?.id, selectedPatient?.ai_processing_consent, selectedPatient?.sms_reminder_consent]);
 
   async function savePatient(event) {
     event.preventDefault();
+    if (savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     setError('');
+    setSuccess('');
     try {
       const patient = await onCreatePatient({
         ...form,
@@ -584,55 +940,84 @@ function Patients({ patients, query, setQuery, onCreatePatient, canCreate }) {
       setSelectedPatient(patient);
       setForm(emptyPatient);
       setShowForm(false);
+      setSuccess(`Patient profile for ${patient.full_name} was created successfully.`);
     } catch (saveError) {
       setError(saveError.message);
     } finally {
+      savingRef.current = false;
       setSaving(false);
+    }
+  }
+
+  async function saveConsents(event) {
+    event.preventDefault();
+    if (!selectedPatient || consentSavingRef.current) return;
+    consentSavingRef.current = true;
+    setConsentSaving(true);
+    setError('');
+    setSuccess('');
+    try {
+      setSelectedPatient(await onUpdatePatient(selectedPatient.id, consentForm));
+      setSuccess('Consent settings were saved successfully.');
+    } catch (saveError) {
+      setError(saveError.message);
+    } finally {
+      consentSavingRef.current = false;
+      setConsentSaving(false);
     }
   }
 
   return <section className="page-section management-page">
     <div className="section-toolbar">
-      <div><span className="eyebrow">DANH SÁCH BỆNH NHÂN</span><h2>Hồ sơ bệnh nhân</h2></div>
-      {canCreate && <button className="primary-button" onClick={() => { setShowForm(!showForm); setError(''); }}>
-        <UserRound size={17} /> {showForm ? 'Hủy' : 'Thêm bệnh nhân'}
+      <div><span className="eyebrow">PATIENT DIRECTORY</span><h2>Patient records</h2></div>
+      {canCreate && <button className="primary-button" onClick={() => { setShowForm(!showForm); setError(''); setSuccess(''); }}>
+        <UserRound size={17} /> {showForm ? 'Cancel' : 'New patient'}
       </button>}
     </div>
+    {success && <div className="form-success" role="status">{success}</div>}
     {error && <div className="form-error" role="alert">{error}</div>}
     {showForm && <form className="panel management-form" onSubmit={savePatient}>
-      <h3>Tạo hồ sơ bệnh nhân</h3>
+      <h3>New patient profile</h3>
       <div className="form-grid">
-        <label>Mã bệnh nhân<input required maxLength="20" value={form.patient_code} onChange={(event) => setForm({ ...form, patient_code: event.target.value.trim().toUpperCase() })} /></label>
-        <label>Họ và tên<input required maxLength="160" value={form.full_name} onChange={(event) => setForm({ ...form, full_name: event.target.value })} /></label>
-        <label>Số điện thoại<input maxLength="30" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
-        <label>Ngày sinh<input type="date" value={form.date_of_birth} onChange={(event) => setForm({ ...form, date_of_birth: event.target.value })} /></label>
-        <label>Bộ răng<select value={form.dentition_type} onChange={(event) => setForm({ ...form, dentition_type: event.target.value })}><option value="ADULT">Người lớn · 32 răng</option><option value="CHILD">Trẻ em · 20 răng</option></select></label>
-        <label>Dị ứng<textarea value={form.allergies} onChange={(event) => setForm({ ...form, allergies: event.target.value })} /></label>
-        <label className="form-wide">Tiền sử bệnh<textarea value={form.medical_history} onChange={(event) => setForm({ ...form, medical_history: event.target.value })} /></label>
+        <label>Patient code<input required maxLength="20" value={form.patient_code} onChange={(event) => setForm({ ...form, patient_code: event.target.value.trim().toUpperCase() })} /></label>
+        <label>Full name<input required maxLength="160" value={form.full_name} onChange={(event) => setForm({ ...form, full_name: event.target.value })} /></label>
+        <label>Phone<input maxLength="30" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
+        <label>Date of birth<input type="date" value={form.date_of_birth} onChange={(event) => setForm({ ...form, date_of_birth: event.target.value })} /></label>
+        <label>Dental profile<select value={form.dentition_type} onChange={(event) => setForm({ ...form, dentition_type: event.target.value })}><option value="ADULT">Adult · 32 teeth</option><option value="CHILD">Child · 20 teeth</option></select></label>
+        <label>Allergies<textarea value={form.allergies} onChange={(event) => setForm({ ...form, allergies: event.target.value })} /></label>
+        <label className="form-wide">Medical history<textarea value={form.medical_history} onChange={(event) => setForm({ ...form, medical_history: event.target.value })} /></label>
+        <label className="checkbox-field form-wide"><input type="checkbox" checked={form.ai_processing_consent} onChange={(event) => setForm({ ...form, ai_processing_consent: event.target.checked })} /> Patient has consented to send de-identified clinical text to Gemini for an AI summary.</label>
+        <label className="checkbox-field form-wide"><input type="checkbox" checked={form.sms_reminder_consent} onChange={(event) => setForm({ ...form, sms_reminder_consent: event.target.checked })} /> Patient has consented to receive follow-up reminders by SMS.</label>
       </div>
-      <div className="form-actions"><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Đang lưu…' : 'Tạo hồ sơ bệnh nhân'}</button></div>
+      <div className="form-actions"><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Create patient'}</button></div>
     </form>}
     {selectedPatient && <section className="panel patient-profile">
-      <div className="panel-heading"><div><span className="eyebrow">HỒ SƠ BỆNH NHÂN</span><h3>{selectedPatient.full_name}</h3></div><button className="secondary-button" onClick={() => setSelectedPatient(null)}>Đóng</button></div>
+      <div className="panel-heading"><div><span className="eyebrow">PATIENT PROFILE</span><h3>{selectedPatient.full_name}</h3></div><button className="secondary-button" onClick={() => setSelectedPatient(null)}>Close</button></div>
       <div className="patient-profile-grid">
-        <div><span>Mã bệnh nhân</span><strong>{selectedPatient.patient_code}</strong></div>
-        <div><span>Số điện thoại</span><strong>{selectedPatient.phone || '—'}</strong></div>
-        <div><span>Ngày sinh</span><strong>{selectedPatient.date_of_birth ? new Date(`${selectedPatient.date_of_birth}T00:00:00`).toLocaleDateString('vi-VN') : '—'}</strong></div>
-        <div><span>Bộ răng</span><strong>{displayDentition(selectedPatient.dentition_type)}</strong></div>
-        <div><span>Dị ứng</span><p>{selectedPatient.allergies || 'Chưa ghi nhận dị ứng'}</p></div>
-        <div><span>Tiền sử bệnh</span><p>{selectedPatient.medical_history || 'Chưa ghi nhận tiền sử bệnh'}</p></div>
+        <div><span>Patient code</span><strong>{selectedPatient.patient_code}</strong></div>
+        <div><span>Phone</span><strong>{selectedPatient.phone || '—'}</strong></div>
+        <div><span>Date of birth</span><strong>{selectedPatient.date_of_birth || '—'}</strong></div>
+        <div><span>Dental profile</span><strong>{selectedPatient.dentition_type === 'CHILD' ? 'Child · 20 teeth' : 'Adult · 32 teeth'}</strong></div>
+        <div><span>Allergies</span><p>{selectedPatient.allergies || 'No known allergies recorded'}</p></div>
+        <div><span>Medical history</span><p>{selectedPatient.medical_history || 'No medical history recorded'}</p></div>
       </div>
+      {canCreate && <form className="management-form" onSubmit={saveConsents}>
+        <h4>Recorded communication and AI consent</h4>
+        <label className="checkbox-field"><input type="checkbox" checked={consentForm.ai_processing_consent} onChange={(event) => setConsentForm({ ...consentForm, ai_processing_consent: event.target.checked })} /> Patient has consented to send de-identified clinical text to Gemini for an AI summary.</label>
+        <label className="checkbox-field"><input type="checkbox" checked={consentForm.sms_reminder_consent} onChange={(event) => setConsentForm({ ...consentForm, sms_reminder_consent: event.target.checked })} /> Patient has consented to receive follow-up reminders by SMS.</label>
+        <div className="form-actions"><button className="secondary-button" type="submit" disabled={consentSaving}>{consentSaving ? 'Saving…' : 'Save consent settings'}</button></div>
+      </form>}
     </section>}
-    <div className="search-field"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm theo tên, mã bệnh nhân hoặc số điện thoại" /></div>
-    <div className="panel table-panel">
-      {patients.length === 0 ? <p className="management-state">{query ? 'Không tìm thấy bệnh nhân phù hợp.' : 'Chưa có hồ sơ bệnh nhân.'}</p> :
-        <table><thead><tr><th>Bệnh nhân</th><th>Mã</th><th>Điện thoại</th><th>Bộ răng</th><th>Dị ứng</th><th>Hồ sơ</th></tr></thead>
+    <div className="search-field"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, patient code or phone" /></div>
+    <div className="panel table-panel" aria-busy={loading}>
+      {loading ? <p className="management-state" role="status">Loading patient records…</p> : patients.length === 0 ? <p className="management-state">{query ? 'No matching patients.' : 'No patient records found.'}</p> :
+        <table><thead><tr><th>Patient</th><th>Code</th><th>Phone</th><th>Dental profile</th><th>Allergy note</th><th>Profile</th></tr></thead>
           <tbody>{patients.map((patient) => <tr key={patient.id}>
             <td><div className="table-person"><div className="small-avatar">{patient.full_name.split(' ').map((part) => part[0]).slice(-2).join('')}</div><strong>{patient.full_name}</strong></div></td>
             <td><code>{patient.patient_code}</code></td><td>{patient.phone || '—'}</td>
-            <td><span className="pill">{displayDentition(patient.dentition_type)}</span></td>
-            <td>{patient.allergies || 'Không ghi nhận dị ứng'}</td>
-            <td><button className="text-button" onClick={() => setSelectedPatient(patient)}>Xem hồ sơ</button></td>
+            <td><span className="pill">{patient.dentition_type === 'CHILD' ? '20 teeth · child' : '32 teeth · adult'}</span></td>
+            <td>{patient.allergies || 'No known allergies'}</td>
+            <td><button className="text-button" onClick={() => setSelectedPatient(patient)}>View profile</button></td>
           </tr>)}</tbody>
         </table>}
     </div>
@@ -656,6 +1041,8 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
   const [cancellationTarget, setCancellationTarget] = useState(null);
   const [cancelling, setCancelling] = useState(false);
   const [cancellationError, setCancellationError] = useState('');
+  const savingRef = useRef(false);
+  const cancellationRef = useRef(false);
   const monday = new Date(calendarDate);
   monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
   const days = Array.from({ length: calendarMode === 'day' ? 1 : 7 }, (_, index) => {
@@ -693,11 +1080,13 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
 
   async function submitBooking(event) {
     event.preventDefault();
+    if (savingRef.current) return;
     const reason = booking.notes.trim();
     if (!booking.patient || !booking.doctor || !booking.service || !booking.date || !booking.time || !reason) {
-      setError('Vui lòng điền đầy đủ các trường bắt buộc, bao gồm cả lý do khám.');
+      setError('Complete all required fields, including the reason for the visit.');
       return;
     }
+    savingRef.current = true;
     setSaving(true);
     setError('');
     setSuccess('');
@@ -713,21 +1102,25 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
       setCalendarDate(new Date(`${booking.date}T12:00:00`));
       setCalendarMode('day');
       const patientName = patients.find((patient) => patient.id === created.patient)?.full_name;
-      setSuccess(`Đã gửi yêu cầu đặt lịch${patientName ? ` cho bệnh nhân ${patientName}` : ''}. Lịch hẹn mới đã được cập nhật trong ngày đã chọn.`);
+      setSuccess(`Appointment request submitted${patientName ? ` for ${patientName}` : ''}. The updated visit is shown on the selected day.`);
       setBooking((current) => ({ ...current, patient: '', notes: '' }));
     } catch (saveError) {
       setError(saveError.message === 'Failed to fetch'
-        ? 'Không thể kết nối đến hệ thống phòng khám. Vui lòng kiểm tra kết nối và thử lại.'
-        : saveError.message || 'Không thể gửi yêu cầu đặt lịch. Vui lòng thử lại.');
+        ? 'Could not connect to the clinic API. Check your connection and try again.'
+        : saveError.message || 'Could not submit the appointment request. Try again.');
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
 
   async function submitSchedule(event) {
     event.preventDefault();
+    if (savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     setError('');
+    setSuccess('');
     try {
       await onCreateSchedule({
         doctor: Number(schedule.doctor),
@@ -736,26 +1129,30 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
         end_time: schedule.end_time
       });
       setScheduleOpen(false);
+      setSuccess('Dentist work shift saved successfully.');
     } catch (saveError) {
       setError(saveError.message);
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
 
   async function confirmCancellation() {
-    if (!cancellationTarget) return;
+    if (!cancellationTarget || cancellationRef.current) return;
+    cancellationRef.current = true;
     setCancelling(true);
     setCancellationError('');
     try {
       await onCancelAppointment(cancellationTarget.id);
-      setSuccess(`Đã hủy lịch hẹn của bệnh nhân ${cancellationTarget.patient_name}.`);
+      setSuccess(`Appointment for ${cancellationTarget.patient_name} was cancelled.`);
       setCancellationTarget(null);
     } catch (cancelError) {
       setCancellationError(cancelError.message === 'Failed to fetch'
-        ? 'Không thể kết nối đến hệ thống phòng khám. Vui lòng kiểm tra kết nối và thử lại.'
-        : cancelError.message || 'Không thể hủy lịch hẹn này. Vui lòng thử lại.');
+        ? 'Could not connect to the clinic API. Check your connection and try again.'
+        : cancelError.message || 'Could not cancel this appointment. Try again.');
     } finally {
+      cancellationRef.current = false;
       setCancelling(false);
     }
   }
@@ -776,84 +1173,84 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
 
   return <section className="page-section management-page">
     <div className="section-toolbar">
-      <div><span className="eyebrow">LỊCH LÀM VIỆC PHÒNG KHÁM</span><h2>Lịch hẹn và ca làm việc</h2></div>
+      <div><span className="eyebrow">CLINIC TIMETABLE</span><h2>Appointments & work shifts</h2></div>
       <div className="calendar-actions">
-        {isReceptionRole && <button className="secondary-button" onClick={() => { setScheduleOpen(!scheduleOpen); setError(''); }}>{scheduleOpen ? 'Đóng biểu mẫu ca làm' : 'Thêm ca làm'}</button>}
-        {isReceptionRole && <button className="primary-button" onClick={() => openBooking(calendarDate, '09:00')}><CalendarDays size={17} /> Đặt lịch hẹn</button>}
+        {isReceptionRole && <button className="secondary-button" disabled={saving} onClick={() => { setScheduleOpen(!scheduleOpen); setError(''); setSuccess(''); }}>{scheduleOpen ? 'Close shift form' : 'Add work shift'}</button>}
+        {isReceptionRole && <button className="primary-button" disabled={saving} onClick={() => openBooking(calendarDate, '09:00')}><CalendarDays size={17} /> Book appointment</button>}
       </div>
     </div>
     {success && <div className="form-success" role="status">{success}</div>}
     {error && <div className="form-error" role="alert">{error}</div>}
     {cancellationTarget && <div className="confirmation-backdrop">
       <section className="panel cancellation-dialog" role="dialog" aria-modal="true" aria-labelledby="cancel-dialog-title">
-        <h3 id="cancel-dialog-title">Bạn có chắc muốn hủy lịch hẹn này?</h3>
-        <p>{cancellationTarget.patient_name} · {new Date(cancellationTarget.appointment_date || cancellationTarget.start_at).toLocaleString('vi-VN')}</p>
-        <p className="management-hint">Chỉ có thể hủy lịch đang chờ xác nhận hoặc đã xác nhận.</p>
+        <h3 id="cancel-dialog-title">Cancel this appointment?</h3>
+        <p>{cancellationTarget.patient_name} · {new Date(cancellationTarget.appointment_date || cancellationTarget.start_at).toLocaleString()}</p>
+        <p className="management-hint">Only pending or confirmed appointments can be cancelled.</p>
         {cancellationError && <div className="form-error" role="alert">{cancellationError}</div>}
         <div className="form-actions">
-          <button className="danger-button secondary-button" type="button" disabled={cancelling} onClick={confirmCancellation}>{cancelling ? 'Đang hủy…' : 'Xác nhận hủy'}</button>
-          <button className="secondary-button" type="button" disabled={cancelling} onClick={() => { setCancellationTarget(null); setCancellationError(''); }}>Giữ lịch hẹn</button>
+          <button className="danger-button secondary-button" type="button" disabled={cancelling} onClick={confirmCancellation}>{cancelling ? 'Cancelling…' : 'Confirm cancellation'}</button>
+          <button className="secondary-button" type="button" disabled={cancelling} onClick={() => { setCancellationTarget(null); setCancellationError(''); }}>Keep appointment</button>
         </div>
       </section>
     </div>}
     {scheduleOpen && <form className="panel management-form" onSubmit={submitSchedule}>
-      <h3>Thiết lập ca làm việc của bác sĩ</h3>
+      <h3>Set dentist working hours</h3>
       <div className="form-grid">
-        <label>Bác sĩ<select required value={schedule.doctor} onChange={(event) => setSchedule({ ...schedule, doctor: event.target.value })}><option value="">Chọn bác sĩ</option>{doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.full_name}</option>)}</select></label>
-        <label>Ngày<input required type="date" value={schedule.work_date} onChange={(event) => setSchedule({ ...schedule, work_date: event.target.value })} /></label>
-        <label>Giờ bắt đầu<input required type="time" value={schedule.start_time} onChange={(event) => setSchedule({ ...schedule, start_time: event.target.value })} /></label>
-        <label>Giờ kết thúc<input required type="time" value={schedule.end_time} onChange={(event) => setSchedule({ ...schedule, end_time: event.target.value })} /></label>
+        <label>Dentist<select required value={schedule.doctor} onChange={(event) => setSchedule({ ...schedule, doctor: event.target.value })}><option value="">Select dentist</option>{doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.full_name}</option>)}</select></label>
+        <label>Date<input required type="date" value={schedule.work_date} onChange={(event) => setSchedule({ ...schedule, work_date: event.target.value })} /></label>
+        <label>Start time<input required type="time" value={schedule.start_time} onChange={(event) => setSchedule({ ...schedule, start_time: event.target.value })} /></label>
+        <label>End time<input required type="time" value={schedule.end_time} onChange={(event) => setSchedule({ ...schedule, end_time: event.target.value })} /></label>
       </div>
-      <div className="form-actions"><button className="primary-button" disabled={saving}>{saving ? 'Đang lưu…' : 'Lưu ca làm việc'}</button></div>
+      <div className="form-actions"><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save work shift'}</button><button className="secondary-button" type="button" disabled={saving} onClick={() => setScheduleOpen(false)}>Cancel</button></div>
     </form>}
     {bookingOpen && <form className="panel management-form" onSubmit={submitBooking}>
-      <h3>Đặt lịch hẹn</h3>
+      <h3>Request an appointment</h3>
       <div className="form-grid">
-        <label>Bệnh nhân<select required value={booking.patient} onChange={(event) => setBooking({ ...booking, patient: event.target.value })}><option value="">Chọn bệnh nhân</option>{patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.full_name} · {patient.patient_code}</option>)}</select></label>
-        <label>Bác sĩ<select required value={booking.doctor} onChange={(event) => setBooking({ ...booking, doctor: event.target.value })}><option value="">Chọn bác sĩ</option>{doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.full_name}</option>)}</select></label>
-        <label>Dịch vụ<select required value={booking.service} onChange={(event) => setBooking({ ...booking, service: event.target.value })}><option value="">Chọn dịch vụ</option>{services.map((service) => <option key={service.id} value={service.id}>{service.name} · {service.duration_minutes} phút</option>)}</select></label>
-        <label>Ngày<input required type="date" value={booking.date} onChange={(event) => setBooking({ ...booking, date: event.target.value })} /></label>
-        <label>Giờ bắt đầu<input required type="time" value={booking.time} onChange={(event) => setBooking({ ...booking, time: event.target.value })} /></label>
-        <label className="booking-reason">Lý do khám<textarea required maxLength={1000} value={booking.notes} onChange={(event) => setBooking({ ...booking, notes: event.target.value })} /></label>
+        <label>Patient<select required value={booking.patient} onChange={(event) => setBooking({ ...booking, patient: event.target.value })}><option value="">Select patient</option>{patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.full_name} · {patient.patient_code}</option>)}</select></label>
+        <label>Dentist<select required value={booking.doctor} onChange={(event) => setBooking({ ...booking, doctor: event.target.value })}><option value="">Select dentist</option>{doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.full_name}</option>)}</select></label>
+        <label>Service<select required value={booking.service} onChange={(event) => setBooking({ ...booking, service: event.target.value })}><option value="">Select service</option>{services.map((service) => <option key={service.id} value={service.id}>{service.name} · {service.duration_minutes} min</option>)}</select></label>
+        <label>Date<input required type="date" value={booking.date} onChange={(event) => setBooking({ ...booking, date: event.target.value })} /></label>
+        <label>Start time<input required type="time" value={booking.time} onChange={(event) => setBooking({ ...booking, time: event.target.value })} /></label>
+        <label className="booking-reason">Reason for visit<textarea required maxLength={1000} value={booking.notes} onChange={(event) => setBooking({ ...booking, notes: event.target.value })} /></label>
       </div>
-      <p className="management-hint">Bác sĩ được chọn cần có ca làm đủ thời lượng dịch vụ. Hệ thống sẽ từ chối các lịch hẹn bị trùng.</p>
-      <div className="form-actions"><button className="primary-button" disabled={saving}>{saving ? 'Đang đặt lịch…' : 'Xác nhận đặt lịch'}</button><button className="secondary-button" type="button" onClick={() => setBookingOpen(false)}>Hủy</button></div>
+      <p className="management-hint">The selected dentist must be scheduled for the full service duration. Overlapping appointments are rejected by the API.</p>
+      <div className="form-actions"><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Booking…' : 'Confirm booking'}</button><button className="secondary-button" type="button" disabled={saving} onClick={() => setBookingOpen(false)}>Cancel</button></div>
     </form>}
     <div className="calendar-toolbar panel">
       <div className="calendar-navigation">
-        <button className="secondary-button" onClick={() => setCalendarDate(new Date(calendarDate.getFullYear(), calendarDate.getMonth(), calendarDate.getDate() - (calendarMode === 'day' ? 1 : 7), 12))}>{calendarMode === 'day' ? 'Ngày trước' : 'Tuần trước'}</button>
-        <button className="secondary-button" onClick={() => setCalendarDate(new Date())}>Hôm nay</button>
-        <button className="secondary-button" onClick={() => setCalendarDate(new Date(calendarDate.getFullYear(), calendarDate.getMonth(), calendarDate.getDate() + (calendarMode === 'day' ? 1 : 7), 12))}>{calendarMode === 'day' ? 'Ngày sau' : 'Tuần sau'}</button>
+        <button className="secondary-button" onClick={() => setCalendarDate(new Date(calendarDate.getFullYear(), calendarDate.getMonth(), calendarDate.getDate() - (calendarMode === 'day' ? 1 : 7), 12))}>Previous {calendarMode}</button>
+        <button className="secondary-button" onClick={() => setCalendarDate(new Date())}>Today</button>
+        <button className="secondary-button" onClick={() => setCalendarDate(new Date(calendarDate.getFullYear(), calendarDate.getMonth(), calendarDate.getDate() + (calendarMode === 'day' ? 1 : 7), 12))}>Next {calendarMode}</button>
       </div>
       <strong>{calendarMode === 'day'
-        ? calendarDate.toLocaleDateString('vi-VN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-        : `${days[0].toLocaleDateString('vi-VN', { day: 'numeric', month: 'short' })} – ${days[6].toLocaleDateString('vi-VN', { day: 'numeric', month: 'short', year: 'numeric' })}`}</strong>
-      <label className="calendar-filter">Bác sĩ
-        <select aria-label="Lọc theo bác sĩ" value={doctorFilter} onChange={(event) => setDoctorFilter(event.target.value)}>
-          <option value="">Tất cả bác sĩ</option>
+        ? calendarDate.toLocaleDateString('en', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })
+        : `${days[0].toLocaleDateString('en', { month: 'short', day: 'numeric' })} – ${days[6].toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' })}`}</strong>
+      <label className="calendar-filter">Dentist
+        <select aria-label="Filter by dentist" value={doctorFilter} onChange={(event) => setDoctorFilter(event.target.value)}>
+          <option value="">All dentists</option>
           {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.full_name}</option>)}
         </select>
       </label>
-      <div className="calendar-view-switch" role="group" aria-label="Chế độ xem lịch">
-        {['day', 'week'].map((mode) => <button key={mode} type="button" className={calendarMode === mode ? 'secondary-button active' : 'secondary-button'} aria-pressed={calendarMode === mode} onClick={() => setCalendarMode(mode)}>{mode === 'day' ? 'Ngày' : 'Tuần'}</button>)}
+      <div className="calendar-view-switch" role="group" aria-label="Calendar view">
+        {['day', 'week'].map((mode) => <button key={mode} type="button" className={calendarMode === mode ? 'secondary-button active' : 'secondary-button'} aria-pressed={calendarMode === mode} onClick={() => setCalendarMode(mode)}>{mode === 'day' ? 'Day' : 'Week'}</button>)}
       </div>
-      <input aria-label="Chọn ngày" type="date" value={dateKey(calendarDate)} onChange={(event) => { if (event.target.value) setCalendarDate(new Date(`${event.target.value}T12:00:00`)); }} />
+      <input aria-label="Go to date" type="date" value={dateKey(calendarDate)} onChange={(event) => { if (event.target.value) setCalendarDate(new Date(`${event.target.value}T12:00:00`)); }} />
     </div>
-    {loadError && <div className="form-error" role="alert">Không thể tải lịch: {loadError}</div>}
-    {doctors.length === 0 && !loading && !loadError && <div className="management-state" role="status">Chưa có hồ sơ bác sĩ.</div>}
-    {loading ? <div className="panel management-state" role="status">Đang tải lịch hẹn và ca làm việc…</div> :
-      loadError ? <div className="panel management-state">Không có dữ liệu lịch. Vui lòng kiểm tra kết nối và thử lại.</div> :
+    {loadError && <div className="form-error" role="alert">Could not load the calendar: {loadError}</div>}
+    {doctors.length === 0 && !loading && !loadError && <div className="management-state" role="status">No dentist profiles are available.</div>}
+    {loading ? <div className="panel management-state" role="status">Loading appointments and work shifts…</div> :
+      loadError ? <div className="panel management-state">Calendar data is unavailable. Check the connection and try again.</div> :
       <>
-        {!visibleSchedules.length && !visibleAppointments.length && <div className="panel management-state" role="status">Không có ca làm hoặc lịch hẹn trong {calendarMode === 'day' ? 'ngày' : 'tuần'} này.</div>}
-        <div className="calendar-legend" aria-label="Chú giải lịch">
-          <span><i className="legend-shift" /> Giờ làm việc của bác sĩ</span>
-          <span><i className="legend-unavailable" /> Ngoài giờ làm việc</span>
-          <span><i className="legend-appointment" /> Lịch hẹn</span>
+        {!visibleSchedules.length && !visibleAppointments.length && <div className="panel management-state" role="status">No work shifts or appointments for this {calendarMode}.</div>}
+        <div className="calendar-legend" aria-label="Calendar legend">
+          <span><i className="legend-shift" /> Doctor working hours</span>
+          <span><i className="legend-unavailable" /> Outside working hours</span>
+          <span><i className="legend-appointment" /> Appointment</span>
         </div>
         <div className="panel timetable-panel">
           <div className={`timetable-grid ${calendarMode === 'day' ? 'day-view' : ''}`} style={{ '--calendar-day-count': days.length }}>
-            <div className="timetable-head timetable-time">Giờ</div>
-            {days.map((date) => <div className="timetable-head" key={dateKey(date)}><strong>{date.toLocaleDateString('vi-VN', { weekday: 'short' })}</strong><span>{date.toLocaleDateString('vi-VN', { day: 'numeric', month: 'short' })}</span></div>)}
+            <div className="timetable-head timetable-time">Time</div>
+            {days.map((date) => <div className="timetable-head" key={dateKey(date)}><strong>{date.toLocaleDateString('en', { weekday: 'short' })}</strong><span>{date.toLocaleDateString('en', { month: 'short', day: 'numeric' })}</span></div>)}
             {slots.map((time) => <div className="timetable-row" key={time}>
               <div className="timetable-time">{time}</div>
               {days.map((date) => {
@@ -882,20 +1279,20 @@ function Appointments({ appointments, patients, doctors, services, schedules, ro
                     const end = item.end_at ? new Date(item.end_at) : null;
                     const statusClass = String(item.status || 'scheduled').toLowerCase().replace(/[^a-z0-9]+/g, '-');
                     return <div className={`calendar-event status-${statusClass}`} key={item.id}>
-                      <strong>{start.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}{end && !Number.isNaN(end.getTime()) ? `–${end.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}` : ''} · {item.patient_name}</strong>
-                      <span>{item.service_name || item.type || 'Khám răng'} · {item.dentist_name}</span>
-                      <small>{displayAppointmentStatus(item.status || 'scheduled')}</small>
-                      {item.notes && <small className="calendar-event-reason">Lý do: {item.notes}</small>}
+                      <strong>{start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}{end && !Number.isNaN(end.getTime()) ? `–${end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''} · {item.patient_name}</strong>
+                      <span>{item.service_name || item.type || 'Dental visit'} · {item.dentist_name}</span>
+                      <small>{item.status || 'Scheduled'}</small>
+                      {item.notes && <small className="calendar-event-reason">Reason: {item.notes}</small>}
                     </div>;
                   })}
-                  {!events.length && !slotBusy && isReceptionRole && shifts.length > 0 && <button aria-label={`Đặt lịch ngày ${key} lúc ${time}`} className="empty-slot" onClick={() => openBooking(date, time)} title="Đặt lịch hẹn vào khung giờ còn trống này">+</button>}
+                  {!events.length && !slotBusy && isReceptionRole && shifts.length > 0 && <button aria-label={`Book ${key} at ${time}`} className="empty-slot" onClick={() => openBooking(date, time)} title="Request an appointment for this available slot">+</button>}
                 </div>;
               })}
             </div>)}
           </div>
         </div>
-        <div className="panel appointment-list-panel"><div className="panel-heading"><div><span className="eyebrow">{calendarMode === 'day' ? 'NGÀY ĐANG CHỌN' : 'TUẦN ĐANG CHỌN'}</span><h3>Lịch hẹn trong chế độ xem này</h3></div></div>
-          {visibleAppointments.length ? <div className="appointment-list">{[...visibleAppointments].sort((a, b) => new Date(a.appointment_date || a.start_at) - new Date(b.appointment_date || b.start_at)).map((item) => <AppointmentRow key={item.id} item={item} canCancel={isReceptionRole} onCancel={(target) => { setCancellationTarget(target); setCancellationError(''); setSuccess(''); }} />)}</div> : <p className="management-state">Không có lịch hẹn trong {calendarMode === 'day' ? 'ngày' : 'tuần'} này.</p>}
+        <div className="panel appointment-list-panel"><div className="panel-heading"><div><span className="eyebrow">SELECTED {calendarMode.toUpperCase()}</span><h3>Appointments in this view</h3></div></div>
+          {visibleAppointments.length ? <div className="appointment-list">{[...visibleAppointments].sort((a, b) => new Date(a.appointment_date || a.start_at) - new Date(b.appointment_date || b.start_at)).map((item) => <AppointmentRow key={item.id} item={item} canCancel={isReceptionRole} cancelling={cancelling} onCancel={(target) => { setCancellationTarget(target); setCancellationError(''); setSuccess(''); }} />)}</div> : <p className="management-state">No appointments in this {calendarMode}.</p>}
         </div>
       </>}
   </section>;
@@ -924,7 +1321,7 @@ function Reception({ tokens, onTokensChanged, appointments, setSection }) {
     setSearched(Boolean(searchTerm));
     if (!searchTerm) return;
     if (searchTerm.length > 100 || !/^[\p{L}\p{N}\s._+'()\-]+$/u.test(searchTerm)) {
-      setError('Vui lòng nhập mã, tên hoặc số điện thoại bệnh nhân bằng chữ cái, chữ số, khoảng trắng và các ký tự phân tách thông dụng.');
+      setError('Enter a patient code, name, or phone using letters, numbers, spaces, and common separators.');
       return;
     }
 
@@ -935,21 +1332,21 @@ function Reception({ tokens, onTokensChanged, appointments, setSection }) {
         onTokens: onTokensChanged
       });
       if (!Array.isArray(result)) {
-        throw new Error('Hệ thống trả về kết quả tra cứu bệnh nhân không hợp lệ.');
+        throw new Error('The patient search returned an unexpected response.');
       }
       setPatients(result);
       setSelectedPatientId(result.length === 1 ? result[0].id : null);
     } catch (searchError) {
-      setError(searchError.message || 'Không thể tìm kiếm bệnh nhân. Vui lòng thử lại.');
+      setError(searchError.message || 'Could not search patients. Please try again.');
     } finally {
       setLoading(false);
     }
   }
 
   function formatDate(value) {
-    if (!value) return 'Chưa ghi nhận';
+    if (!value) return 'Not recorded';
     const date = new Date(`${value}T00:00:00`);
-    return Number.isNaN(date.getTime()) ? 'Chưa ghi nhận' : date.toLocaleDateString('vi-VN');
+    return Number.isNaN(date.getTime()) ? 'Not recorded' : date.toLocaleDateString();
   }
 
   function patientAge(value) {
@@ -964,12 +1361,12 @@ function Reception({ tokens, onTokensChanged, appointments, setSection }) {
 
   return <section className="page-section management-page reception-page">
     <div className="section-toolbar">
-      <div><span className="eyebrow">QUẦY LỄ TÂN</span><h2>Tiếp nhận bệnh nhân</h2></div>
-      {selectedPatient && <button className="primary-button" onClick={() => setSection('Lịch hẹn')}><CalendarDays size={17} /> Tiếp tục đặt lịch</button>}
+      <div><span className="eyebrow">FRONT DESK</span><h2>Patient reception</h2></div>
+      {selectedPatient && <button className="primary-button" onClick={() => setSection('Appointments')}><CalendarDays size={17} /> Continue to scheduling</button>}
     </div>
     <form className="panel reception-search" onSubmit={searchPatients} noValidate>
-      <label htmlFor="reception-search">Tìm bệnh nhân hiện có</label>
-      <p>Tìm theo mã bệnh nhân, họ tên đầy đủ hoặc một phần, hay số điện thoại.</p>
+      <label htmlFor="reception-search">Find an existing patient</label>
+      <p>Search by patient code, full or partial name, or phone number.</p>
       <div className="reception-search-controls">
         <Search size={18} aria-hidden="true" />
         <input
@@ -985,21 +1382,21 @@ function Reception({ tokens, onTokensChanged, appointments, setSection }) {
             setError('');
           }}
           disabled={loading}
-          placeholder="Ví dụ: DMS-0001, Nguyễn Minh Anh hoặc số điện thoại"
+          placeholder="e.g. DMS-0001, Nguyen Minh Anh, or phone"
           autoComplete="off"
         />
-        <button className="primary-button" type="submit" disabled={loading}>{loading ? 'Đang tìm…' : 'Tìm kiếm'}</button>
+        <button className="primary-button" type="submit" disabled={loading}>{loading ? 'Searching…' : 'Search'}</button>
       </div>
       {error && <div className="form-error" role="alert">{error}</div>}
     </form>
 
-    {loading && <div className="panel reception-state" role="status">Đang tìm hồ sơ bệnh nhân…</div>}
-    {!loading && !error && !term.trim() && <div className="panel reception-state">Nhập mã, tên hoặc số điện thoại bệnh nhân để bắt đầu.</div>}
-    {!loading && !error && term.trim() && !searched && <div className="panel reception-state">Nhấn Tìm kiếm để tra cứu bệnh nhân.</div>}
-    {!loading && !error && searched && patients.length === 0 && <div className="panel reception-state" role="status">Không tìm thấy bệnh nhân. Vui lòng kiểm tra thông tin và tìm lại.</div>}
+    {loading && <div className="panel reception-state" role="status">Searching patient records…</div>}
+    {!loading && !error && !term.trim() && <div className="panel reception-state">Enter a patient code, name, or phone number to begin.</div>}
+    {!loading && !error && term.trim() && !searched && <div className="panel reception-state">Press Search to look up this patient.</div>}
+    {!loading && !error && searched && patients.length === 0 && <div className="panel reception-state" role="status">No patient found. Check the details and search again.</div>}
     {!loading && !error && patients.length > 0 && <div className="reception-results-layout">
-      <section className="panel reception-results" aria-label="Kết quả tìm kiếm bệnh nhân">
-        <div className="panel-heading"><div><span className="eyebrow">KẾT QUẢ TÌM KIẾM</span><h3>Tìm thấy {patients.length} bệnh nhân</h3></div></div>
+      <section className="panel reception-results" aria-label="Patient search results">
+        <div className="panel-heading"><div><span className="eyebrow">SEARCH RESULTS</span><h3>{patients.length} {patients.length === 1 ? 'patient' : 'patients'} found</h3></div></div>
         {patients.map((patient) => <button
           type="button"
           key={patient.id}
@@ -1007,38 +1404,44 @@ function Reception({ tokens, onTokensChanged, appointments, setSection }) {
           onClick={() => setSelectedPatientId(patient.id)}
         >
           <span className="small-avatar">{patient.full_name.split(' ').map((part) => part[0]).slice(-2).join('')}</span>
-          <span className="reception-result-info"><strong>{patient.full_name}</strong><small>{patient.patient_code} · {patient.phone || 'Chưa có số điện thoại'}</small></span>
+          <span className="reception-result-info"><strong>{patient.full_name}</strong><small>{patient.patient_code} · {patient.phone || 'No phone recorded'}</small></span>
           <span className="reception-result-arrow">›</span>
         </button>)}
       </section>
       {selectedPatient && <section className="panel reception-profile">
-        <div className="panel-heading"><div><span className="eyebrow">HỒ SƠ BỆNH NHÂN</span><h3>{selectedPatient.full_name}</h3></div><span className="pill">{selectedPatient.patient_code}</span></div>
+        <div className="panel-heading"><div><span className="eyebrow">PATIENT PROFILE</span><h3>{selectedPatient.full_name}</h3></div><span className="pill">{selectedPatient.patient_code}</span></div>
         <dl className="reception-profile-grid">
-          <div><dt>Điện thoại</dt><dd>{selectedPatient.phone || 'Chưa ghi nhận'}</dd></div>
-          <div><dt>Ngày sinh</dt><dd>{formatDate(selectedPatient.date_of_birth)}{patientAge(selectedPatient.date_of_birth) !== null ? ` · ${patientAge(selectedPatient.date_of_birth)} tuổi` : ''}</dd></div>
-          <div><dt>Bộ răng</dt><dd>{displayDentition(selectedPatient.dentition_type)}</dd></div>
-          <div className="reception-medical-alert"><dt>Dị ứng</dt><dd>{selectedPatient.allergies || 'Chưa ghi nhận'}</dd></div>
-          <div className="profile-wide"><dt>Tiền sử bệnh</dt><dd>{selectedPatient.medical_history || 'Chưa ghi nhận'}</dd></div>
+          <div><dt>Phone</dt><dd>{selectedPatient.phone || 'Not recorded'}</dd></div>
+          <div><dt>Date of birth</dt><dd>{formatDate(selectedPatient.date_of_birth)}{patientAge(selectedPatient.date_of_birth) !== null ? ` · ${patientAge(selectedPatient.date_of_birth)} years old` : ''}</dd></div>
+          <div><dt>Dental profile</dt><dd>{selectedPatient.dentition_type === 'CHILD' ? 'Child · 20 teeth' : 'Adult · 32 teeth'}</dd></div>
+          <div className="reception-medical-alert"><dt>Allergies</dt><dd>{selectedPatient.allergies || 'None recorded'}</dd></div>
+          <div className="profile-wide"><dt>Medical history</dt><dd>{selectedPatient.medical_history || 'None recorded'}</dd></div>
         </dl>
         <div className="reception-visit-history">
-          <span className="eyebrow">LỊCH SỬ KHÁM</span>
+          <span className="eyebrow">APPOINTMENT HISTORY</span>
           {patientAppointments.length
-            ? patientAppointments.map((appointment) => <div key={appointment.id}><strong>{new Date(appointment.appointment_date || appointment.start_at).toLocaleString('vi-VN')}</strong><span>{appointment.service_name || appointment.type || 'Khám răng'} · {displayAppointmentStatus(appointment.status)}</span></div>)
-            : <p>Chưa có lịch hẹn.</p>}
+            ? patientAppointments.map((appointment) => <div key={appointment.id}><strong>{new Date(appointment.appointment_date || appointment.start_at).toLocaleString()}</strong><span>{appointment.service_name || appointment.type || 'Dental visit'} · {appointment.status}</span></div>)
+            : <p>No appointments recorded.</p>}
         </div>
       </section>}
-      {!selectedPatient && <div className="panel reception-state">Chọn bệnh nhân trong danh sách để xem thông tin tiếp nhận.</div>}
+      {!selectedPatient && <div className="panel reception-state">Select a patient from the results to review their reception details.</div>}
     </div>}
   </section>;
 }
 
-function MedicalRecords({ appointments, patients, services, teeth, records, loading, loadError, onSave }) {
+function MedicalRecords({ appointments, patients, services, teeth, records, loading, loadError, onSave, onGenerateSummary }) {
   const eligibleAppointments = appointments.filter((item) => item.status !== 'Cancelled' && item.status !== 'CANCELLED');
   const [appointmentId, setAppointmentId] = useState('');
-  const [form, setForm] = useState({ diagnosis: '', treatment_plan: '', prescription: '', notes: '', teeth: [], services: [] });
+  const [form, setForm] = useState({ diagnosis: '', treatment_plan: '', prescription: '', notes: '', teeth: [], services: [], follow_up_date: '' });
   const [saving, setSaving] = useState(false);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summary, setSummary] = useState('');
+  const [summaryRetryable, setSummaryRetryable] = useState(false);
+  const [summaryError, setSummaryError] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const summaryInFlight = useRef(false);
+  const savingRef = useRef(false);
   const selectedAppointment = eligibleAppointments.find((item) => String(item.id) === appointmentId);
   const selectedPatient = patients.find((patient) => String(patient.id) === String(selectedAppointment?.patient));
   const record = records.find((item) => String(item.appointment) === appointmentId);
@@ -1056,9 +1459,13 @@ function MedicalRecords({ appointments, patients, services, teeth, records, load
       prescription: record.prescription || '',
       notes: record.notes || '',
       teeth: record.teeth || [],
-      services: record.services || []
-    } : { diagnosis: '', treatment_plan: '', prescription: '', notes: '', teeth: [], services: [] });
+      services: record.services || [],
+      follow_up_date: record.follow_up_date || ''
+    } : { diagnosis: '', treatment_plan: '', prescription: '', notes: '', teeth: [], services: [], follow_up_date: '' });
     setError('');
+    setSummary('');
+    setSummaryRetryable(false);
+    setSummaryError('');
   }, [appointmentId, record?.id]);
 
   function toggleSelection(field, id) {
@@ -1072,74 +1479,675 @@ function MedicalRecords({ appointments, patients, services, teeth, records, load
 
   async function saveRecord(event) {
     event.preventDefault();
+    if (savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     setError('');
     setSuccess('');
     try {
-      await onSave({ ...form, appointment: Number(appointmentId) }, record?.id);
-      setSuccess('Đã lưu hồ sơ bệnh án.');
+      await onSave({
+        ...form,
+        appointment: Number(appointmentId),
+        follow_up_date: form.follow_up_date || null
+      }, record?.id);
+      setSuccess('Medical record saved.');
     } catch (saveError) {
       setError(saveError.message);
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
 
+  async function requestSummary() {
+    if (!record || summaryInFlight.current) return;
+    summaryInFlight.current = true;
+    setSummaryLoading(true);
+    setSummaryError('');
+    setSummaryRetryable(false);
+    try {
+      const result = await onGenerateSummary(record.id);
+      setSummary(result.summary);
+    } catch (requestError) {
+      setSummaryError(requestError.message);
+      setSummaryRetryable(requestError.retryable === true);
+    } finally {
+      summaryInFlight.current = false;
+      setSummaryLoading(false);
+    }
+  }
+
   return <section className="page-section management-page">
-    <div className="section-toolbar"><div><span className="eyebrow">KHÔNG GIAN LÂM SÀNG</span><h2>Hồ sơ bệnh án điện tử</h2></div></div>
-    {loading && <div className="panel management-state" role="status">Đang tải lịch hẹn, hồ sơ, sơ đồ răng và dịch vụ…</div>}
-    {loadError && <div className="form-error" role="alert">Không thể tải dữ liệu bệnh án điện tử: {loadError}</div>}
+    <div className="section-toolbar"><div><span className="eyebrow">CLINICAL WORKSPACE</span><h2>Electronic medical record</h2></div></div>
+    {loading && <div className="panel management-state" role="status">Loading appointments, records, teeth and services…</div>}
+    {loadError && <div className="form-error" role="alert">EMR data could not be loaded: {loadError}</div>}
     {error && <div className="form-error" role="alert">{error}</div>}
     {success && <div className="form-success" role="status">{success}</div>}
-    {!loading && !loadError && !eligibleAppointments.length && <div className="panel management-state">Không có lịch hẹn để lập hồ sơ bệnh án.</div>}
+    {!loading && !loadError && !eligibleAppointments.length && <div className="panel management-state">No appointments are available for clinical documentation.</div>}
     {!loading && !loadError && eligibleAppointments.length > 0 && selectedAppointment && <form className="panel management-form emr-form" onSubmit={saveRecord}>
-      <label className="emr-appointment">Lịch hẹn đang khám
-        <select value={appointmentId} onChange={(event) => { setAppointmentId(event.target.value); setSuccess(''); }}>
-          {eligibleAppointments.map((item) => <option key={item.id} value={item.id}>{new Date(item.appointment_date || item.start_at).toLocaleString('vi-VN')} · {item.patient_name} · {item.dentist_name}</option>)}
+      <label className="emr-appointment">Appointment being examined
+        <select value={appointmentId} disabled={summaryLoading || saving} onChange={(event) => { setAppointmentId(event.target.value); setSuccess(''); }}>
+          {eligibleAppointments.map((item) => <option key={item.id} value={item.id}>{new Date(item.appointment_date || item.start_at).toLocaleString()} · {item.patient_name} · {item.dentist_name}</option>)}
         </select>
       </label>
       {selectedPatient && <div className="emr-patient-alert">
-        <div className="emr-patient-heading"><strong>{selectedPatient.full_name}</strong><span>{selectedPatient.patient_code} · {selectedPatient.phone || 'Chưa có số điện thoại'}</span></div>
+        <div className="emr-patient-heading"><strong>{selectedPatient.full_name}</strong><span>{selectedPatient.patient_code} · {selectedPatient.phone || 'No phone recorded'}</span></div>
         <div className="emr-appointment-details">
-          <span><strong>Lịch hẹn:</strong> {new Date(selectedAppointment.appointment_date || selectedAppointment.start_at).toLocaleString('vi-VN')}</span>
-          <span><strong>Bác sĩ:</strong> {selectedAppointment.dentist_name || 'Chưa ghi nhận'}</span>
-          <span><strong>Trạng thái:</strong> {displayAppointmentStatus(selectedAppointment.status)}</span>
+          <span><strong>Appointment:</strong> {new Date(selectedAppointment.appointment_date || selectedAppointment.start_at).toLocaleString()}</span>
+          <span><strong>Dentist:</strong> {selectedAppointment.dentist_name || 'Not recorded'}</span>
+          <span><strong>Status:</strong> {selectedAppointment.status}</span>
         </div>
-        <p><strong>Dị ứng:</strong> {selectedPatient.allergies || 'Chưa ghi nhận'} · <strong>Tiền sử bệnh:</strong> {selectedPatient.medical_history || 'Chưa ghi nhận'}</p>
+        <p><strong>Allergies:</strong> {selectedPatient.allergies || 'None recorded'} · <strong>Medical history:</strong> {selectedPatient.medical_history || 'None recorded'}</p>
       </div>}
-      <label>Chẩn đoán<textarea required rows="3" value={form.diagnosis} onChange={(event) => setForm({ ...form, diagnosis: event.target.value })} /></label>
-      <label>Phác đồ điều trị<textarea required rows="3" value={form.treatment_plan} onChange={(event) => setForm({ ...form, treatment_plan: event.target.value })} /></label>
+      <label>Diagnosis<textarea required rows="3" value={form.diagnosis} onChange={(event) => setForm({ ...form, diagnosis: event.target.value })} /></label>
+      <label>Treatment plan<textarea required rows="3" value={form.treatment_plan} onChange={(event) => setForm({ ...form, treatment_plan: event.target.value })} /></label>
       <div className="emr-selection-grid">
         <fieldset className="emr-teeth-fieldset">
-          <legend>Răng đã khám hoặc điều trị ({form.teeth.length} đã chọn)</legend>
-          {!patientTeeth.length ? <p className="emr-empty-options">Không có dữ liệu sơ đồ răng cho bộ răng của bệnh nhân này.</p> : <div className="emr-tooth-chart">
-            <span className="emr-arch-label">HÀM TRÊN</span>
+          <legend>Teeth examined or treated ({form.teeth.length} selected)</legend>
+          {!patientTeeth.length ? <p className="emr-empty-options">No tooth chart data is available for this patient's dentition.</p> : <div className="emr-tooth-chart">
+            <span className="emr-arch-label">UPPER ARCH</span>
             <div className="emr-tooth-row">{patientTeeth.slice(0, midpoint).map((tooth) => <button key={tooth.id} type="button" aria-pressed={form.teeth.includes(tooth.id)} className={`emr-tooth ${form.teeth.includes(tooth.id) ? 'selected' : ''}`} onClick={() => toggleSelection('teeth', tooth.id)}>{tooth.code}</button>)}</div>
             <div className="emr-mouth-line" />
             <div className="emr-tooth-row lower">{patientTeeth.slice(midpoint).reverse().map((tooth) => <button key={tooth.id} type="button" aria-pressed={form.teeth.includes(tooth.id)} className={`emr-tooth ${form.teeth.includes(tooth.id) ? 'selected' : ''}`} onClick={() => toggleSelection('teeth', tooth.id)}>{tooth.code}</button>)}</div>
-            <span className="emr-arch-label lower">HÀM DƯỚI</span>
+            <span className="emr-arch-label lower">LOWER ARCH</span>
           </div>}
         </fieldset>
         <fieldset>
-          <legend>Dịch vụ điều trị ({form.services.length} đã chọn)</legend>
-          {!services.length ? <p className="emr-empty-options">Hiện không có dịch vụ nào đang hoạt động.</p> : <div className="service-options">
+          <legend>Treatment services ({form.services.length} selected)</legend>
+          {!services.length ? <p className="emr-empty-options">No active services are available.</p> : <div className="service-options">
             {services.map((service) => <label key={service.id}>
               <input type="checkbox" checked={form.services.includes(service.id)} onChange={() => toggleSelection('services', service.id)} />
-              <span><strong>{service.name}</strong><small>{service.description || 'Chưa có mô tả dịch vụ'} · {service.duration_minutes} phút</small></span>
+              <span><strong>{service.name}</strong><small>{service.description || 'No service description'} · {service.duration_minutes} min</small></span>
               <small>{Number(service.price).toLocaleString('vi-VN')} ₫</small>
             </label>)}
           </div>}
         </fieldset>
       </div>
-      <label>Đơn thuốc<textarea rows="2" value={form.prescription} onChange={(event) => setForm({ ...form, prescription: event.target.value })} /></label>
-      <label>Ghi chú lâm sàng<textarea rows="2" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
-      <div className="form-actions"><button className="primary-button" disabled={saving || !appointmentId}>{saving ? 'Đang lưu…' : record ? 'Cập nhật bệnh án' : 'Lưu bệnh án'}</button></div>
+      <label>Prescription<textarea rows="2" value={form.prescription} onChange={(event) => setForm({ ...form, prescription: event.target.value })} /></label>
+      <label>Clinical notes<textarea rows="2" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
+      <label>Follow-up date<input type="date" value={form.follow_up_date} onChange={(event) => setForm({ ...form, follow_up_date: event.target.value })} /></label>
+      <p>A follow-up SMS is sent only when the patient has SMS consent and a valid mobile number, and the daily reminder task is configured.</p>
+      <div className="form-actions"><button className="primary-button" disabled={saving || !appointmentId}>{saving ? 'Saving…' : record ? 'Update medical record' : 'Save medical record'}</button></div>
     </form>}
+    {!loading && record && <section className="panel management-form">
+      <h3>AI summary · Gemini</h3>
+      <p className="management-hint">Sau khi có consent, Gemini nhận chẩn đoán, kế hoạch điều trị, đơn thuốc, ghi chú, tên dịch vụ và mã răng. Hệ thống lọc tên, mã bệnh nhân, điện thoại, email và các định dạng ngày phổ biến khi phát hiện; không gửi ngày sinh, dị ứng hay tiền sử riêng từ hồ sơ bệnh nhân. Đây là lọc theo mẫu, không bảo đảm ẩn danh hoàn toàn. Bác sĩ cần rà soát kết quả; AI không tự sửa hồ sơ và không thay thế đánh giá chuyên môn.</p>
+      {!selectedPatient?.ai_processing_consent && <p role="status">Patient AI-processing consent has not been recorded.</p>}
+      <button className="secondary-button" type="button" disabled={!selectedPatient?.ai_processing_consent || summaryLoading || Boolean(summaryError && !summaryRetryable)} onClick={requestSummary}>{summaryLoading ? 'Đang xử lý AI…' : summaryRetryable ? 'Thử lại' : 'Tạo tóm tắt AI'}</button>
+      {summaryLoading && <p className="management-state" role="status">Đang chờ dịch vụ AI phản hồi…</p>}
+      {summaryError && <div className="form-error" role="alert">{summaryError}</div>}
+      {summary && <div className="panel" role="status"><strong>AI-generated draft — clinician review required</strong><p>{summary}</p></div>}
+    </section>}
   </section>;
 }
-function ToothChart({ dentition, setDentition, selectedTooth, setSelectedTooth }) { const teeth = dentition === 'ADULT' ? teethAdult : teethChild; return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">HỒ SƠ LÂM SÀNG</span><h2>Sơ đồ răng tương tác</h2></div><div className="segmented"><button className={dentition === 'ADULT' ? 'selected' : ''} onClick={() => setDentition('ADULT')}>Người lớn · 32 răng</button><button className={dentition === 'CHILD' ? 'selected' : ''} onClick={() => setDentition('CHILD')}>Trẻ em · 20 răng</button></div></div><div className="chart-layout"><div className="panel tooth-panel"><div className="chart-header"><div><strong>Nguyễn Minh Anh</strong><span>DMS-0001 · {dentition === 'ADULT' ? 'Răng vĩnh viễn' : 'Răng sữa'}</span></div><span className="status confirmed">Đang điều trị</span></div><div className="mouth-label">HÀM TRÊN</div><div className={`teeth-grid ${dentition.toLowerCase()}`}>{teeth.slice(0, Math.ceil(teeth.length / 2)).map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-line" /><div className={`teeth-grid lower ${dentition.toLowerCase()}`}>{teeth.slice(Math.ceil(teeth.length / 2)).reverse().map((tooth) => <Tooth key={tooth.id} tooth={tooth} selected={selectedTooth === tooth.id} onClick={() => setSelectedTooth(tooth.id)} />)}</div><div className="mouth-label lower-label">HÀM DƯỚI</div><div className="chart-legend"><span><i className="dot healthy" />Khỏe mạnh</span><span><i className="dot care" />Cần điều trị</span><span><i className="dot monitor" />Cần theo dõi</span></div></div><aside className="panel tooth-detail"><span className="eyebrow">RĂNG ĐANG CHỌN</span>{selectedTooth ? <><div className="tooth-number">{teeth.find((tooth) => tooth.id === selectedTooth)?.code}</div><h3>Tình trạng lâm sàng</h3><p>Cập nhật tình trạng răng và thêm ghi chú điều trị vào hồ sơ bệnh nhân.</p><select defaultValue="Healthy"><option value="Healthy">Khỏe mạnh</option><option value="Needs care">Cần điều trị</option><option value="Monitor">Cần theo dõi</option><option value="Restored">Đã phục hồi</option></select><textarea placeholder="Thêm ghi chú lâm sàng..." /><button className="primary-button full">Lưu tình trạng</button></> : <div className="empty-detail"><Stethoscope size={28} /><p>Chọn một chiếc răng để xem hồ sơ lâm sàng.</p></div>}</aside></div></section>; }
-function Tooth({ tooth, selected, onClick }) { return <button aria-label={`${tooth.code}: ${displayToothState(tooth.state)}`} onClick={onClick} className={`tooth ${tooth.state.toLowerCase().replace(' ', '-')} ${selected ? 'selected' : ''}`}><span>{tooth.code.slice(1)}</span><div className="tooth-shape" /></button>; }
-function Billing({ patients }) { return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">TÀI CHÍNH</span><h2>Thanh toán và trả góp</h2></div><button className="primary-button"><CircleDollarSign size={17} /> Tạo hóa đơn</button></div><div className="metric-grid compact"><Metric label="Còn phải thu" value="42,8 triệu ₫" detail="Trong 18 hóa đơn" accent="gold" icon={CircleDollarSign} /><Metric label="Đến hạn tuần này" value="8,4 triệu ₫" detail="6 đợt thanh toán" accent="coral" icon={CalendarDays} /><Metric label="Đã thu hôm nay" value="5,2 triệu ₫" detail="11 khoản thanh toán" accent="sage" icon={ShieldCheck} /></div><div className="panel table-panel"><table><thead><tr><th>Hóa đơn</th><th>Bệnh nhân</th><th>Tổng cộng</th><th>Đã thanh toán</th><th>Trạng thái</th></tr></thead><tbody>{patients.slice(0, 3).map((p, i) => <tr key={p.id}><td><code>INV-000{i + 1}</code></td><td><strong>{p.full_name}</strong></td><td>{['3.500.000', '1.200.000', '850.000'][i]} ₫</td><td>{['1.500.000', '1.200.000', '350.000'][i]} ₫</td><td><span className={`status ${i === 1 ? 'paid' : 'scheduled'}`}>{i === 1 ? 'Đã thanh toán' : 'Trả góp'}</span></td></tr>)}</tbody></table></div></section>; }
-function Radiographs() { return <section className="page-section"><div className="section-toolbar"><div><span className="eyebrow">CHẨN ĐOÁN HÌNH ẢNH</span><h2>Thư viện ảnh X-quang</h2></div><button className="primary-button"><FileImage size={17} /> Tải ảnh lên</button></div><div className="upload-placeholder"><FileImage size={30} /><h3>Chưa có ảnh X-quang</h3><p>Đính kèm ảnh X-quang vào hồ sơ bệnh nhân trong buổi khám.</p><button className="secondary-button">Chọn tệp</button></div></section>; }
+function ToothChart({
+  dentition,
+  setDentition,
+  selectedTooth,
+  setSelectedTooth,
+  patients,
+  teeth,
+  tokens,
+  onTokensChanged
+}) {
+  const [patientId, setPatientId] = useState('');
+  const [conditions, setConditions] = useState([]);
+  const [condition, setCondition] = useState('Healthy');
+  const [note, setNote] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState('');
+  const saveInFlight = useRef(false);
+  const eligiblePatients = patients.filter((patient) => patient.dentition_type === dentition);
+  const selectedPatient = eligiblePatients.find((patient) => String(patient.id) === patientId);
+  const chartTeeth = teeth
+    .filter((tooth) => tooth.dentition_type === dentition)
+    .sort((left, right) => left.display_order - right.display_order);
+  const selectedCondition = conditions.find(
+    (item) => item.tooth === selectedTooth
+  );
+
+  useEffect(() => {
+    if (!eligiblePatients.some((patient) => String(patient.id) === patientId)) {
+      setPatientId(eligiblePatients.length ? String(eligiblePatients[0].id) : '');
+      setSelectedTooth(null);
+    }
+  }, [dentition, patients, patientId, setSelectedTooth]);
+
+  useEffect(() => {
+    if (!selectedPatient) {
+      setConditions([]);
+      setLoading(false);
+      return undefined;
+    }
+
+    let active = true;
+    setLoading(true);
+    setError('');
+    apiRequest(`/tooth-conditions/?patient=${encodeURIComponent(selectedPatient.id)}`, {
+      tokens,
+      onTokens: onTokensChanged
+    }).then((items) => {
+      if (active) setConditions(items);
+    }).catch((loadError) => {
+      if (active) setError(loadError.message);
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
+  }, [selectedPatient?.id, tokens, onTokensChanged]);
+
+  useEffect(() => {
+    setCondition(selectedCondition?.condition || 'Healthy');
+    setNote(selectedCondition?.note || '');
+    setSaved('');
+  }, [selectedTooth, selectedCondition?.condition, selectedCondition?.note]);
+
+  async function saveCondition(event) {
+    event.preventDefault();
+    if (!selectedPatient || !selectedTooth || saveInFlight.current) return;
+
+    saveInFlight.current = true;
+    setSaving(true);
+    setError('');
+    setSaved('');
+    try {
+      const result = await apiRequest('/tooth-conditions/', {
+        tokens,
+        onTokens: onTokensChanged,
+        method: 'POST',
+        body: {
+          patient: selectedPatient.id,
+          tooth: selectedTooth,
+          condition,
+          note
+        }
+      });
+      setConditions((current) => [
+        ...current.filter((item) => item.tooth !== result.tooth),
+        result
+      ]);
+      setSaved(`Đã lưu tình trạng răng ${result.tooth_code}.`);
+    } catch (saveError) {
+      setError(saveError.message);
+    } finally {
+      saveInFlight.current = false;
+      setSaving(false);
+    }
+  }
+
+  function changeDentition(value) {
+    setDentition(value);
+    setSelectedTooth(null);
+  }
+
+  function renderArch(items, lower = false) {
+    const archTeeth = lower ? items.slice(Math.ceil(items.length / 2)).reverse() : items.slice(0, Math.ceil(items.length / 2));
+    return <div className={`teeth-grid ${lower ? 'lower ' : ''}${dentition.toLowerCase()}`}>
+      {archTeeth.map((tooth) => {
+        const savedCondition = conditions.find((item) => item.tooth === tooth.id);
+        const toothState = (savedCondition?.condition || 'Healthy').toLowerCase().replace(/\s+/g, '-');
+        return <Tooth
+          key={tooth.id}
+          tooth={{ ...tooth, state: toothState }}
+          selected={selectedTooth === tooth.id}
+          onClick={() => setSelectedTooth(tooth.id)}
+        />;
+      })}
+    </div>;
+  }
+
+  return <section className="page-section">
+    <div className="section-toolbar">
+      <div><span className="eyebrow">CLINICAL RECORD</span><h2>Interactive tooth chart</h2></div>
+      <div className="segmented">
+        <button type="button" className={dentition === 'ADULT' ? 'selected' : ''} onClick={() => changeDentition('ADULT')}>Adult · 32</button>
+        <button type="button" className={dentition === 'CHILD' ? 'selected' : ''} onClick={() => changeDentition('CHILD')}>Child · 20</button>
+      </div>
+    </div>
+    {patients.length > 0 && <label className="tooth-patient-select">Patient
+      <select value={patientId} onChange={(event) => { setPatientId(event.target.value); setSelectedTooth(null); }}>
+        {eligiblePatients.map((patient) => <option key={patient.id} value={patient.id}>{patient.patient_code} · {patient.full_name}</option>)}
+      </select>
+    </label>}
+    {error && <div className="form-error" role="alert">{error}</div>}
+    {loading && <div className="management-state" role="status">Loading saved tooth conditions…</div>}
+    {!selectedPatient && <div className="panel reception-state">No patient with this dentition is available.</div>}
+    {selectedPatient && <div className="chart-layout">
+      <div className="panel tooth-panel">
+        <div className="chart-header">
+          <div><strong>{selectedPatient.full_name}</strong><span>{selectedPatient.patient_code} · {dentition === 'ADULT' ? 'Permanent dentition' : 'Primary dentition'}</span></div>
+        </div>
+        <div className="mouth-label">UPPER ARCH</div>
+        {renderArch(chartTeeth)}
+        <div className="mouth-line" />
+        {renderArch(chartTeeth, true)}
+        <div className="mouth-label lower-label">LOWER ARCH</div>
+        <div className="chart-legend"><span><i className="dot healthy" />Healthy</span><span><i className="dot care" />Needs care</span><span><i className="dot monitor" />Monitor</span><span><i className="dot restored" />Restored</span></div>
+      </div>
+      <aside className="panel tooth-detail">
+        <span className="eyebrow">SELECTED TOOTH</span>
+        {selectedTooth ? <form onSubmit={saveCondition}>
+          <div className="tooth-number">{chartTeeth.find((tooth) => tooth.id === selectedTooth)?.code}</div>
+          <label>Clinical condition
+            <select value={condition} onChange={(event) => setCondition(event.target.value)} disabled={loading || saving}>
+              <option>Healthy</option><option>Needs care</option><option>Monitor</option><option>Restored</option>
+            </select>
+          </label>
+          <label>Clinical note<textarea rows="4" maxLength={2000} value={note} onChange={(event) => setNote(event.target.value)} disabled={loading || saving} /></label>
+          <button className="primary-button full" type="submit" disabled={loading || saving}>{saving ? 'Saving…' : 'Save condition'}</button>
+          {saved && <p role="status">{saved}</p>}
+        </form> : <div className="empty-detail"><Stethoscope size={28} /><p>Select a tooth to view or update its saved clinical condition.</p></div>}
+      </aside>
+    </div>}
+  </section>;
+}
+
+function Tooth({ tooth, selected, onClick }) {
+  return <button type="button" onClick={onClick} className={`tooth ${tooth.state} ${selected ? 'selected' : ''}`} aria-pressed={selected} aria-label={`${tooth.code}, ${tooth.state.replace('-', ' ')}`}>
+    <span>{tooth.code.slice(1)}</span><div className="tooth-shape" />
+  </button>;
+}
+function Billing({ invoices, records, loading, onCreateInvoice, onPayCash, onCreateQr, onReconcileQr, onCancelQr }) {
+  const [recordId, setRecordId] = useState('');
+  const [quantities, setQuantities] = useState({});
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState('');
+  const [cashConfirmOpen, setCashConfirmOpen] = useState(false);
+  const [qrDialogOpen, setQrDialogOpen] = useState(false);
+  const [qrTransfer, setQrTransfer] = useState(null);
+  const [qrImageError, setQrImageError] = useState(false);
+  const [bankReference, setBankReference] = useState('');
+  const [qrVerified, setQrVerified] = useState(false);
+  const [qrCancellationChecked, setQrCancellationChecked] = useState(false);
+  const [cashMethod, setCashMethod] = useState('CASH');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [cashError, setCashError] = useState('');
+  const [qrError, setQrError] = useState('');
+  const [success, setSuccess] = useState('');
+  const savingRef = useRef(false);
+  const selectedRecord = records.find((record) => String(record.id) === recordId);
+  const selectedInvoice = invoices.find((invoice) => String(invoice.id) === selectedInvoiceId);
+  const hasPendingQr = selectedInvoice?.payments?.some((payment) => payment.method === 'BANK_TRANSFER' && payment.status === 'PENDING') || false;
+  const total = selectedRecord?.services.reduce((sum, service) => {
+    const quantity = Number(quantities[service.id] || 1);
+    return sum + Number(service.price) * quantity;
+  }, 0) || 0;
+
+  useEffect(() => {
+    if (records.length && !records.some((record) => String(record.id) === recordId)) {
+      setRecordId(String(records[0].id));
+    }
+  }, [records, recordId]);
+
+  useEffect(() => {
+    if (selectedRecord) {
+      setQuantities(Object.fromEntries(selectedRecord.services.map((service) => [service.id, 1])));
+    }
+  }, [selectedRecord?.id]);
+
+  async function createInvoice(event) {
+    event.preventDefault();
+    if (!selectedRecord || savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setError('');
+    setSuccess('');
+    try {
+      const invoice = await onCreateInvoice({
+        medical_record: selectedRecord.id,
+        items: selectedRecord.services.map((service) => ({
+          service: service.id,
+          quantity: Number(quantities[service.id] || 1)
+        }))
+      });
+      setSelectedInvoiceId(String(invoice.id));
+      setSuccess(`Invoice ${invoice.invoice_number} created successfully.`);
+    } catch (saveError) {
+      setError(saveError.message);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }
+
+  async function confirmCashPayment() {
+    if (!selectedInvoice || cashMethod !== 'CASH' || savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setCashError('');
+    setError('');
+    setSuccess('');
+    try {
+      const paid = await onPayCash(selectedInvoice.id);
+      setCashConfirmOpen(false);
+      setSuccess(`Cash payment of ${Number(paid.paid_amount).toLocaleString('vi-VN')} ₫ recorded.`);
+    } catch (paymentError) {
+      setCashError(paymentError.message);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }
+
+  async function showQrPayment() {
+    if (!selectedInvoice || savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setQrError('');
+    setError('');
+    setSuccess('');
+    try {
+      const result = await onCreateQr(selectedInvoice.id);
+      setQrTransfer(result.transfer);
+      setQrImageError(false);
+      setBankReference('');
+      setQrVerified(false);
+      setQrCancellationChecked(false);
+      setQrDialogOpen(true);
+      setSuccess('Transfer QR is ready. The invoice remains unpaid until a bank transaction is verified.');
+    } catch (paymentError) {
+      setQrError(paymentError.message);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }
+
+  async function confirmQrPayment(event) {
+    event.preventDefault();
+    if (!selectedInvoice || !bankReference.trim() || !qrVerified || savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setQrError('');
+    try {
+      const paid = await onReconcileQr(selectedInvoice.id, {
+        bank_reference: bankReference.trim(),
+        verified_amount: qrTransfer.amount,
+        verified: true
+      });
+      setQrDialogOpen(false);
+      setBankReference('');
+      setQrVerified(false);
+      setSuccess(`Bank transfer for invoice ${paid.invoice_number} was recorded as verified.`);
+    } catch (verificationError) {
+      setQrError(verificationError.message);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }
+
+  async function cancelPendingQr() {
+    if (!selectedInvoice || !qrCancellationChecked || savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setQrError('');
+    try {
+      const updatedInvoice = await onCancelQr(selectedInvoice.id);
+      setQrDialogOpen(false);
+      setQrCancellationChecked(false);
+      setSuccess(`Pending transfer for invoice ${updatedInvoice.invoice_number} was cancelled after the account check.`);
+    } catch (cancellationError) {
+      setQrError(cancellationError.message);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }
+
+  return <section className="page-section management-page">
+    <div className="section-toolbar"><div><span className="eyebrow">FINANCE</span><h2>Invoices</h2></div></div>
+    {error && <div className="form-error" role="alert">{error}</div>}
+    {success && <div className="form-success" role="status">{success}</div>}
+    <section className="panel invoice-create-panel">
+      <div className="panel-heading"><div><span className="eyebrow">FROM PRESCRIBED SERVICES</span><h3>Create invoice</h3></div></div>
+      {loading ? <p className="management-state" role="status">Loading invoices and prescribed services…</p> : !records.length ? <p className="management-state">No examination records with uninvoiced prescribed services are available.</p> : <form className="invoice-form" onSubmit={createInvoice}>
+        <label>Examination record
+          <select required value={recordId} onChange={(event) => { setRecordId(event.target.value); setSuccess(''); }}>
+            {records.map((record) => <option key={record.id} value={record.id}>{record.patient_name} · {record.patient_code} · {new Date(record.appointment_date).toLocaleString()}</option>)}
+          </select>
+        </label>
+        {selectedRecord && <>
+          <div className="invoice-patient-summary"><strong>{selectedRecord.patient_name}</strong><span>{selectedRecord.patient_code} · Examined {new Date(selectedRecord.appointment_date).toLocaleString()}</span></div>
+          <p className="invoice-source-meta">Prescribed services are loaded from EMR. Prices are determined and validated by the server when the invoice is created.</p>
+          <div className="invoice-lines">
+            <div className="invoice-line invoice-line-heading"><span>Service</span><span>Unit price</span><span>Quantity</span><span>Amount</span></div>
+            {selectedRecord.services.map((service) => {
+              const quantity = Number(quantities[service.id] || 1);
+              const lineTotal = Number(service.price) * quantity;
+              return <div className="invoice-line" key={service.id}>
+                <strong>{service.name}</strong>
+                <span>{Number(service.price).toLocaleString('vi-VN')} ₫</span>
+                <input aria-label={`Quantity for ${service.name}`} type="number" min="1" max="32767" step="1" required value={quantities[service.id] ?? 1} onChange={(event) => setQuantities((current) => ({ ...current, [service.id]: event.target.value }))} />
+                <strong>{lineTotal.toLocaleString('vi-VN')} ₫</strong>
+              </div>;
+            })}
+          </div>
+          <div className="invoice-total invoice-grand-total"><span>Total due</span><strong>{total.toLocaleString('vi-VN')} ₫</strong></div>
+          <p className="invoice-payment-note">New invoices are issued unpaid. Cash and QR transfer options are available from invoice details.</p>
+          <div className="form-actions"><button className="primary-button" type="submit" disabled={saving || !selectedRecord.services.length}>{saving ? 'Creating invoice…' : 'Create invoice'}</button></div>
+        </>}
+      </form>}
+    </section>
+    <section className="panel table-panel management-table invoice-history-panel">
+      <div className="panel-heading"><div><span className="eyebrow">BILLING HISTORY</span><h3>Invoices ({invoices.length})</h3></div></div>
+      {loading ? <p className="management-state" role="status">Loading invoice history…</p> : !invoices.length ? <p className="management-state">No invoices have been created yet.</p> : <div className="invoice-table-scroll"><table>
+        <thead><tr><th>Invoice</th><th>Patient</th><th>Issued</th><th>Total</th><th>Paid</th><th>Balance</th><th>Status</th></tr></thead>
+        <tbody>{invoices.map((invoice) => <tr key={invoice.id} className={selectedInvoiceId === String(invoice.id) ? 'invoice-row-selected' : ''} onClick={() => setSelectedInvoiceId(String(invoice.id))}>
+          <td><button type="button" className="invoice-number-button" aria-label={`View invoice ${invoice.invoice_number}`} onClick={() => setSelectedInvoiceId(String(invoice.id))}>{invoice.invoice_number}</button></td>
+          <td>{invoice.patient_name}</td><td>{new Date(invoice.issued_at).toLocaleDateString()}</td>
+          <td>{Number(invoice.total_amount).toLocaleString('vi-VN')} ₫</td><td>{Number(invoice.paid_amount).toLocaleString('vi-VN')} ₫</td>
+          <td>{Number(invoice.balance).toLocaleString('vi-VN')} ₫</td><td><span className={`pill invoice-status ${invoice.status.toLowerCase()}`}>{invoice.status}</span></td>
+        </tr>)}</tbody>
+      </table></div>}
+    </section>
+    {selectedInvoice && <section className="panel invoice-detail-panel">
+      <div className="panel-heading"><div><span className="eyebrow">INVOICE DETAILS</span><h3>{selectedInvoice.invoice_number} · {selectedInvoice.patient_name}</h3></div><div className="invoice-detail-actions"><span className={`pill invoice-status ${selectedInvoice.status.toLowerCase()}`}>{selectedInvoice.status}</span>{selectedInvoice.status === 'ISSUED' && Number(selectedInvoice.balance) > 0 && <><button type="button" className="primary-button" disabled={saving || hasPendingQr} title={hasPendingQr ? 'A bank transfer is pending; do not record another payment.' : undefined} onClick={() => { setCashError(''); setCashMethod('CASH'); setCashConfirmOpen(true); }}>Pay by cash</button><button type="button" className="secondary-button" disabled={saving} onClick={showQrPayment}>{hasPendingQr ? 'Show transfer QR' : 'Pay by QR'}</button></>}</div></div>
+      {hasPendingQr && <div className="qr-pending-note" role="status">Bank transfer pending confirmation. The invoice is not paid yet; do not treat this QR or a patient's transfer claim as payment confirmation.</div>}
+      {qrError && <div className="form-error" role="alert">{qrError}</div>}
+      <div className="invoice-lines">
+        <div className="invoice-line invoice-line-heading"><span>Service</span><span>Unit price</span><span>Quantity</span><span>Amount</span></div>
+        {selectedInvoice.items.map((item) => <div className="invoice-line" key={item.id}>
+          <strong>{item.description}</strong><span>{Number(item.unit_price).toLocaleString('vi-VN')} ₫</span><span>{item.quantity}</span><strong>{Number(item.amount).toLocaleString('vi-VN')} ₫</strong>
+        </div>)}
+      </div>
+      <div className="invoice-total"><span>Total · Balance</span><strong>{Number(selectedInvoice.total_amount).toLocaleString('vi-VN')} ₫ · {Number(selectedInvoice.balance).toLocaleString('vi-VN')} ₫</strong></div>
+      {!!selectedInvoice.payments.length && <div className="invoice-payments">
+        <h4>Payment transactions</h4>
+        {selectedInvoice.payments.map((payment) => <div className="invoice-payment-row" key={payment.id}>
+          <strong>{Number(payment.amount).toLocaleString('vi-VN')} ₫ · {payment.method}</strong>
+          <span>{payment.status === 'COMPLETED' && payment.paid_at ? `Paid ${new Date(payment.paid_at).toLocaleString()}` : `Created ${new Date(payment.created_at).toLocaleString()} · ${payment.status === 'PENDING' ? 'Awaiting verification' : payment.status}`}</span>
+          {payment.bank_reference && <span>Bank reference: {payment.bank_reference}</span>}
+          {payment.verified_at && <span>Manually verified {new Date(payment.verified_at).toLocaleString()}</span>}
+          {payment.verified_by_name && <span>Manually verified by {payment.verified_by_name}</span>}
+          {payment.cancelled_at && <span>Cancelled {new Date(payment.cancelled_at).toLocaleString()} by {payment.cancelled_by_name || 'staff'}</span>}
+          {payment.received_by_name && <span>Received by {payment.received_by_name}</span>}
+        </div>)}
+      </div>}
+    </section>}
+    {qrDialogOpen && qrTransfer && <div className="confirmation-backdrop" role="presentation">
+      <section className="panel cancellation-dialog qr-payment-dialog" role="dialog" aria-modal="true" aria-labelledby="qr-payment-title">
+        <h3 id="qr-payment-title">Bank transfer QR</h3>
+        <p>Scan this code to transfer the exact amount. The invoice will stay <strong>unpaid</strong> until a bank transaction is verified.</p>
+        <div className="qr-image-frame">
+          {qrImageError ? <p role="alert">The QR image could not be loaded. Use the bank details below to make the transfer.</p> : <img src={qrTransfer.qr_url} alt={`VietQR for invoice ${qrTransfer.description}`} onError={() => setQrImageError(true)} />}
+        </div>
+        <dl className="qr-transfer-details">
+          <div><dt>Amount</dt><dd>{Number(qrTransfer.amount).toLocaleString('vi-VN')} ₫</dd></div>
+          <div><dt>Bank</dt><dd>{qrTransfer.bank_id}</dd></div>
+          <div><dt>Account number</dt><dd>{qrTransfer.account_number}</dd></div>
+          <div><dt>Account name</dt><dd>{qrTransfer.account_name}</dd></div>
+          <div><dt>Transfer content</dt><dd>{qrTransfer.description}</dd></div>
+          <div><dt>Status</dt><dd>Pending verification</dd></div>
+        </dl>
+        <p className="qr-pending-note">Do not confirm from the QR code or a patient's report. Check the receiving bank account and match both the exact amount and transaction reference first. This action records a staff manual reconciliation; it does not connect to a bank or webhook.</p>
+        {qrTransfer.status === 'PENDING' && <form className="qr-reconciliation-form" onSubmit={confirmQrPayment}>
+          <label>Bank transaction reference<input type="text" required maxLength={100} value={bankReference} onChange={(event) => setBankReference(event.target.value)} /></label>
+          <label className="qr-verification-check"><input type="checkbox" checked={qrVerified} onChange={(event) => setQrVerified(event.target.checked)} /> I checked the receiving bank account and confirmed the transaction reference and amount match this invoice.</label>
+          {qrError && <div className="form-error" role="alert">{qrError}</div>}
+          <div className="form-actions"><button type="button" className="secondary-button" disabled={saving} onClick={() => setQrDialogOpen(false)}>Close</button><button type="submit" className="primary-button" disabled={saving || !bankReference.trim() || !qrVerified}>{saving ? 'Recording…' : 'Record verified transfer'}</button></div>
+        </form>}
+        {qrTransfer.status === 'PENDING' && <div className="qr-cancellation-form">
+          <label className="qr-verification-check"><input type="checkbox" checked={qrCancellationChecked} onChange={(event) => setQrCancellationChecked(event.target.checked)} /> I checked the receiving account and confirmed that this transfer has not arrived.</label>
+          <button type="button" className="secondary-button" disabled={saving || !qrCancellationChecked} onClick={cancelPendingQr}>{saving ? 'Cancelling…' : 'Cancel pending transfer'}</button>
+        </div>}
+        {qrTransfer.status !== 'PENDING' && <div className="form-actions"><button type="button" className="secondary-button" onClick={() => setQrDialogOpen(false)}>Close</button></div>}
+      </section>
+    </div>}
+    {cashConfirmOpen && selectedInvoice && <div className="confirmation-backdrop" role="presentation">
+      <section className="panel cancellation-dialog cash-payment-dialog" role="dialog" aria-modal="true" aria-labelledby="cash-payment-title">
+        <h3 id="cash-payment-title">Confirm cash payment</h3>
+        <p>Confirm that you received the full balance for invoice <strong>{selectedInvoice.invoice_number}</strong>.</p>
+        <p className="cash-payment-due">Amount received: <strong>{Number(selectedInvoice.balance).toLocaleString('vi-VN')} ₫</strong></p>
+        <fieldset className="cash-method-options"><legend>Payment method</legend>
+          <label><input type="radio" name="payment-method" value="CASH" checked={cashMethod === 'CASH'} onChange={() => setCashMethod('CASH')} /> Cash</label>
+        </fieldset>
+        {cashError && <div className="form-error" role="alert">{cashError}</div>}
+        <div className="form-actions"><button type="button" className="secondary-button" disabled={saving} onClick={() => setCashConfirmOpen(false)}>Cancel</button><button type="button" className="primary-button" disabled={saving || cashMethod !== 'CASH'} onClick={confirmCashPayment}>{saving ? 'Recording payment…' : 'Confirm cash received'}</button></div>
+      </section>
+    </div>}
+  </section>;
+}
+function Radiographs({ patients, tokens, onTokensChanged }) {
+  const [patientId, setPatientId] = useState('');
+  const [radiographs, setRadiographs] = useState([]);
+  const [imageUrls, setImageUrls] = useState({});
+  const [file, setFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const uploadInFlight = useRef(false);
+
+  useEffect(() => {
+    if (!patients.some((patient) => String(patient.id) === patientId)) {
+      setPatientId(patients.length ? String(patients[0].id) : '');
+    }
+  }, [patients, patientId]);
+
+  useEffect(() => {
+    if (!patientId) {
+      setRadiographs([]);
+      setLoading(false);
+      return undefined;
+    }
+
+    let active = true;
+    setLoading(true);
+    setError('');
+    setRadiographs([]);
+    apiRequest(`/radiographs/?patient=${encodeURIComponent(patientId)}`, {
+      tokens,
+      onTokens: onTokensChanged
+    }).then((items) => {
+      if (active) setRadiographs(items);
+    }).catch((loadError) => {
+      if (active) setError(loadError.message);
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
+  }, [patientId, tokens, onTokensChanged]);
+
+  useEffect(() => {
+    let active = true;
+    const createdUrls = [];
+    setImageUrls({});
+    Promise.all(radiographs.map(async (radiograph) => {
+      const image = await apiRequest(
+        `/radiographs/${radiograph.id}/image/`,
+        { tokens, onTokens: onTokensChanged, responseType: 'blob' }
+      );
+      const url = URL.createObjectURL(image);
+      createdUrls.push(url);
+      return [radiograph.id, url];
+    })).then((entries) => {
+      if (active) setImageUrls(Object.fromEntries(entries));
+    }).catch((loadError) => {
+      if (active) setError(loadError.message);
+    });
+    return () => {
+      active = false;
+      createdUrls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [radiographs, tokens, onTokensChanged]);
+
+  async function uploadRadiograph(event) {
+    event.preventDefault();
+    if (!patientId || !file || uploadInFlight.current) return;
+
+    const form = event.currentTarget;
+    uploadInFlight.current = true;
+    setUploading(true);
+    setError('');
+    setNotice('');
+    const formData = new FormData();
+    formData.append('patient', patientId);
+    formData.append('image', file);
+    try {
+      const created = await apiRequest('/radiographs/', {
+        tokens,
+        onTokens: onTokensChanged,
+        method: 'POST',
+        body: formData
+      });
+      setRadiographs((current) => [created, ...current]);
+      setFile(null);
+      form.reset();
+      setNotice('Đã tải ảnh X-quang lên và lưu vào hồ sơ bệnh nhân.');
+    } catch (uploadError) {
+      setError(uploadError.message);
+    } finally {
+      uploadInFlight.current = false;
+      setUploading(false);
+    }
+  }
+
+  const selectedPatient = patients.find((patient) => String(patient.id) === patientId);
+  return <section className="page-section">
+    <div className="section-toolbar">
+      <div><span className="eyebrow">IMAGING</span><h2>Radiograph gallery</h2></div>
+    </div>
+    <section className="panel radiograph-upload-panel">
+      <h3>Upload a patient X-ray</h3>
+      <p>Only JPG, JPEG or PNG images up to 10 MB are accepted. Images are private and visible only to the assigned dentist and administrators.</p>
+      <form onSubmit={uploadRadiograph}>
+        <label>Patient
+          <select value={patientId} onChange={(event) => setPatientId(event.target.value)} disabled={uploading || patients.length === 0}>
+            {patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.patient_code} · {patient.full_name}</option>)}
+          </select>
+        </label>
+        <label>X-ray image
+          <input
+            type="file"
+            accept="image/jpeg,image/png,.jpg,.jpeg,.png"
+            onChange={(event) => setFile(event.target.files?.[0] || null)}
+            disabled={uploading || patients.length === 0}
+          />
+        </label>
+        {file && <p className="management-hint">{file.name} · {(file.size / (1024 * 1024)).toFixed(2)} MB</p>}
+        <button className="primary-button" type="submit" disabled={!selectedPatient || !file || uploading}>
+          <FileImage size={17} />{uploading ? 'Uploading…' : 'Upload image'}
+        </button>
+      </form>
+    </section>
+    {error && <div className="form-error" role="alert">{error}</div>}
+    {notice && <div className="form-success" role="status">{notice}</div>}
+    {loading && <div className="management-state" role="status">Loading radiographs…</div>}
+    {!loading && selectedPatient && radiographs.length === 0 && !error && <div className="upload-placeholder">
+      <FileImage size={30} /><h3>No radiographs uploaded yet</h3><p>Uploaded images for {selectedPatient.full_name} will appear here.</p>
+    </div>}
+    {radiographs.length > 0 && <div className="radiograph-grid">
+      {radiographs.map((radiograph) => <article className="panel radiograph-card" key={radiograph.id}>
+        {imageUrls[radiograph.id]
+          ? <img src={imageUrls[radiograph.id]} alt={`Radiograph for ${selectedPatient?.full_name}`} />
+          : <div className="radiograph-image-loading" role="status">Loading image…</div>}
+        <div><strong>{radiograph.original_filename}</strong><span>{new Date(radiograph.uploaded_at).toLocaleString()}</span></div>
+      </article>)}
+    </div>}
+  </section>;
+}
 
 createRoot(document.getElementById('root')).render(<App />);

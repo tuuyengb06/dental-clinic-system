@@ -1,4 +1,7 @@
+import uuid
 from decimal import Decimal
+from pathlib import Path
+
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
@@ -40,9 +43,11 @@ class Patient(models.Model):
     full_name = models.CharField(max_length=160)
     phone = models.CharField(max_length=30, blank=True)
     date_of_birth = models.DateField(null=True, blank=True)
-    dentition_type = models.CharField(max_length=10, choices=[(ADULT, "Người lớn"), (CHILD, "Trẻ em")], default=ADULT)
+    dentition_type = models.CharField(max_length=10, choices=[(ADULT, "Adult"), (CHILD, "Child")], default=ADULT)
     medical_history = models.TextField(blank=True)
     allergies = models.TextField(blank=True)
+    ai_processing_consent = models.BooleanField(default=False)
+    sms_reminder_consent = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -74,6 +79,32 @@ class ToothCondition(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["patient", "tooth"], name="unique_patient_tooth")]
+
+
+def radiograph_upload_path(instance, filename):
+    extension = Path(filename).suffix.lower()
+    return f"radiographs/{uuid.uuid4().hex}{extension}"
+
+
+class Radiograph(models.Model):
+    patient = models.ForeignKey(
+        Patient,
+        on_delete=models.CASCADE,
+        related_name="radiographs",
+    )
+    image = models.FileField(upload_to=radiograph_upload_path)
+    original_filename = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=30)
+    file_size = models.PositiveIntegerField()
+    uploaded_by = models.ForeignKey(
+        ClinicUser,
+        on_delete=models.PROTECT,
+        related_name="radiographs_uploaded",
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-uploaded_at", "-id"]
 
 
 class Service(models.Model):
@@ -123,7 +154,7 @@ class TreatmentPlan(models.Model):
     ACTIVE = "ACTIVE"
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
-    STATUS_CHOICES = [(DRAFT, "Bản nháp"), (ACTIVE, "Đang thực hiện"), (COMPLETED, "Hoàn thành"), (CANCELLED, "Đã hủy")]
+    STATUS_CHOICES = [(DRAFT, "Draft"), (ACTIVE, "Active"), (COMPLETED, "Completed"), (CANCELLED, "Cancelled")]
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name="treatment_plans")
     dentist = models.ForeignKey(Doctor, on_delete=models.PROTECT, related_name="treatment_plans")
     title = models.CharField(max_length=180)
@@ -138,14 +169,14 @@ class TreatmentItem(models.Model):
     IN_PROGRESS = "IN_PROGRESS"
     DONE = "DONE"
     CANCELLED = "CANCELLED"
-    STATUS_CHOICES = [(PLANN_STATUS := PLANNED, "Đã lên kế hoạch"), (IN_PROGRESS, "Đang thực hiện"), (DONE, "Hoàn thành"), (CANCELLED, "Đã hủy")] # simplified choices safely below
+    STATUS_CHOICES = [(PLANN_STATUS := PLANNED, "Planned"), (IN_PROGRESS, "In progress"), (DONE, "Done"), (CANCELLED, "Cancelled")] # simplified choices safely below
     plan = models.ForeignKey(TreatmentPlan, on_delete=models.CASCADE, related_name="items")
     appointment = models.ForeignKey(Appointment, on_delete=models.SET_NULL, null=True, blank=True, related_name="treatment_items")
     service = models.ForeignKey(Service, on_delete=models.PROTECT, null=True, blank=True, related_name="treatment_items")
     procedure_name = models.CharField(max_length=180)
     tooth = models.ForeignKey(Tooth, on_delete=models.PROTECT, null=True, blank=True, related_name="treatment_items")
     cost = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0"))])
-    status = models.CharField(max_length=20, choices=[(PLANNED, "Đã lên kế hoạch"), (IN_PROGRESS, "Đang thực hiện"), (DONE, "Hoàn thành"), (CANCELLED, "Đã hủy")], default=PLANNED)
+    status = models.CharField(max_length=20, choices=[(PLANNED, "Planned"), (IN_PROGRESS, "In progress"), (DONE, "Done"), (CANCELLED, "Cancelled")], default=PLANNED)
 
 
 class Invoice(models.Model):
@@ -154,11 +185,30 @@ class Invoice(models.Model):
     PARTIAL = "PARTIALLY_PAID"
     PAID = "PAID"
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name="invoices")
+    medical_record = models.OneToOneField(
+        "appointments.MedicalRecord",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="invoice",
+    )
     invoice_number = models.CharField(max_length=30, unique=True)
     total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     paid_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     status = models.CharField(max_length=20, default=DRAFT)
     issued_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["status", "issued_at", "total_amount"],
+                name="inv_status_issued_idx",
+            ),
+            models.Index(
+                fields=["-issued_at", "-id"],
+                name="inv_recent_idx",
+            ),
+        ]
 
     @property
     def balance(self):
@@ -182,9 +232,59 @@ class Payment(models.Model):
     CASH = "CASH"
     CARD = "CARD"
     BANK_TRANSFER = "BANK_TRANSFER"
-    METHOD_CHOICES = [(CASH, "Tiền mặt"), (CARD, "Thẻ"), (BANK_TRANSFER, "Chuyển khoản")]
+    METHOD_CHOICES = [(CASH, "Cash"), (CARD, "Card"), (BANK_TRANSFER, "Bank transfer")]
+    PENDING = "PENDING"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+    STATUS_CHOICES = [
+        (PENDING, "Pending"),
+        (COMPLETED, "Completed"),
+        (CANCELLED, "Cancelled"),
+    ]
     invoice = models.ForeignKey(Invoice, on_delete=models.PROTECT, related_name="payments")
     amount = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
     method = models.CharField(max_length=20, choices=METHOD_CHOICES, default=CASH)
-    paid_at = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=COMPLETED)
+    bank_id = models.CharField(max_length=20, blank=True, default="")
+    bank_account_number = models.CharField(max_length=25, blank=True, default="")
+    bank_account_name = models.CharField(max_length=100, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
     received_by = models.ForeignKey(ClinicUser, on_delete=models.PROTECT, null=True, blank=True, related_name="payments_received")
+    cancelled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="cancelled_qr_payments",
+    )
+
+
+class BankTransferVerification(models.Model):
+    payment = models.OneToOneField(
+        Payment,
+        on_delete=models.PROTECT,
+        related_name="verification",
+    )
+    reference = models.CharField(max_length=100, unique=True)
+    verified_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="verified_qr_payments",
+    )
+    verified_at = models.DateTimeField(auto_now_add=True)
+
+
+class ActiveInvoicePayment(models.Model):
+    invoice = models.OneToOneField(
+        Invoice,
+        on_delete=models.PROTECT,
+        related_name="active_payment_slot",
+    )
+    payment = models.OneToOneField(
+        Payment,
+        on_delete=models.PROTECT,
+        related_name="active_invoice_slot",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)

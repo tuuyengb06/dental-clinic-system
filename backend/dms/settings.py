@@ -5,9 +5,16 @@ from datetime import timedelta
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Cấu hình bảo mật và môi trường mặc định
-SECRET_KEY = 'django-insecure-dental-clinic-system-key-change-me'
-DEBUG = True
-ALLOWED_HOSTS = ['*']
+SECRET_KEY = os.environ.get(
+    "DMS_SECRET_KEY",
+    "django-insecure-dental-clinic-system-key-change-me",
+)
+DEBUG = os.environ.get("DMS_DEBUG", "true").lower() == "true"
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.environ.get("DMS_ALLOWED_HOSTS", "*").split(",")
+    if host.strip()
+]
 
 # Định nghĩa các module gốc
 ROOT_URLCONF = 'dms.urls'
@@ -36,6 +43,16 @@ else:
         }
     }
 
+VIETQR_BANK_ID = os.environ.get("DMS_VIETQR_BANK_ID", "").strip().upper()
+VIETQR_ACCOUNT_NUMBER = os.environ.get("DMS_VIETQR_ACCOUNT_NUMBER", "").strip()
+VIETQR_ACCOUNT_NAME = os.environ.get("DMS_VIETQR_ACCOUNT_NAME", "").strip()
+GEMINI_API_KEY = os.environ.get("DMS_GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.environ.get("DMS_GEMINI_MODEL", "gemini-2.5-flash").strip()
+MEDIA_ROOT = os.environ.get("DMS_MEDIA_ROOT", BASE_DIR / "media")
+TWILIO_ACCOUNT_SID = os.environ.get("DMS_TWILIO_ACCOUNT_SID", "").strip()
+TWILIO_AUTH_TOKEN = os.environ.get("DMS_TWILIO_AUTH_TOKEN", "").strip()
+TWILIO_FROM_NUMBER = os.environ.get("DMS_TWILIO_FROM_NUMBER", "").strip()
+
 # 2. Cấu hình các App được cài đặt trong Project
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -60,7 +77,12 @@ AUTH_USER_MODEL = 'authentication.User'
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
-    )
+    ),
+    'DEFAULT_THROTTLE_RATES': {
+        'ai_chat': '30/hour',
+        'ai_summary': '10/hour',
+        'ai_reminder_preview': '10/hour',
+    },
 }
 
 SIMPLE_JWT = {
@@ -113,7 +135,7 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 # Internationalization
-LANGUAGE_CODE = 'vi'
+LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'Asia/Ho_Chi_Minh'
 USE_I18N = True
 USE_TZ = True

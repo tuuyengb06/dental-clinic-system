@@ -1,22 +1,24 @@
 from rest_framework import serializers
-from django.contrib.auth.password_validation import validate_password
 from .models import User
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
-    role = serializers.ChoiceField(choices=[(User.Role.PATIENT, 'Bệnh nhân')], default=User.Role.PATIENT)
 
     class Meta:
         model = User
         fields = ['username', 'password', 'email', 'role', 'first_name', 'last_name']
 
-    def validate_password(self, value):
-        validate_password(value)
-        return value
-
     def create(self, validated_data):
-        password = validated_data.pop('password')
-        return User.objects.create_user(password=password, **validated_data)
+        # Tạo user và mã hóa mật khẩu bằng hàm create_user chuẩn của Django
+        user = User.objects.create_user(
+            username=validated_data['username'],
+            email=validated_data.get('email', ''),
+            password=validated_data['password'],
+            role=validated_data.get('role', 'Patient'),
+            first_name=validated_data.get('first_name', ''),
+            last_name=validated_data.get('last_name', '')
+        )
+        return user
 
 
 class CurrentUserSerializer(serializers.ModelSerializer):

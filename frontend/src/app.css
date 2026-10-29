@@ -1,17 +1,13 @@
 .auth-loading,.login-screen{min-height:100vh;display:grid;place-items:center;padding:24px}
 .auth-loading{color:var(--muted);font-size:14px}
 .login-screen{background:radial-gradient(circle at top left,#e5eee6,transparent 44%),var(--cream)}
-.login-card{width:min(100%,440px);display:grid;gap:12px;padding:36px;background:var(--paper);border:1px solid var(--line);box-shadow:0 18px 50px #183f3b12}
+.login-card{width:min(100%,420px);display:grid;gap:12px;padding:36px;background:var(--paper);border:1px solid var(--line);box-shadow:0 18px 50px #183f3b12}
 .login-card .brand-mark{margin-bottom:8px}
 .login-card h1{font-family:Fraunces,Georgia,serif;color:var(--deep);font-size:29px;margin:0}
 .login-card>p{color:var(--muted);font-size:13px;margin:0 0 8px}
-.auth-tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;background:#f1f3ee;border-radius:6px;margin:0 0 4px}
-.auth-tabs button{padding:9px;border:0;border-radius:4px;background:transparent;color:var(--muted);font:inherit;font-size:13px;font-weight:700;cursor:pointer}
-.auth-tabs button.active{background:var(--paper);color:var(--deep);box-shadow:0 1px 4px #183f3b18}
 .login-card label{font-size:12px;font-weight:700;color:var(--deep);margin-top:5px}
 .login-card input{width:100%;padding:11px 12px;background:#fff;border:1px solid var(--line);border-radius:5px;color:var(--ink)}
 .login-submit{justify-content:center;margin-top:8px}
-.auth-note{text-align:center;color:var(--muted);font-size:11px;line-height:1.5}
 .form-error,.api-error{padding:11px 13px;background:#fff0ed;color:#9a4937;border:1px solid #f0d3ca;font-size:12px;line-height:1.5}
 .api-error{margin:0 0 18px}
 .topbar-actions .user-card{border:0;padding:0;margin:0;gap:8px}
@@ -36,9 +32,138 @@
 .patient-profile-grid strong,.patient-profile-grid p{margin:0;color:var(--ink);font-size:13px;line-height:1.6;white-space:pre-wrap}
 .form-actions,.row-actions{display:flex;align-items:center;gap:9px}
 .form-actions{margin-top:18px}
+.follow-up-intro{margin:0 0 14px}
+.follow-up-layout{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(280px,.9fr);gap:16px;align-items:start}
+.follow-up-list-panel,.follow-up-preview-panel{min-width:0;padding:20px}
+.follow-up-list-panel .panel-heading h3,.follow-up-preview-panel .panel-heading h3{margin:5px 0 0;color:var(--deep);font:600 19px Fraunces,Georgia,serif}
+.follow-up-list-panel .panel-heading,.follow-up-preview-panel .panel-heading{margin-bottom:14px}
+.follow-up-table-scroll{overflow:auto}
+.follow-up-table-scroll table{min-width:590px}
+.follow-up-table-scroll tbody tr{cursor:pointer}
+.follow-up-row-selected{background:#f0f5ef}
+.follow-up-table-scroll td small{display:block;margin-top:4px;color:var(--muted);font-size:10px}
+.follow-up-select{padding:0;background:transparent;color:var(--deep);font-size:12px;font-weight:700;text-align:left}
+.follow-up-consent-on{background:#e1efe6;color:#28664f}
+.follow-up-preview-panel{display:grid;gap:13px}
+.follow-up-selected{display:grid;gap:4px;padding:12px;background:#f8f7f2}
+.follow-up-selected strong{color:var(--deep);font-size:13px}
+.follow-up-selected span{color:var(--muted);font-size:11px}
+.follow-up-generated{display:grid;gap:7px}
+.follow-up-generated label{color:var(--deep);font-size:12px;font-weight:700}
+.follow-up-generated textarea{width:100%;padding:10px 11px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink);font:13px/1.6 Inter,Arial,sans-serif;resize:vertical}
+.follow-up-preview-actions{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.follow-up-preview-actions>span{color:var(--muted);font-size:10px}
+.follow-up-preview-actions button{display:flex;align-items:center;gap:6px}
 .management-table{margin-top:8px}
 .management-table .table-description{display:block;max-width:320px;margin-top:4px;color:var(--muted);white-space:normal;font-size:11px}
 .management-state{padding:20px;color:var(--muted);font-size:13px}
+.invoice-create-panel,.invoice-history-panel,.invoice-detail-panel{padding:20px;margin-bottom:16px}
+.invoice-create-panel .panel-heading,.invoice-history-panel .panel-heading,.invoice-detail-panel .panel-heading{margin-bottom:14px}
+.invoice-create-panel .panel-heading h3,.invoice-history-panel .panel-heading h3,.invoice-detail-panel .panel-heading h3{margin:5px 0 0;color:var(--deep);font:600 19px Fraunces,Georgia,serif}
+.invoice-form{display:grid;gap:14px}
+.invoice-form>label{display:grid;gap:7px;color:var(--deep);font-size:12px;font-weight:700}
+.invoice-form select{width:100%;padding:10px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink);font-size:13px}
+.invoice-patient-summary{display:grid;gap:4px;padding:12px;background:#f8f7f2}
+.invoice-patient-summary strong{color:var(--deep);font-size:13px}
+.invoice-patient-summary span,.invoice-payment-note{color:var(--muted);font-size:11px}
+.invoice-source-meta{margin:0;color:var(--muted);font-size:11px}
+.invoice-source-meta strong{color:var(--deep)}
+.invoice-lines{display:grid;min-width:0}
+.invoice-line{display:grid;grid-template-columns:minmax(160px,1fr) minmax(100px,.6fr) 90px minmax(120px,.7fr);align-items:center;gap:12px;padding:10px 8px;border-bottom:1px solid #eeeae1;color:var(--ink);font-size:12px}
+.invoice-line> :last-child{text-align:right}
+.invoice-line-heading{color:var(--muted);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.invoice-line input{width:80px;padding:7px;border:1px solid var(--line);border-radius:4px;background:#fff;color:var(--ink)}
+.invoice-total{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 8px 4px;color:var(--deep);font-size:13px}
+.invoice-total strong{font-size:16px}
+.invoice-grand-total{border-top:1px solid var(--line)}
+.invoice-payment-note{margin:0}
+.invoice-table-scroll{overflow:auto}
+.invoice-table-scroll table{min-width:760px}
+.invoice-table-scroll tbody tr{cursor:pointer}
+.invoice-row-selected{background:#f0f5ef}
+.invoice-number-button{padding:0;background:none;color:var(--green);font-weight:700;text-decoration:underline;text-underline-offset:2px}
+.invoice-status{white-space:nowrap}
+.invoice-status.issued{background:#fff0dc;color:#875e1e}
+.invoice-status.partially_paid{background:#e8eff4;color:#42677e}
+.invoice-status.paid{background:#e1efe6;color:#28664f}
+.invoice-detail-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.invoice-payments{display:grid;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.invoice-payments h4{margin:0;color:var(--deep);font-size:12px}
+.invoice-payment-row{display:grid;gap:4px;padding:10px;background:#f8f7f2}
+.invoice-payment-row strong{color:var(--deep);font-size:12px}
+.invoice-payment-row span{color:var(--muted);font-size:10px}
+.cash-payment-dialog{display:grid;gap:10px}
+.cash-payment-dialog>p{margin:0;color:var(--muted);font-size:12px;line-height:1.6}
+.cash-payment-dialog .cash-payment-due{padding:12px;background:#f8f7f2;color:var(--deep)}
+.cash-payment-due strong{font-size:16px}
+.cash-method-options{border:1px solid var(--line);padding:12px}
+.cash-method-options legend{padding:0 5px;color:var(--deep);font-size:11px;font-weight:700}
+.cash-method-options label{display:flex;align-items:center;gap:8px;color:var(--ink);font-size:12px}
+.cash-payment-dialog .form-actions{justify-content:flex-end;flex-wrap:wrap}
+.qr-payment-dialog{display:grid;gap:12px;width:min(100%,520px);max-height:calc(100vh - 40px);overflow:auto}
+.qr-payment-dialog>p{margin:0;color:var(--muted);font-size:12px;line-height:1.6}
+.qr-image-frame{display:grid;place-items:center;min-height:220px;padding:12px;background:#fff;border:1px solid var(--line);border-radius:6px}
+.qr-image-frame img{width:min(100%,280px);height:auto;image-rendering:auto}
+.qr-image-frame p{margin:0;color:var(--muted);font-size:12px;text-align:center}
+.qr-transfer-details{display:grid;gap:8px;margin:0}
+.qr-transfer-details>div{display:flex;justify-content:space-between;gap:12px;padding:9px 11px;background:#f8f7f2}
+.qr-transfer-details dt{color:var(--muted);font-size:11px}
+.qr-transfer-details dd{margin:0;color:var(--deep);font-size:11px;font-weight:700;text-align:right;overflow-wrap:anywhere}
+.qr-pending-note{padding:11px;background:#fff0dc;color:#875e1e;font-size:11px;line-height:1.6}
+.qr-payment-dialog .form-actions{justify-content:flex-end}
+.chatbot-widget{position:fixed;right:24px;bottom:22px;z-index:30;display:grid;justify-items:end;gap:10px;font-family:Inter,Arial,sans-serif}
+.chatbot-launcher{display:flex;align-items:center;gap:8px;padding:12px 16px;border-radius:999px;background:var(--green);color:#fff;box-shadow:0 8px 28px #14232133;font-size:12px;font-weight:700}
+.chatbot-launcher:hover{background:var(--deep)}
+.chatbot-panel{width:min(390px,calc(100vw - 32px));height:min(560px,calc(100vh - 112px));display:grid;grid-template-rows:auto auto 1fr auto;overflow:hidden;background:var(--paper);border:1px solid var(--line);border-radius:12px;box-shadow:0 18px 55px #14232133}
+.chatbot-header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:15px 16px;background:var(--deep);color:#fff}
+.chatbot-header>div{display:grid;gap:4px}
+.chatbot-header strong{font-size:13px}
+.chatbot-header span{color:#d5e1dd;font-size:10px}
+.chatbot-close{display:grid;place-items:center;padding:6px;background:transparent;color:#fff;border-radius:5px}
+.chatbot-close:hover{background:#ffffff20}
+.chatbot-scope-note{padding:9px 13px;background:#f5f2e9;color:var(--muted);font-size:10px;line-height:1.5}
+.chatbot-messages{display:flex;flex-direction:column;gap:10px;overflow-y:auto;padding:14px;background:#fcfbf7}
+.chatbot-message{max-width:88%;padding:9px 11px;border-radius:10px;font-size:12px;line-height:1.55}
+.chatbot-message p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.chatbot-message.assistant{align-self:start;background:#eef3ee;color:var(--deep);border-bottom-left-radius:3px}
+.chatbot-message.user{align-self:end;background:var(--green);color:#fff;border-bottom-right-radius:3px}
+.chatbot-form{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line);background:#fff}
+.chatbot-form input{flex:1;min-width:0;padding:10px;border:1px solid var(--line);border-radius:7px;color:var(--ink);font-size:12px}
+.chatbot-form input:focus{outline:2px solid var(--coral);outline-offset:1px}
+.chatbot-form button{display:grid;place-items:center;width:40px;border-radius:7px;background:var(--green);color:#fff}
+.chatbot-form button:disabled{cursor:not-allowed;opacity:.5}
+.revenue-dashboard>.section-toolbar{align-items:center}
+.dashboard-timezone{padding:7px 10px;border-radius:999px;background:#e8eff4;color:#42677e;font-size:10px;font-weight:700}
+.dashboard-filter-panel{display:flex;align-items:end;gap:12px;flex-wrap:wrap;padding:16px;margin-bottom:16px}
+.dashboard-filter-panel label{display:grid;gap:5px;color:var(--deep);font-size:11px;font-weight:700}
+.dashboard-filter-panel input,.dashboard-filter-panel select{min-width:150px;padding:9px 10px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink);font:inherit}
+.dashboard-filter-summary{margin:0 0 3px auto;color:var(--muted);font-size:11px}
+.dashboard-metrics{grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:16px}
+.dashboard-metrics .metric-card strong{font-size:clamp(20px,3vw,30px);overflow-wrap:anywhere}
+.dashboard-chart-panel{min-width:0;padding:20px;margin-bottom:16px}
+.dashboard-chart-panel .panel-heading{margin-bottom:18px}
+.dashboard-chart-panel .panel-heading h3{margin:5px 0 0;color:var(--deep);font:600 19px Fraunces,Georgia,serif}
+.dashboard-chart-scroll{overflow-x:auto;padding-bottom:8px}
+.dashboard-bars{display:grid;grid-auto-columns:minmax(44px,1fr);grid-auto-flow:column;align-items:end;gap:7px;min-width:max-content;height:250px;padding:8px 4px 0;border-bottom:1px solid var(--line)}
+.dashboard-bar-column{height:100%;display:grid;grid-template-rows:22px 1fr 22px;justify-items:center;align-items:end;min-width:40px}
+.dashboard-bar-value{max-width:100%;overflow:hidden;color:var(--muted);font-size:9px;text-overflow:ellipsis;white-space:nowrap}
+.dashboard-bar-track{width:70%;height:100%;display:flex;align-items:flex-end;justify-content:center}
+.dashboard-bar{width:100%;min-height:0;border-radius:4px 4px 0 0;transition:height .2s ease}
+.dashboard-bar.revenue{background:linear-gradient(180deg,#6caa89,var(--green))}
+.dashboard-bar.visits{background:linear-gradient(180deg,#7fa9c2,#42677e)}
+.dashboard-bar-label{align-self:center;color:var(--muted);font-size:9px;white-space:nowrap}
+.dashboard-empty-chart{display:grid;place-items:center;min-height:160px;margin:0;color:var(--muted);font-size:13px}
+.dashboard-definition{margin:0 0 18px;color:var(--muted);font-size:11px;line-height:1.7}
+.dashboard-definition code{color:var(--deep);font-weight:700}
+.qr-reconciliation-form{display:grid;gap:12px;margin-top:15px}
+.qr-reconciliation-form>label{display:grid;gap:6px;color:var(--deep);font-size:12px;font-weight:700}
+.qr-reconciliation-form input[type="text"],.qr-reconciliation-form input:not([type]){width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink);font:inherit}
+.qr-reconciliation-form .qr-verification-check{display:flex;align-items:flex-start;gap:8px;color:var(--muted);font-weight:500;line-height:1.5}
+.qr-reconciliation-form .qr-verification-check input{margin-top:3px}
+.qr-cancellation-form{display:grid;gap:10px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.qr-cancellation-form .qr-verification-check{display:flex;align-items:flex-start;gap:8px;color:var(--muted);font-size:12px;line-height:1.5}
+.qr-cancellation-form .qr-verification-check input{margin-top:3px}
+.qr-cancellation-form .secondary-button{justify-self:start;color:#8d4e40}
 .pill.inactive{background:#f1eeea;color:#827970}
 .danger-button{color:#b34d3d}
 .cancel-appointment-button{padding:6px 9px;color:#a34c3d;font-size:10px;white-space:nowrap}
@@ -162,10 +287,84 @@
 .reception-visit-history strong,.reception-visit-history span,.reception-visit-history p{font-size:11px}
 .reception-visit-history strong{color:var(--deep)}
 .reception-visit-history span,.reception-visit-history p{color:var(--muted);margin:0}
+.main-content,.page-section,.management-page,.panel,.management-form{min-width:0}
+.page-section{width:100%}
+.primary-button,.secondary-button{min-height:44px}
+.icon-button{min-width:40px;min-height:40px}
+button:disabled{cursor:not-allowed;opacity:.62}
+.form-error,.form-success{border-radius:6px;line-height:1.5;overflow-wrap:anywhere}
+.form-actions{flex-wrap:wrap}
+.table-panel,.follow-up-table-scroll,.invoice-table-scroll{max-width:100%;overscroll-behavior-inline:contain}
 @media(max-width:700px){.form-grid{grid-template-columns:1fr}.form-grid .form-wide{grid-column:auto}.management-table td,.management-table th{padding:12px 10px}}
 @media(max-width:700px){.patient-profile-grid{grid-template-columns:1fr}}
 @media(max-width:900px){.main-content{padding:24px}.reception-layout{grid-template-columns:1fr}}
+@media(max-width:900px){.follow-up-layout{grid-template-columns:1fr}}
 @media(max-width:700px){.calendar-toolbar{flex-wrap:wrap}.calendar-toolbar strong{order:-1;width:100%;text-align:center}.emr-selection-grid{grid-template-columns:1fr}.section-toolbar{gap:12px;align-items:flex-start}.calendar-actions{justify-content:flex-end}}
 @media(max-width:850px){.reception-results-layout{grid-template-columns:1fr}}
 @media(max-width:560px){.reception-search{padding:15px}.reception-search-controls{flex-wrap:wrap}.reception-search-controls input{flex-basis:calc(100% - 32px)}.reception-search-controls .primary-button{width:100%;justify-content:center}.reception-profile-grid{grid-template-columns:1fr}.reception-profile-grid .profile-wide{grid-column:auto}.reception-visit-history>div{flex-direction:column;gap:4px}}
 @media(max-width:560px){.login-card{padding:27px 22px}.topbar-actions .user-card>div:nth-child(2){display:none}.topbar-actions .user-card .secondary-button{font-size:10px;padding:7px}}
+@media(max-width:700px){.invoice-line{grid-template-columns:minmax(120px,1fr) minmax(85px,.7fr) 72px minmax(100px,.7fr);gap:7px;padding:9px 4px;font-size:10px}.invoice-line input{width:68px}.invoice-create-panel,.invoice-history-panel,.invoice-detail-panel{padding:15px}}
+@media(max-width:560px){.chatbot-widget{right:12px;bottom:12px}.chatbot-panel{height:min(560px,calc(100vh - 90px))}}
+@media(max-width:700px){.dashboard-filter-panel{align-items:stretch}.dashboard-filter-panel label{flex:1 1 140px}.dashboard-filter-panel input,.dashboard-filter-panel select{width:100%;min-width:0}.dashboard-filter-summary{width:100%;margin:0}.dashboard-chart-panel{padding:15px}}
+@media(max-width:560px){.dashboard-metrics{grid-template-columns:1fr}}
+@media(max-width:560px){
+  .main-content{min-width:0}
+  .section-toolbar .primary-button{font-size:12px;padding:10px 12px}
+  .topbar{display:grid;grid-template-columns:40px minmax(0,1fr);gap:8px}
+  .topbar-actions{grid-column:2;justify-content:flex-end;gap:6px}
+  .topbar-actions>.icon-button{display:none}
+  .section-toolbar{flex-wrap:wrap}
+  .section-toolbar>div:first-child{min-width:0;flex:1 1 100%}
+  .section-toolbar>.pill{flex-shrink:0}
+  .calendar-actions{width:100%}
+  .calendar-actions button{flex:1 1 145px;justify-content:center}
+  .calendar-navigation{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:100%}
+  .calendar-navigation .secondary-button{justify-content:center;padding:9px 6px;font-size:10px}
+  .calendar-filter{width:100%;justify-content:space-between}
+  .calendar-filter select{max-width:none;flex:1}
+  .calendar-view-switch{flex:1}
+  .calendar-view-switch .secondary-button{flex:1;justify-content:center}
+  .appointment-row{display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:8px;align-items:center}
+  .appointment-row .time{grid-column:1/-1;width:auto;white-space:normal}
+  .appointment-row .appointment-info{min-width:0}
+  .appointment-row .status{justify-self:end}
+  .appointment-row .cancel-appointment-button{grid-column:1/-1;justify-self:start;white-space:normal}
+  .invoice-line-heading{display:none}
+  .invoice-line{grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;padding:12px 4px;font-size:11px}
+  .invoice-line>:first-child{min-width:0;overflow-wrap:anywhere}
+  .invoice-line input{width:72px}
+  .form-actions>.primary-button,.form-actions>.secondary-button{flex:1 1 140px;justify-content:center}
+  .follow-up-preview-actions{align-items:flex-start;flex-wrap:wrap}
+  .follow-up-preview-actions>span{flex:1 1 100%}
+  .chatbot-panel{height:min(560px,calc(100dvh - 90px))}
+  .qr-transfer-details>div{align-items:flex-start}
+  .cancellation-dialog{max-height:calc(100dvh - 32px);overflow-y:auto;padding:20px}
+}
+@media(max-width:1200px){
+  .calendar-toolbar{flex-wrap:wrap}
+  .calendar-toolbar>strong{order:-1;width:100%;text-align:center}
+}
+@media(max-width:900px){
+  .sidebar-backdrop{display:block;position:fixed;inset:0;z-index:4;background:#14232188}
+  .sidebar{z-index:5}
+}
+
+.radiograph-upload-panel{padding:20px;margin-bottom:18px}
+.radiograph-upload-panel>p{max-width:760px;color:var(--muted);font-size:12px;line-height:1.6}
+.radiograph-upload-panel form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:end}
+.radiograph-upload-panel label{display:grid;gap:6px;color:var(--deep);font-size:12px;font-weight:700}
+.radiograph-upload-panel select,.radiograph-upload-panel input[type=file]{width:100%;min-width:0;padding:9px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink)}
+.radiograph-upload-panel .primary-button{justify-self:start}
+.radiograph-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
+.radiograph-card{overflow:hidden}
+.radiograph-card img,.radiograph-image-loading{display:grid;width:100%;height:210px;object-fit:contain;background:#172321}
+.radiograph-image-loading{place-items:center;color:#fff;font-size:12px}
+.radiograph-card>div:last-child{display:grid;gap:5px;padding:12px}
+.radiograph-card strong{overflow-wrap:anywhere;color:var(--deep);font-size:12px}
+.radiograph-card span{color:var(--muted);font-size:10px}
+@media(max-width:700px){.radiograph-upload-panel form{grid-template-columns:1fr}.radiograph-upload-panel .primary-button{width:100%;justify-content:center}}
+.tooth-patient-select{display:grid;gap:6px;max-width:420px;margin:0 0 16px;color:var(--deep);font-size:12px;font-weight:700}
+.tooth-patient-select select,.tooth-detail select,.tooth-detail textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink)}
+.tooth-detail form{display:grid;gap:12px}
+.tooth-detail form label{display:grid;gap:6px;color:var(--deep);font-size:12px;font-weight:700}
+.tooth.restored .tooth-shape,.dot.restored{background:#6f8fa8}

@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from datetime import timedelta
 
 from django.db.models import Q
@@ -42,10 +43,10 @@ class AppointmentSerializer(serializers.ModelSerializer):
         )
         if not doctor or not service or not appointment_date:
             raise serializers.ValidationError(
-                "Vui lòng cung cấp bệnh nhân, bác sĩ, dịch vụ và thời gian hẹn."
+                "Patient, dentist, service and appointment time are required."
             )
         if not service.is_active:
-            raise serializers.ValidationError({"service": "Dịch vụ này hiện không hoạt động."})
+            raise serializers.ValidationError({"service": "This service is inactive."})
 
         local_start = timezone.localtime(appointment_date)
         local_end = local_start + timedelta(minutes=service.duration_minutes)
@@ -59,12 +60,12 @@ class AppointmentSerializer(serializers.ModelSerializer):
             end_time__gte=local_end.time(),
         ).exists():
             raise serializers.ValidationError(
-                {"appointment_date": "Bác sĩ không có ca làm vào thời gian này."}
+                {"appointment_date": "The dentist is not scheduled for this time."}
             )
 
         if not self._doctor_can_manage(doctor):
             raise serializers.ValidationError(
-                {"doctor": "Bác sĩ chỉ có thể quản lý lịch hẹn của chính mình."}
+                {"doctor": "Dentists can only manage their own appointments."}
             )
 
         for existing in Appointment.objects.filter(
@@ -78,7 +79,7 @@ class AppointmentSerializer(serializers.ModelSerializer):
             existing_end = existing_start + timedelta(minutes=existing_duration)
             if local_start < existing_end and existing_start < local_end:
                 raise serializers.ValidationError(
-                    {"appointment_date": "Khung giờ này bị trùng với một lịch hẹn khác."}
+                    {"appointment_date": "This time overlaps another appointment."}
                 )
         return attrs
 
@@ -117,6 +118,7 @@ class MedicalRecordSerializer(serializers.ModelSerializer):
             "id", "appointment", "patient_name", "appointment_date", "diagnosis",
             "treatment_plan", "prescription", "notes", "teeth", "tooth_codes",
             "services", "created_at",
+            "follow_up_date",
         ]
         read_only_fields = ["id", "created_at"]
 
@@ -128,18 +130,28 @@ class MedicalRecordSerializer(serializers.ModelSerializer):
         if appointment:
             if appointment.status == Appointment.Status.CANCELLED:
                 raise serializers.ValidationError(
-                    {"appointment": "Không thể lập bệnh án cho lịch hẹn đã bị hủy."}
+                    {"appointment": "Cancelled appointments cannot receive a medical record."}
+                )
+            follow_up_date = attrs.get(
+                "follow_up_date",
+                self.instance.follow_up_date if self.instance else None,
+            )
+            if follow_up_date and follow_up_date < timezone.localdate(
+                appointment.appointment_date
+            ):
+                raise serializers.ValidationError(
+                    {"follow_up_date": "Follow-up date cannot be before the appointment."}
                 )
             if any(tooth.dentition_type != appointment.patient.dentition_type for tooth in teeth):
                 raise serializers.ValidationError(
-                    {"teeth": "Răng được chọn phải phù hợp với bộ răng của bệnh nhân."}
+                    {"teeth": "Selected teeth must match the patient's dentition type."}
                 )
         return attrs
 
     def validate_appointment(self, appointment):
         request = self.context.get("request")
         if request is None:
-            raise serializers.ValidationError("Yêu cầu ngữ cảnh người dùng đã xác thực.")
+            raise serializers.ValidationError("Authenticated user context is required.")
         clinic_profile = getattr(request.user, "clinic_profile", None)
         if (
             not request.user.is_superuser
@@ -154,11 +166,61 @@ class MedicalRecordSerializer(serializers.ModelSerializer):
             )
         ):
             raise serializers.ValidationError(
-                "Bạn chỉ có thể lập hồ sơ cho lịch hẹn được giao cho mình."
+                "You can only document appointments assigned to you."
             )
         return appointment
 
     def validate_services(self, services):
         if any(not service.is_active for service in services):
-            raise serializers.ValidationError("Không thể chỉ định dịch vụ đã ngừng hoạt động.")
+            raise serializers.ValidationError("Inactive services cannot be prescribed.")
         return services
+
+
+class FollowUpAppointmentSerializer(serializers.ModelSerializer):
+    appointment_id = serializers.IntegerField(read_only=True)
+    appointment_date = serializers.DateTimeField(
+        source="appointment.appointment_date",
+        read_only=True,
+    )
+    patient_name = serializers.CharField(
+        source="appointment.patient.full_name",
+        read_only=True,
+    )
+    patient_code = serializers.CharField(
+        source="appointment.patient.patient_code",
+        read_only=True,
+    )
+    dentist_name = serializers.SerializerMethodField()
+    sms_reminder_consent = serializers.BooleanField(
+        source="appointment.patient.sms_reminder_consent",
+        read_only=True,
+    )
+
+    class Meta:
+        model = MedicalRecord
+        fields = [
+            "id",
+            "appointment_id",
+            "appointment_date",
+            "patient_name",
+            "patient_code",
+            "dentist_name",
+            "follow_up_date",
+            "sms_reminder_consent",
+        ]
+        read_only_fields = fields
+
+    def get_dentist_name(self, record):
+        user = record.appointment.doctor.clinic_user.user
+        return user.get_full_name() or user.username
+
+
+class FollowUpReminderRequestSerializer(serializers.Serializer):
+    medical_record_id = serializers.IntegerField(min_value=1)
+
+    def to_internal_value(self, data):
+        if isinstance(data, Mapping) and set(data) - set(self.fields):
+            raise serializers.ValidationError(
+                {"detail": "Only medical_record_id is accepted."}
+            )
+        return super().to_internal_value(data)
