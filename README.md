@@ -1,6 +1,6 @@
 ﻿# Dental Management System (DMS)
 
-MVP runnable cho phòng khám nha khoa, gồm Django REST Framework backend và React/Vite frontend.
+MVP chạy được cho phòng khám nha khoa, gồm backend Django REST Framework và frontend React/Vite; giao diện và thông báo mặc định bằng tiếng Việt.
 
 ## 1. Cài đặt yêu cầu
 

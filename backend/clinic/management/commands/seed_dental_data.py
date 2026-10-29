@@ -27,14 +27,14 @@ User = get_user_model()
 
 
 class Command(BaseCommand):
-    help = "Create idempotent demo accounts, patients, services, appointments and invoices"
+    help = "Tạo tài khoản, bệnh nhân, dịch vụ, lịch hẹn và hóa đơn mẫu (có thể chạy lặp lại)"
 
     @transaction.atomic
     def handle(self, *args, **options):
         role_specs = [
-            ("ADMIN", "Administrator", "Clinic system administrator"),
-            ("DENTIST", "Dentist", "Dental care provider"),
-            ("RECEPTIONIST", "Receptionist", "Front desk and appointment management"),
+            ("ADMIN", "Quản trị viên", "Quản trị hệ thống phòng khám"),
+            ("DENTIST", "Bác sĩ", "Bác sĩ nha khoa"),
+            ("RECEPTIONIST", "Lễ tân", "Tiếp đón và quản lý lịch hẹn"),
         ]
         roles = {
             code: Role.objects.update_or_create(code=code, defaults={"name": name, "description": description})[0]
@@ -42,10 +42,10 @@ class Command(BaseCommand):
         }
 
         staff_specs = [
-            ("admin", "DMS", "Administrator", "ADMIN", "0901000001", ""),
-            ("doctor1", "Le Thu", "Ha", "DENTIST", "0901000002", "DMS-DOC-001"),
-            ("doctor2", "Pham", "Quoc", "DENTIST", "0901000003", "DMS-DOC-002"),
-            ("receptionist1", "Nguyen", "Lan", "RECEPTIONIST", "0901000004", ""),
+            ("admin", "DMS", "Quản trị viên", "ADMIN", "0901000001", ""),
+            ("doctor1", "Lê Thu", "Hà", "DENTIST", "0901000002", "DMS-DOC-001"),
+            ("doctor2", "Phạm", "Quốc", "DENTIST", "0901000003", "DMS-DOC-002"),
+            ("receptionist1", "Nguyễn", "Lan", "RECEPTIONIST", "0901000004", ""),
         ]
         staff = {}
         admin_password = os.environ.get("DMS_SEED_ADMIN_PASSWORD")
@@ -80,7 +80,7 @@ class Command(BaseCommand):
                     clinic_user=clinic_user,
                     defaults={
                         "license_number": license_number,
-                        "specialization": "General dentistry",
+                        "specialization": "Nha khoa tổng quát",
                     },
                 )
 
@@ -98,11 +98,11 @@ class Command(BaseCommand):
             )
 
         patient_specs = [
-            ("DMS-0001", "Nguyen Minh Anh", "0901234567", Patient.ADULT, "Penicillin"),
-            ("DMS-0002", "Tran Gia Bao", "0912345678", Patient.CHILD, ""),
-            ("DMS-0003", "Le Thu Phuong", "0985552026", Patient.ADULT, ""),
-            ("DMS-0004", "Pham Duc Minh", "0971112233", Patient.ADULT, ""),
-            ("DMS-0005", "Vo Khanh Linh", "0962223344", Patient.CHILD, ""),
+            ("DMS-0001", "Nguyễn Minh Anh", "0901234567", Patient.ADULT, "Penicillin"),
+            ("DMS-0002", "Trần Gia Bảo", "0912345678", Patient.CHILD, ""),
+            ("DMS-0003", "Lê Thu Phương", "0985552026", Patient.ADULT, ""),
+            ("DMS-0004", "Phạm Đức Minh", "0971112233", Patient.ADULT, ""),
+            ("DMS-0005", "Võ Khánh Linh", "0962223344", Patient.CHILD, ""),
         ]
         patients = {}
         for code, name, phone, dentition, allergies in patient_specs:
@@ -117,11 +117,11 @@ class Command(BaseCommand):
             )
 
         service_specs = [
-            ("CONSULT", "Dental consultation", Decimal("200000"), 30),
-            ("CLEANING", "Scaling and polishing", Decimal("500000"), 45),
-            ("FILLING", "Tooth filling", Decimal("800000"), 60),
-            ("EXTRACTION", "Simple extraction", Decimal("700000"), 45),
-            ("XRAY", "Dental X-ray", Decimal("150000"), 15),
+            ("CONSULT", "Khám tư vấn nha khoa", Decimal("200000"), 30),
+            ("CLEANING", "Cạo vôi và đánh bóng răng", Decimal("500000"), 45),
+            ("FILLING", "Trám răng", Decimal("800000"), 60),
+            ("EXTRACTION", "Nhổ răng đơn giản", Decimal("700000"), 45),
+            ("XRAY", "Chụp X-quang răng", Decimal("150000"), 15),
         ]
         services = {}
         for code, name, price, duration in service_specs:
@@ -143,8 +143,8 @@ class Command(BaseCommand):
             start_at=start,
             defaults={
                 "doctor": staff["doctor1"].doctor_profile,
-                "dentist_name": "Dr. Le Thu Ha",
-                "room": "Room 01",
+                "dentist_name": "Bác sĩ Lê Thu Hà",
+                "room": "Phòng 01",
                 "end_at": start + timedelta(minutes=45),
                 "status": Appointment.CONFIRMED,
             },
@@ -162,7 +162,7 @@ class Command(BaseCommand):
             defaults={
                 "service": services["CLEANING"],
                 "status": ScheduledAppointment.Status.CONFIRMED,
-                "notes": "Seeded cleaning appointment",
+                "notes": "Lịch hẹn cạo vôi răng mẫu",
             },
         )
 
@@ -185,7 +185,7 @@ class Command(BaseCommand):
         )
         plan, _ = TreatmentPlan.objects.get_or_create(
             patient=patients["DMS-0001"],
-            title="Routine dental care",
+            title="Chăm sóc răng định kỳ",
             defaults={
                 "dentist": staff["doctor1"].doctor_profile,
                 "status": TreatmentPlan.ACTIVE,
@@ -205,12 +205,12 @@ class Command(BaseCommand):
 
         self.stdout.write(
             self.style.SUCCESS(
-                "Seed complete: 3 roles, 1 admin, 2 dentists, 1 receptionist, "
-                "5 patients, 5 services, 52 teeth, and related demo records."
+                "Đã tạo dữ liệu mẫu: 3 vai trò, 1 quản trị viên, 2 bác sĩ, 1 lễ tân, "
+                "5 bệnh nhân, 5 dịch vụ, 52 răng và các hồ sơ liên quan."
             )
         )
         if not User.objects.get(username="admin").has_usable_password():
             self.stdout.write(
-                "The seeded admin has no usable password. Set DMS_SEED_ADMIN_PASSWORD before seeding, "
-                "or run `python manage.py changepassword admin`."
+                "Tài khoản quản trị mẫu chưa có mật khẩu sử dụng được. Hãy đặt DMS_SEED_ADMIN_PASSWORD "
+                "trước khi tạo dữ liệu mẫu hoặc chạy `python manage.py changepassword admin`."
             )

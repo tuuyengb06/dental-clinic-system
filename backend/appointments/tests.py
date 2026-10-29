@@ -74,7 +74,7 @@ class AppointmentCancellationApiTests(TestCase):
         response = self.cancel(appointment)
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(str(response.data["status"]), "This appointment is already cancelled.")
+        self.assertEqual(str(response.data["status"]), "Lịch hẹn này đã được hủy.")
 
     def test_completed_appointment_cannot_be_cancelled(self):
         appointment = self.create_appointment(Appointment.Status.COMPLETED)
@@ -84,7 +84,7 @@ class AppointmentCancellationApiTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(
             str(response.data["status"]),
-            "Only pending or confirmed appointments can be cancelled.",
+            "Chỉ có thể hủy lịch đang chờ xác nhận hoặc đã xác nhận.",
         )
         appointment.refresh_from_db()
         self.assertEqual(appointment.status, Appointment.Status.COMPLETED)
@@ -194,7 +194,7 @@ class MedicalRecordApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("Selected teeth must match", str(response.data["teeth"]))
+        self.assertIn("Răng được chọn phải phù hợp", str(response.data["teeth"]))
         self.assertFalse(MedicalRecord.objects.exists())
 
     def test_dentist_cannot_create_record_for_another_dentists_appointment(self):
@@ -226,5 +226,5 @@ class MedicalRecordApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("only document appointments assigned to you", str(response.data["appointment"]))
+        self.assertIn("chỉ có thể lập hồ sơ cho lịch hẹn được giao", str(response.data["appointment"]))
         self.assertFalse(MedicalRecord.objects.exists())

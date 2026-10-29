@@ -51,11 +51,11 @@ class PatientViewSet(viewsets.ModelViewSet):
 
         search_term = self.request.query_params["search"].strip()
         if not search_term:
-            raise ValidationError({"search": "Enter a patient code, name, or phone number."})
+            raise ValidationError({"search": "Vui lòng nhập mã bệnh nhân, họ tên hoặc số điện thoại."})
         if len(search_term) > 100:
-            raise ValidationError({"search": "Search must be 100 characters or fewer."})
+            raise ValidationError({"search": "Nội dung tìm kiếm không được vượt quá 100 ký tự."})
         if not re.fullmatch(r"[\w\s.\-+'()]+", search_term, flags=re.UNICODE):
-            raise ValidationError({"search": "Search contains unsupported characters."})
+            raise ValidationError({"search": "Nội dung tìm kiếm chứa ký tự không được hỗ trợ."})
         return queryset.filter(
             Q(patient_code__icontains=search_term)
             | Q(full_name__icontains=search_term)

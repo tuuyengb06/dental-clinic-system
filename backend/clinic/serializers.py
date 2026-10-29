@@ -28,7 +28,7 @@ class WorkScheduleSerializer(serializers.ModelSerializer):
         doctor = attrs.get("doctor", self.instance.doctor if self.instance else None)
         work_date = attrs.get("work_date", self.instance.work_date if self.instance else None)
         if start_time and end_time and start_time >= end_time:
-            raise serializers.ValidationError({"end_time": "End time must be later than start time."})
+            raise serializers.ValidationError({"end_time": "Giờ kết thúc phải sau giờ bắt đầu."})
         if doctor and work_date and start_time and end_time:
             overlapping = WorkSchedule.objects.filter(
                 doctor=doctor,
@@ -39,7 +39,7 @@ class WorkScheduleSerializer(serializers.ModelSerializer):
             if self.instance:
                 overlapping = overlapping.exclude(pk=self.instance.pk)
             if overlapping.exists():
-                raise serializers.ValidationError("This shift overlaps another work shift.")
+                raise serializers.ValidationError("Ca làm việc này bị trùng với một ca làm khác.")
         return attrs
 
 class DentalServiceSerializer(serializers.ModelSerializer):

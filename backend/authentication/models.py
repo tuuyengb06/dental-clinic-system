@@ -3,10 +3,10 @@ from django.db import models
 
 class User(AbstractUser):
     class Role(models.TextChoices):
-        ADMIN = 'Admin', 'Admin'
-        DOCTOR = 'Doctor', 'Doctor'
-        RECEPTIONIST = 'Receptionist', 'Receptionist'
-        PATIENT = 'Patient', 'Patient'
+        ADMIN = 'Admin', 'Quản trị viên'
+        DOCTOR = 'Doctor', 'Bác sĩ'
+        RECEPTIONIST = 'Receptionist', 'Lễ tân'
+        PATIENT = 'Patient', 'Bệnh nhân'
 
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.PATIENT)
     phone = models.CharField(max_length=15, blank=True, null=True)

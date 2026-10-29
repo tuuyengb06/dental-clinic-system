@@ -40,7 +40,7 @@ class Patient(models.Model):
     full_name = models.CharField(max_length=160)
     phone = models.CharField(max_length=30, blank=True)
     date_of_birth = models.DateField(null=True, blank=True)
-    dentition_type = models.CharField(max_length=10, choices=[(ADULT, "Adult"), (CHILD, "Child")], default=ADULT)
+    dentition_type = models.CharField(max_length=10, choices=[(ADULT, "Người lớn"), (CHILD, "Trẻ em")], default=ADULT)
     medical_history = models.TextField(blank=True)
     allergies = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -123,7 +123,7 @@ class TreatmentPlan(models.Model):
     ACTIVE = "ACTIVE"
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
-    STATUS_CHOICES = [(DRAFT, "Draft"), (ACTIVE, "Active"), (COMPLETED, "Completed"), (CANCELLED, "Cancelled")]
+    STATUS_CHOICES = [(DRAFT, "Bản nháp"), (ACTIVE, "Đang thực hiện"), (COMPLETED, "Hoàn thành"), (CANCELLED, "Đã hủy")]
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name="treatment_plans")
     dentist = models.ForeignKey(Doctor, on_delete=models.PROTECT, related_name="treatment_plans")
     title = models.CharField(max_length=180)
@@ -138,14 +138,14 @@ class TreatmentItem(models.Model):
     IN_PROGRESS = "IN_PROGRESS"
     DONE = "DONE"
     CANCELLED = "CANCELLED"
-    STATUS_CHOICES = [(PLANN_STATUS := PLANNED, "Planned"), (IN_PROGRESS, "In progress"), (DONE, "Done"), (CANCELLED, "Cancelled")] # simplified choices safely below
+    STATUS_CHOICES = [(PLANN_STATUS := PLANNED, "Đã lên kế hoạch"), (IN_PROGRESS, "Đang thực hiện"), (DONE, "Hoàn thành"), (CANCELLED, "Đã hủy")] # simplified choices safely below
     plan = models.ForeignKey(TreatmentPlan, on_delete=models.CASCADE, related_name="items")
     appointment = models.ForeignKey(Appointment, on_delete=models.SET_NULL, null=True, blank=True, related_name="treatment_items")
     service = models.ForeignKey(Service, on_delete=models.PROTECT, null=True, blank=True, related_name="treatment_items")
     procedure_name = models.CharField(max_length=180)
     tooth = models.ForeignKey(Tooth, on_delete=models.PROTECT, null=True, blank=True, related_name="treatment_items")
     cost = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0"))])
-    status = models.CharField(max_length=20, choices=[(PLANNED, "Planned"), (IN_PROGRESS, "In progress"), (DONE, "Done"), (CANCELLED, "Cancelled")], default=PLANNED)
+    status = models.CharField(max_length=20, choices=[(PLANNED, "Đã lên kế hoạch"), (IN_PROGRESS, "Đang thực hiện"), (DONE, "Hoàn thành"), (CANCELLED, "Đã hủy")], default=PLANNED)
 
 
 class Invoice(models.Model):
@@ -182,7 +182,7 @@ class Payment(models.Model):
     CASH = "CASH"
     CARD = "CARD"
     BANK_TRANSFER = "BANK_TRANSFER"
-    METHOD_CHOICES = [(CASH, "Cash"), (CARD, "Card"), (BANK_TRANSFER, "Bank transfer")]
+    METHOD_CHOICES = [(CASH, "Tiền mặt"), (CARD, "Thẻ"), (BANK_TRANSFER, "Chuyển khoản")]
     invoice = models.ForeignKey(Invoice, on_delete=models.PROTECT, related_name="payments")
     amount = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
     method = models.CharField(max_length=20, choices=METHOD_CHOICES, default=CASH)

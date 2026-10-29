@@ -69,13 +69,13 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             appointment = self.get_object()
             if appointment.status == Appointment.Status.CANCELLED:
-                raise ValidationError({"status": "This appointment is already cancelled."})
+                raise ValidationError({"status": "Lịch hẹn này đã được hủy."})
             if appointment.status not in (
                 Appointment.Status.PENDING,
                 Appointment.Status.CONFIRMED,
             ):
                 raise ValidationError(
-                    {"status": "Only pending or confirmed appointments can be cancelled."}
+                    {"status": "Chỉ có thể hủy lịch đang chờ xác nhận hoặc đã xác nhận."}
                 )
             appointment.status = Appointment.Status.CANCELLED
             appointment.save(update_fields=["status"])
