@@ -84,7 +84,7 @@ class Command(BaseCommand):
                     clinic_user=clinic_user,
                     defaults={
                         "license_number": license_number,
-                        "specialization": "General dentistry",
+                        "specialization": "Nha khoa tổng quát",
                     },
                 )
 
@@ -123,35 +123,35 @@ class Command(BaseCommand):
         service_specs = [
             (
                 "CONSULT",
-                "Dental consultation",
+                "Tư vấn nha khoa",
                 "Bác sĩ kiểm tra tình trạng răng miệng và trao đổi với bệnh nhân về nhu cầu khám.",
                 Decimal("200000"),
                 30,
             ),
             (
                 "CLEANING",
-                "Scaling and polishing",
+                "Cạo vôi và đánh bóng răng",
                 "Làm sạch cao răng và đánh bóng bề mặt răng theo chỉ định của bác sĩ.",
                 Decimal("500000"),
                 45,
             ),
             (
                 "FILLING",
-                "Tooth filling",
+                "Trám răng",
                 "Sử dụng vật liệu nha khoa để phục hồi phần răng bị tổn thương phù hợp với đánh giá của bác sĩ.",
                 Decimal("800000"),
                 60,
             ),
             (
                 "EXTRACTION",
-                "Simple extraction",
+                "Nhổ răng đơn giản",
                 "Thủ thuật lấy răng được bác sĩ đánh giá là có thể nhổ đơn giản.",
                 Decimal("700000"),
                 45,
             ),
             (
                 "XRAY",
-                "Dental X-ray",
+                "Chụp X-quang răng",
                 "Chụp hình ảnh X-quang răng để hỗ trợ bác sĩ kiểm tra cấu trúc răng và vùng liên quan.",
                 Decimal("150000"),
                 15,

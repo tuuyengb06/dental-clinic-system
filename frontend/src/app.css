@@ -5,6 +5,7 @@
 .login-card .brand-mark{margin-bottom:8px}
 .login-card h1{font-family:Fraunces,Georgia,serif;color:var(--deep);font-size:29px;margin:0}
 .login-card>p{color:var(--muted);font-size:13px;margin:0 0 8px}
+.login-mode-toggle{justify-self:center}
 .login-card label{font-size:12px;font-weight:700;color:var(--deep);margin-top:5px}
 .login-card input{width:100%;padding:11px 12px;background:#fff;border:1px solid var(--line);border-radius:5px;color:var(--ink)}
 .login-submit{justify-content:center;margin-top:8px}
@@ -15,6 +16,15 @@
 .topbar-actions .user-card strong{color:var(--deep)}
 .topbar-actions .user-card span{color:var(--muted);text-transform:capitalize}
 .topbar-actions .user-card .secondary-button{padding:8px 10px}
+.account-dialog-backdrop{position:fixed;inset:0;z-index:40;display:grid;place-items:center;padding:20px;background:#14232166}
+.account-dialog{width:min(100%,460px);max-height:calc(100vh - 40px);overflow:auto;padding:24px;background:var(--paper);border:1px solid var(--line);box-shadow:0 20px 60px #14232133}
+.account-dialog-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.account-dialog-heading h2{margin:4px 0 0;color:var(--deep);font:600 22px Fraunces,Georgia,serif}
+.account-dialog .management-form{display:grid;gap:10px;padding:18px 0 0;margin:0}
+.account-dialog .management-form>label{display:grid;gap:6px;color:var(--deep);font-size:12px;font-weight:700}
+.account-dialog .management-form input{width:100%;padding:10px 11px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink);font-size:13px}
+.account-dialog-hint{margin:0;color:var(--muted);font-size:12px}
+.account-dialog .form-actions{justify-content:flex-end;flex-wrap:wrap}
 .management-page{max-width:1160px}
 .management-page>.form-error{margin-bottom:14px}
 .management-form{padding:22px;margin-bottom:16px}
@@ -30,6 +40,21 @@
 .patient-profile-grid>div{display:grid;gap:5px}
 .patient-profile-grid span{color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
 .patient-profile-grid strong,.patient-profile-grid p{margin:0;color:var(--ink);font-size:13px;line-height:1.6;white-space:pre-wrap}
+.patient-portal{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+.patient-portal>.hero-band,.patient-portal>.patient-portal-nav,.patient-portal>.form-error,.patient-portal>.form-success,.patient-portal>.patient-portal-booking,.patient-portal>.patient-portal-profile,.patient-portal>.patient-portal-appointments,.patient-portal>.patient-portal-invoices{grid-column:1/-1}
+.patient-portal>.hero-band,.patient-portal>.patient-portal-profile,.patient-portal>.management-table{margin-bottom:0}
+.patient-portal-nav{display:flex;flex-wrap:wrap;gap:8px;margin-top:-4px}
+.patient-portal-nav a{padding:9px 12px;border:1px solid var(--line);border-radius:999px;background:var(--paper);color:var(--deep);font-size:11px;font-weight:700;text-decoration:none}
+.patient-portal-nav a:hover,.patient-portal-nav a:focus-visible{background:#e3eee6;border-color:#c8dacf}
+.patient-portal .patient-profile-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+.patient-portal .panel-heading{margin-bottom:14px}
+.patient-portal .panel-heading h3{margin:5px 0 0}
+.patient-portal .management-table{margin-top:0}
+.patient-portal .patient-record-list{padding:0}
+.patient-portal .patient-record-card{min-width:0;overflow-wrap:anywhere}
+.overview-page .metric-grid{width:100%}
+.dentist-overview .metric-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+.appointment-row .time{width:max-content;flex:0 0 auto;white-space:nowrap}
 .form-actions,.row-actions{display:flex;align-items:center;gap:9px}
 .form-actions{margin-top:18px}
 .follow-up-intro{margin:0 0 14px}
@@ -100,6 +125,13 @@
 .cash-method-options legend{padding:0 5px;color:var(--deep);font-size:11px;font-weight:700}
 .cash-method-options label{display:flex;align-items:center;gap:8px;color:var(--ink);font-size:12px}
 .cash-payment-dialog .form-actions{justify-content:flex-end;flex-wrap:wrap}
+.patient-record-list{display:grid;gap:12px;padding:14px}
+.patient-record-card{padding:14px;border:1px solid var(--line);border-radius:5px;background:#fff}
+.patient-record-card p{margin:8px 0 0;color:var(--ink);font-size:13px;line-height:1.6;white-space:pre-wrap}
+.patient-record-card ul{margin:10px 0 0;padding-left:22px;color:var(--ink);font-size:13px;line-height:1.8}
+.treatment-plan-card{margin:14px 0}
+.treatment-status-label{display:grid;gap:6px;color:var(--deep);font-size:12px;font-weight:700}
+.treatment-status-label select,.treatment-plan-card td select{padding:7px;border:1px solid var(--line);border-radius:4px;background:#fff;color:var(--ink)}
 .qr-payment-dialog{display:grid;gap:12px;width:min(100%,520px);max-height:calc(100vh - 40px);overflow:auto}
 .qr-payment-dialog>p{margin:0;color:var(--muted);font-size:12px;line-height:1.6}
 .qr-image-frame{display:grid;place-items:center;min-height:220px;padding:12px;background:#fff;border:1px solid var(--line);border-radius:6px}
@@ -128,8 +160,8 @@
 .chatbot-message.assistant{align-self:start;background:#eef3ee;color:var(--deep);border-bottom-left-radius:3px}
 .chatbot-message.user{align-self:end;background:var(--green);color:#fff;border-bottom-right-radius:3px}
 .chatbot-form{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line);background:#fff}
-.chatbot-form input{flex:1;min-width:0;padding:10px;border:1px solid var(--line);border-radius:7px;color:var(--ink);font-size:12px}
-.chatbot-form input:focus{outline:2px solid var(--coral);outline-offset:1px}
+.chatbot-form textarea{flex:1;min-width:0;min-height:40px;max-height:120px;resize:vertical;padding:10px;border:1px solid var(--line);border-radius:7px;color:var(--ink);font:inherit;font-size:12px}
+.chatbot-form textarea:focus{outline:2px solid var(--coral);outline-offset:1px}
 .chatbot-form button{display:grid;place-items:center;width:40px;border-radius:7px;background:var(--green);color:#fff}
 .chatbot-form button:disabled{cursor:not-allowed;opacity:.5}
 .revenue-dashboard>.section-toolbar{align-items:center}
@@ -192,7 +224,8 @@
 .timetable-grid.day-view{min-width:360px}
 .timetable-head,.timetable-row{display:grid;grid-template-columns:72px repeat(var(--calendar-day-count),minmax(125px,1fr))}
 .timetable-grid.day-view .timetable-head,.timetable-grid.day-view .timetable-row{grid-template-columns:72px minmax(220px,1fr)}
-.timetable-head{position:sticky;top:0;z-index:1;background:#f7f5ef;border-bottom:1px solid var(--line)}
+.timetable-header-row{position:sticky;top:0;z-index:2;background:#f7f5ef;border-bottom:1px solid var(--line)}
+.timetable-header-row .timetable-head{position:static;background:transparent;border-bottom:0}
 .timetable-head>div,.timetable-head{padding:10px 8px}
 .timetable-head:not(.timetable-time){display:flex;flex-direction:column;gap:3px;text-align:center}
 .timetable-head strong{color:var(--deep);font-size:11px}
@@ -297,6 +330,8 @@ button:disabled{cursor:not-allowed;opacity:.62}
 .table-panel,.follow-up-table-scroll,.invoice-table-scroll{max-width:100%;overscroll-behavior-inline:contain}
 @media(max-width:700px){.form-grid{grid-template-columns:1fr}.form-grid .form-wide{grid-column:auto}.management-table td,.management-table th{padding:12px 10px}}
 @media(max-width:700px){.patient-profile-grid{grid-template-columns:1fr}}
+@media(max-width:900px){.patient-portal{grid-template-columns:1fr}.patient-portal .patient-profile-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){.patient-portal .patient-profile-grid,.dentist-overview .metric-grid{grid-template-columns:1fr}.patient-portal-nav{gap:6px}.patient-portal-nav a{padding:8px 10px}}
 @media(max-width:900px){.main-content{padding:24px}.reception-layout{grid-template-columns:1fr}}
 @media(max-width:900px){.follow-up-layout{grid-template-columns:1fr}}
 @media(max-width:700px){.calendar-toolbar{flex-wrap:wrap}.calendar-toolbar strong{order:-1;width:100%;text-align:center}.emr-selection-grid{grid-template-columns:1fr}.section-toolbar{gap:12px;align-items:flex-start}.calendar-actions{justify-content:flex-end}}
@@ -325,7 +360,7 @@ button:disabled{cursor:not-allowed;opacity:.62}
   .calendar-view-switch{flex:1}
   .calendar-view-switch .secondary-button{flex:1;justify-content:center}
   .appointment-row{display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:8px;align-items:center}
-  .appointment-row .time{grid-column:1/-1;width:auto;white-space:normal}
+  .appointment-row .time{grid-column:1/-1;width:auto;white-space:nowrap}
   .appointment-row .appointment-info{min-width:0}
   .appointment-row .status{justify-self:end}
   .appointment-row .cancel-appointment-button{grid-column:1/-1;justify-self:start;white-space:normal}
@@ -339,6 +374,7 @@ button:disabled{cursor:not-allowed;opacity:.62}
   .chatbot-panel{height:min(560px,calc(100dvh - 90px))}
   .qr-transfer-details>div{align-items:flex-start}
   .cancellation-dialog{max-height:calc(100dvh - 32px);overflow-y:auto;padding:20px}
+  .account-dialog{max-height:calc(100dvh - 32px);padding:20px}
 }
 @media(max-width:1200px){
   .calendar-toolbar{flex-wrap:wrap}
@@ -346,7 +382,7 @@ button:disabled{cursor:not-allowed;opacity:.62}
 }
 @media(max-width:900px){
   .sidebar-backdrop{display:block;position:fixed;inset:0;z-index:4;background:#14232188}
-  .sidebar{z-index:5}
+  .sidebar{z-index:5;height:100dvh;overflow-y:auto;overscroll-behavior:contain}
 }
 
 .radiograph-upload-panel{padding:20px;margin-bottom:18px}
@@ -368,3 +404,12 @@ button:disabled{cursor:not-allowed;opacity:.62}
 .tooth-detail form{display:grid;gap:12px}
 .tooth-detail form label{display:grid;gap:6px;color:var(--deep);font-size:12px;font-weight:700}
 .tooth.restored .tooth-shape,.dot.restored{background:#6f8fa8}
+@media(max-width:600px){
+  .doctor-directory-table,.doctor-directory-table tbody,.doctor-directory-table tr,.doctor-directory-table td{display:block;width:100%}
+  .doctor-directory-table thead{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  .doctor-directory-table tbody tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:14px 10px;border-bottom:1px solid var(--line)}
+  .doctor-directory-table td{display:grid;gap:5px;min-width:0;padding:0;border:0;white-space:normal;overflow-wrap:anywhere}
+  .doctor-directory-table td::before{content:attr(data-label);color:var(--muted);font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+  .doctor-directory-table td:first-child,.doctor-directory-table td:last-child{grid-column:1/-1}
+  .doctor-directory-table .text-button{justify-self:start;padding:7px 10px;border:1px solid var(--line);border-radius:5px;background:#fff}
+}

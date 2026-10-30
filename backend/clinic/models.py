@@ -5,7 +5,6 @@ from pathlib import Path
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
-from authentication.models import User
 
 class Role(models.Model):
     code = models.CharField(max_length=30, unique=True)
@@ -39,6 +38,13 @@ class Doctor(models.Model):
 class Patient(models.Model):
     ADULT = "ADULT"
     CHILD = "CHILD"
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="patient_profile",
+    )
     patient_code = models.CharField(max_length=20, unique=True)
     full_name = models.CharField(max_length=160)
     phone = models.CharField(max_length=30, blank=True)
@@ -169,14 +175,21 @@ class TreatmentItem(models.Model):
     IN_PROGRESS = "IN_PROGRESS"
     DONE = "DONE"
     CANCELLED = "CANCELLED"
-    STATUS_CHOICES = [(PLANN_STATUS := PLANNED, "Planned"), (IN_PROGRESS, "In progress"), (DONE, "Done"), (CANCELLED, "Cancelled")] # simplified choices safely below
+    STATUS_CHOICES = [
+        (PLANNED, "Planned"),
+        (IN_PROGRESS, "In progress"),
+        (DONE, "Done"),
+        (CANCELLED, "Cancelled"),
+    ]
     plan = models.ForeignKey(TreatmentPlan, on_delete=models.CASCADE, related_name="items")
     appointment = models.ForeignKey(Appointment, on_delete=models.SET_NULL, null=True, blank=True, related_name="treatment_items")
     service = models.ForeignKey(Service, on_delete=models.PROTECT, null=True, blank=True, related_name="treatment_items")
     procedure_name = models.CharField(max_length=180)
     tooth = models.ForeignKey(Tooth, on_delete=models.PROTECT, null=True, blank=True, related_name="treatment_items")
     cost = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0"))])
-    status = models.CharField(max_length=20, choices=[(PLANNED, "Planned"), (IN_PROGRESS, "In progress"), (DONE, "Done"), (CANCELLED, "Cancelled")], default=PLANNED)
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default=PLANNED
+    )
 
 
 class Invoice(models.Model):

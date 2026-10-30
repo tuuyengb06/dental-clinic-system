@@ -10,6 +10,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from .ai_services import AIServiceCredentialsError, AIServiceUnavailableError
 from clinic.models import ClinicUser, Doctor, Patient, Role, Service, Tooth, WorkSchedule
 from .models import Appointment, MedicalRecord
 
@@ -177,6 +178,76 @@ class ChatbotApiTests(TestCase):
         self.assertNotIn(patient.medical_history, response.data["answer"])
         self.assertIn("liên hệ lễ tân", response.data["answer"])
 
+    @patch(
+        "appointments.chatbot.generate_project_consultation_answer",
+        return_value="Phân tích đề tài: hệ thống có các vai trò và chức năng chính.",
+    )
+    def test_chatbot_answers_the_four_project_consultation_topics(self, generate_answer):
+        questions = [
+            "Hãy phân tích bài toán quản lý nha khoa, xác định tác nhân, chức năng và giới hạn AI.",
+            "Hãy thiết kế cơ sở dữ liệu cho bệnh nhân, lịch hẹn, hồ sơ và hóa đơn, nêu khóa chính khóa ngoại.",
+            "Hãy đề xuất kiến trúc frontend, backend, database và AI, mô tả luồng dữ liệu.",
+            "Hãy thiết kế prompt AI tóm tắt hồ sơ điều trị, có cấu trúc input output.",
+        ]
+
+        for question in questions:
+            with self.subTest(question=question):
+                response = self.chat(question)
+
+                self.assertEqual(response.status_code, status.HTTP_200_OK)
+                self.assertEqual(response.data["intent"], "project_consultation")
+                self.assertIn("Phân tích đề tài", response.data["answer"])
+
+        self.assertEqual(
+            [call.args[0] for call in generate_answer.call_args_list],
+            questions,
+        )
+
+    @patch(
+        "appointments.chatbot.generate_project_consultation_answer",
+        return_value="Phần 1. Phân tích.\nPhần 2. Cơ sở dữ liệu.\nPhần 3. Kiến trúc.\nPhần 4. Prompt.",
+    )
+    def test_chatbot_routes_all_four_project_questions_in_one_message(self, generate_answer):
+        question = (
+            "Hãy phân tích yêu cầu cho hệ thống quản lý nha khoa có tích hợp AI, bao gồm "
+            "các tác nhân, chức năng chính, dữ liệu cần quản lý và giới hạn của AI.\n"
+            "Hãy đề xuất thiết kế cơ sở dữ liệu cho hệ thống quản lý nha khoa, gồm các "
+            "bảng, thuộc tính, khóa chính, khóa ngoại và mối quan hệ giữa các bảng.\n"
+            "Hãy đề xuất kiến trúc cho hệ thống quản lý nha khoa có tích hợp AI, gồm "
+            "Frontend, Backend, Database và AI Service. Mô tả chức năng và luồng dữ liệu "
+            "giữa các thành phần.\n"
+            "Hãy thiết kế prompt cho chức năng tóm tắt hồ sơ điều trị nha khoa, đảm bảo "
+            "AI chỉ sử dụng dữ liệu được cung cấp, không chẩn đoán và không thay thế bác sĩ."
+        )
+        self.assertGreater(len(question), 500)
+
+        response = self.chat(question)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["intent"], "project_consultation")
+        for section in ("Phần 1.", "Phần 2.", "Phần 3.", "Phần 4."):
+            self.assertIn(section, response.data["answer"])
+        generate_answer.assert_called_once_with(question)
+
+    @patch("appointments.chatbot.generate_project_consultation_answer")
+    def test_chatbot_does_not_send_personal_medical_questions_to_project_ai(self, generate_answer):
+        response = self.chat("Tôi bị đau răng, nên uống thuốc gì?")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["intent"], "out_of_scope")
+        generate_answer.assert_not_called()
+
+    @patch("appointments.chatbot.generate_project_consultation_answer")
+    def test_project_consultation_rejects_personal_identifiers(self, generate_answer):
+        response = self.chat(
+            "Hãy thiết kế prompt AI cho hồ sơ bệnh nhân, số điện thoại 0912345678."
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["intent"], "privacy_guard")
+        self.assertIn("xóa tên, số điện thoại", response.data["answer"])
+        generate_answer.assert_not_called()
+
     def test_chatbot_hands_off_urgent_medical_questions(self):
         response = self.chat("Tôi đau dữ dội và mặt đang sưng")
 
@@ -255,12 +326,40 @@ class ChatbotApiTests(TestCase):
         self.assertTrue(response.data["retryable"])
         self.assertNotIn("provider detail", str(response.data))
 
+    @patch(
+        "appointments.chatbot.generate_project_consultation_answer",
+        side_effect=AIServiceCredentialsError("Gemini rejected API credentials."),
+    )
+    def test_chatbot_explains_rejected_api_credentials_without_exposing_provider_details(
+        self, generate_answer
+    ):
+        response = self.chat("Hãy đề xuất kiến trúc frontend backend database và AI.")
+
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertEqual(response.data["code"], "ai_credentials_invalid")
+        self.assertIn("thu hồi khóa đã lộ", response.data["detail"])
+        self.assertNotIn("Gemini rejected API credentials", str(response.data))
+        generate_answer.assert_called_once()
+
+    @patch(
+        "appointments.chatbot.generate_project_consultation_answer",
+        side_effect=AIServiceUnavailableError("Gemini returned HTTP 429 after all attempts."),
+    )
+    def test_chatbot_identifies_gemini_rate_limits(self, generate_answer):
+        response = self.chat("Hãy đề xuất kiến trúc frontend backend database và AI.")
+
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertEqual(response.data["code"], "ai_rate_limited")
+        self.assertTrue(response.data["retryable"])
+        self.assertIn("quota", response.data["detail"])
+        generate_answer.assert_called_once()
+
     def test_chatbot_rejects_extra_patient_data_and_oversized_question(self):
         extra_data = self.chat(
             "Giá Dental check-up?",
             {"patient_id": 1, "medical_history": "private"},
         )
-        oversized = self.chat("a" * 501)
+        oversized = self.chat("a" * 4001)
 
         self.assertEqual(extra_data.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(oversized.status_code, status.HTTP_400_BAD_REQUEST)

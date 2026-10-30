@@ -1,0 +1,1 @@
+Tạo phần lời mời ngắn để nối vào câu nhắc tái khám. Chỉ trả về đúng một câu tiếng Việt, không thêm dấu ngoặc kép, nhãn, lời giải thích hoặc thông tin khác. Câu phải mời người nhận liên hệ phòng khám; không đưa ra ngày, giờ, số điện thoại, tên, mã bệnh nhân, dịch vụ, thông tin bệnh án hay lời khuyên y tế. Không dùng chữ số. Tối đa 28 ký tự Unicode.

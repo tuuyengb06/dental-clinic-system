@@ -16,10 +16,12 @@ from clinic.models import Doctor, Service, WorkSchedule
 from .models import Appointment
 from .ai_services import (
     AIServiceConfigurationError,
+    AIServiceCredentialsError,
     AIServiceError,
     AIServiceOutputError,
     AIServiceTimeoutError,
     AIServiceUnavailableError,
+    generate_project_consultation_answer,
     generate_service_explanation,
 )
 
@@ -35,10 +37,33 @@ EXPLANATION_DISCLAIMER = (
     "Thông tin chỉ mang tính tham khảo, không thay thế tư vấn hoặc chẩn đoán "
     "của bác sĩ."
 )
+MAX_CHAT_QUESTION_LENGTH = 4000
+PROJECT_CONSULTATION_PATTERN = re.compile(
+    r"\b(phan tich (bai toan|yeu cau)|"
+    r"yeu cau phan mem|"
+    r"thiet ke (co so du lieu|database|prompt|kien truc|he thong)|"
+    r"khoa chinh|khoa ngoai|"
+    r"luong du lieu|"
+    r"frontend|backend|"
+    r"use case|actor|"
+    r"gioi han cua ai|"
+    r"prompt|kien truc|"
+    r"co so du lieu|"
+    r"mo hinh du lieu)\b"
+)
+PROJECT_CONSULTATION_PERSONAL_DATA_PATTERN = re.compile(
+    r"(?<![\w.+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?![\w.+-])|"
+    r"(?<!\w)(?:\+?\d[\d\s().-]{7,}\d)(?!\w)|"
+    r"\b(so dien thoai|sdt|cccd|cmnd|ten benh nhan|ho ten benh nhan)\b"
+)
 
 
 class ChatQuestionSerializer(serializers.Serializer):
-    question = serializers.CharField(max_length=500, allow_blank=False, trim_whitespace=True)
+    question = serializers.CharField(
+        max_length=MAX_CHAT_QUESTION_LENGTH,
+        allow_blank=False,
+        trim_whitespace=True,
+    )
 
     def to_internal_value(self, data):
         if isinstance(data, Mapping) and set(data) != {"question"}:
@@ -301,6 +326,23 @@ class ChatbotAPIView(APIView):
             )
             return Response({"answer": answer, "intent": "handoff"})
 
+        is_project_consultation = bool(
+            PROJECT_CONSULTATION_PATTERN.search(normalized_question)
+        )
+        if (
+            is_project_consultation
+            and PROJECT_CONSULTATION_PERSONAL_DATA_PATTERN.search(question)
+        ):
+            return Response(
+                {
+                    "answer": (
+                        "Để bảo vệ quyền riêng tư, vui lòng xóa tên, số điện thoại, email "
+                        "hoặc thông tin hồ sơ bệnh nhân khỏi câu hỏi rồi gửi lại."
+                    ),
+                    "intent": "privacy_guard",
+                }
+            )
+
         try:
             services = list(
                 Service.objects.filter(is_active=True).order_by("name", "id")
@@ -325,7 +367,10 @@ class ChatbotAPIView(APIView):
                     normalized_question,
                 )
             )
-            if is_availability:
+            if is_project_consultation:
+                answer = generate_project_consultation_answer(question)
+                intent = "project_consultation"
+            elif is_availability:
                 answer = _availability_answer(question, services)
                 intent = "availability"
             elif is_price:
@@ -344,9 +389,10 @@ class ChatbotAPIView(APIView):
                     intent = "service_explanation"
             else:
                 answer = (
-                    "Mình chỉ hỗ trợ tra giá dịch vụ đang hoạt động và giờ khám còn trống "
-                    "theo ca làm/lịch hẹn hiện có. Mình không tư vấn chẩn đoán, xem hồ sơ bệnh nhân "
-                    "hay đặt lịch qua chat. Nếu cần việc khác, bạn vui lòng liên hệ lễ tân."
+                    "Mình có thể hỗ trợ tra giá dịch vụ, giờ khám còn trống, giải thích dịch vụ "
+                    "hoặc trả lời câu hỏi học tập về phân tích yêu cầu, cơ sở dữ liệu, kiến trúc "
+                    "và prompt AI của đề tài. Mình không chẩn đoán, tư vấn điều trị, xem hồ sơ "
+                    "bệnh nhân hay đặt lịch qua chat. Nếu cần hỗ trợ khác, vui lòng liên hệ lễ tân."
                 )
                 intent = "out_of_scope"
         except DatabaseError:
@@ -358,39 +404,52 @@ class ChatbotAPIView(APIView):
                 },
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        except AIServiceConfigurationError:
-            logger.error("Gemini service explanation is not configured.")
+        except AIServiceCredentialsError:
+            logger.error("Gemini rejected the configured API credentials.")
             return _explanation_error_response(
-                "ai_unavailable",
-                "Dịch vụ giải thích AI chưa được cấu hình. Vui lòng liên hệ quản trị viên.",
+                "ai_credentials_invalid",
+                "Gemini từ chối khóa API. Hãy thu hồi khóa đã lộ, tạo khóa mới và cấu hình lại trong tiến trình backend.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except AIServiceConfigurationError:
+            logger.error("Gemini configuration is missing or was rejected.")
+            return _explanation_error_response(
+                "ai_configuration_invalid",
+                "Cấu hình AI chưa hợp lệ. Kiểm tra tên model và khóa Gemini trong tiến trình backend.",
                 status.HTTP_503_SERVICE_UNAVAILABLE,
             )
         except AIServiceTimeoutError:
-            logger.warning("Gemini service explanation request timed out.")
+            logger.warning("Gemini chatbot request timed out.")
             return _explanation_error_response(
                 "ai_timeout",
                 "AI phản hồi quá thời gian chờ. Vui lòng thử lại.",
                 status.HTTP_504_GATEWAY_TIMEOUT,
                 retryable=True,
             )
-        except AIServiceUnavailableError:
-            logger.warning("Gemini service explanation is temporarily unavailable.")
+        except AIServiceUnavailableError as error:
+            logger.warning("Gemini chatbot is temporarily unavailable: %s", error)
+            rate_limited = "HTTP 429" in str(error)
             return _explanation_error_response(
-                "ai_unavailable",
-                "Dịch vụ AI đang tạm thời không khả dụng sau số lần thử tối đa. Vui lòng thử lại sau.",
+                "ai_rate_limited" if rate_limited else "ai_unavailable",
+                (
+                    "Gemini đang giới hạn yêu cầu hoặc quota đã hết. Kiểm tra quota và giới hạn "
+                    "của dự án trong Google AI Studio rồi thử lại."
+                    if rate_limited
+                    else "Gemini chưa phản hồi. Kiểm tra kết nối Internet của backend và trạng thái dịch vụ, rồi thử lại."
+                ),
                 status.HTTP_503_SERVICE_UNAVAILABLE,
                 retryable=True,
             )
-        except AIServiceOutputError:
-            logger.warning("Gemini service explanation returned invalid output.")
+        except AIServiceOutputError as error:
+            logger.warning("Gemini chatbot returned invalid output: %s", error)
             return _explanation_error_response(
                 "ai_generation_failed",
-                "AI trả về nội dung không hợp lệ. Vui lòng thử lại.",
+                "AI chưa trả về câu trả lời hoàn chỉnh. Vui lòng thử lại.",
                 status.HTTP_502_BAD_GATEWAY,
                 retryable=True,
             )
         except AIServiceError:
-            logger.warning("Gemini service explanation request failed.")
+            logger.warning("Gemini chatbot request failed.")
             return _explanation_error_response(
                 "ai_generation_failed",
                 "Không thể tạo giải thích do phản hồi không hợp lệ từ dịch vụ AI.",

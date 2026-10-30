@@ -3,7 +3,8 @@ name: dental-clinic-system
 services:
   backend:
     build:
-      context: ./backend
+      context: .
+      dockerfile: backend/Dockerfile
     environment:
       DMS_ALLOWED_HOSTS: localhost,127.0.0.1
       DMS_DEBUG: "false"

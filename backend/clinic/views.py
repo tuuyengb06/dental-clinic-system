@@ -30,6 +30,8 @@ from .models import (
     Service,
     Tooth,
     ToothCondition,
+    TreatmentItem,
+    TreatmentPlan,
     WorkSchedule,
 )
 from appointments.views import (
@@ -53,6 +55,8 @@ from .serializers import (
     RadiographSerializer,
     ToothSerializer,
     ToothConditionSerializer,
+    TreatmentItemSerializer,
+    TreatmentPlanSerializer,
     WorkScheduleSerializer,
 )
 
@@ -62,7 +66,19 @@ logger = logging.getLogger(__name__)
 class IsClinicAdminOrReadOnly(BasePermission):
     def has_permission(self, request, view):
         if request.method in ("GET", "HEAD", "OPTIONS"):
-            return request.user and request.user.is_authenticated
+            return bool(
+                request.user
+                and request.user.is_authenticated
+                and (
+                    request.user.is_superuser
+                    or getattr(request.user, "patient_profile", None)
+                    or (
+                        getattr(request.user, "clinic_profile", None)
+                        and request.user.clinic_profile.role.code
+                        in ("ADMIN", "DENTIST", "RECEPTIONIST")
+                    )
+                )
+            )
         clinic_profile = getattr(request.user, "clinic_profile", None)
         return bool(
             request.user
@@ -74,8 +90,74 @@ class IsClinicAdminOrReadOnly(BasePermission):
         )
 
 
+class IsTreatmentStaff(BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        clinic_profile = getattr(user, "clinic_profile", None)
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return bool(
+                user.is_superuser
+                or getattr(user, "patient_profile", None)
+                or (
+                    clinic_profile
+                    and clinic_profile.role.code in ("ADMIN", "DENTIST")
+                )
+            )
+        return bool(
+            user.is_superuser
+            or (clinic_profile and clinic_profile.role.code in ("ADMIN", "DENTIST"))
+        )
+
+
+class TreatmentPlanViewSet(viewsets.ModelViewSet):
+    serializer_class = TreatmentPlanSerializer
+    permission_classes = [IsTreatmentStaff]
+
+    def get_queryset(self):
+        queryset = TreatmentPlan.objects.select_related(
+            "patient", "dentist__clinic_user__user"
+        ).prefetch_related("items")
+        user = self.request.user
+        clinic_profile = getattr(user, "clinic_profile", None)
+        patient = getattr(user, "patient_profile", None)
+        if clinic_profile and clinic_profile.role.code == "DENTIST":
+            return queryset.filter(dentist__clinic_user=clinic_profile)
+        if patient:
+            return queryset.filter(patient=patient)
+        if user.is_superuser or (
+            clinic_profile and clinic_profile.role.code == "ADMIN"
+        ):
+            return queryset
+        return queryset.none()
+
+
+class TreatmentItemViewSet(viewsets.ModelViewSet):
+    serializer_class = TreatmentItemSerializer
+    permission_classes = [IsTreatmentStaff]
+
+    def get_queryset(self):
+        queryset = TreatmentItem.objects.select_related(
+            "plan__patient", "plan__dentist__clinic_user__user", "appointment",
+            "service", "tooth",
+        )
+        user = self.request.user
+        clinic_profile = getattr(user, "clinic_profile", None)
+        patient = getattr(user, "patient_profile", None)
+        if clinic_profile and clinic_profile.role.code == "DENTIST":
+            return queryset.filter(plan__dentist__clinic_user=clinic_profile)
+        if patient:
+            return queryset.filter(plan__patient=patient)
+        if user.is_superuser or (
+            clinic_profile and clinic_profile.role.code == "ADMIN"
+        ):
+            return queryset
+        return queryset.none()
+
+
 class PatientViewSet(viewsets.ModelViewSet):
-    queryset = Patient.objects.all()
+    queryset = Patient.objects.select_related("user")
     serializer_class = PatientSerializer
     permission_classes = [IsAppointmentStaff]
 
@@ -86,6 +168,15 @@ class PatientViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(
                 patient_appointments__doctor__clinic_user=clinic_profile
             ).distinct()
+        patient_profile = getattr(self.request.user, "patient_profile", None)
+        if patient_profile:
+            queryset = queryset.filter(pk=patient_profile.pk)
+        if (
+            not self.request.user.is_superuser
+            and not clinic_profile
+            and not patient_profile
+        ):
+            queryset = queryset.none()
         if "search" not in self.request.query_params:
             return queryset
 
@@ -230,13 +321,17 @@ class IsBillingStaff(BasePermission):
         user = request.user
         if not user or not user.is_authenticated:
             return False
-        if user.is_superuser:
-            return True
         clinic_profile = getattr(user, "clinic_profile", None)
-        return bool(
-            clinic_profile
-            and clinic_profile.role.code in ("ADMIN", "RECEPTIONIST")
-        )
+        clinic_role = clinic_profile.role.code if clinic_profile else None
+        if getattr(view, "action", None) == "available_records":
+            return bool(user.is_superuser or clinic_role in ("ADMIN", "RECEPTIONIST"))
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return bool(
+                user.is_superuser
+                or clinic_role in ("ADMIN", "RECEPTIONIST")
+                or getattr(user, "patient_profile", None)
+            )
+        return bool(user.is_superuser or clinic_role in ("ADMIN", "RECEPTIONIST"))
 
 
 class InvoiceViewSet(viewsets.ModelViewSet):
@@ -244,12 +339,20 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "head", "options"]
 
     def get_queryset(self):
-        return Invoice.objects.select_related("patient").prefetch_related(
+        queryset = Invoice.objects.select_related("patient").prefetch_related(
             "items__service",
             "payments__received_by__user",
             "payments__cancelled_by",
             "payments__verification__verified_by",
         ).order_by("-issued_at", "-id")
+        patient = getattr(self.request.user, "patient_profile", None)
+        if patient:
+            return queryset.filter(patient=patient)
+        if not self.request.user.is_superuser and not getattr(
+            self.request.user, "clinic_profile", None
+        ):
+            return queryset.none()
+        return queryset
 
     def get_serializer_class(self):
         if self.action == "create":
