@@ -47,6 +47,14 @@ class AppointmentSerializer(serializers.ModelSerializer):
             )
         if not service.is_active:
             raise serializers.ValidationError({"service": "This service is inactive."})
+        request = self.context.get("request")
+        patient_profile = getattr(
+            getattr(request, "user", None), "patient_profile", None
+        )
+        if patient_profile and patient != patient_profile:
+            raise serializers.ValidationError(
+                {"patient": "Bạn chỉ có thể đặt lịch cho hồ sơ của mình."}
+            )
 
         local_start = timezone.localtime(appointment_date)
         local_end = local_start + timedelta(minutes=service.duration_minutes)
@@ -63,7 +71,7 @@ class AppointmentSerializer(serializers.ModelSerializer):
                 {"appointment_date": "The dentist is not scheduled for this time."}
             )
 
-        if not self._doctor_can_manage(doctor):
+        if not self._doctor_can_manage(doctor, patient):
             raise serializers.ValidationError(
                 {"doctor": "Dentists can only manage their own appointments."}
             )
@@ -83,7 +91,7 @@ class AppointmentSerializer(serializers.ModelSerializer):
                 )
         return attrs
 
-    def _doctor_can_manage(self, doctor):
+    def _doctor_can_manage(self, doctor, patient):
         request = self.context.get("request")
         if request is None:
             return False
@@ -91,6 +99,9 @@ class AppointmentSerializer(serializers.ModelSerializer):
         if user.is_superuser:
             return True
         clinic_profile = getattr(user, "clinic_profile", None)
+        patient_profile = getattr(user, "patient_profile", None)
+        if patient_profile:
+            return patient == patient_profile
         if not clinic_profile:
             return False
         if clinic_profile.role.code == "ADMIN":

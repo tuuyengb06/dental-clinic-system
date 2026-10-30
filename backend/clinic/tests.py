@@ -14,6 +14,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from appointments.models import Appointment as ScheduledAppointment, MedicalRecord
+from appointments.models import Appointment
 from .models import (
     ActiveInvoicePayment,
     BankTransferVerification,
@@ -28,6 +29,8 @@ from .models import (
     Service,
     Tooth,
     ToothCondition,
+    TreatmentItem,
+    TreatmentPlan,
 )
 
 User = get_user_model()
@@ -75,7 +78,343 @@ class AuthenticationAndManagementApiTests(APITestCase):
         self.assertEqual(response.data["role"], "ADMIN")
         self.assertEqual(response.data["username"], "clinic-admin")
 
-    def test_legacy_admin_role_without_clinic_profile_does_not_unlock_admin_menu(self):
+    def test_user_can_change_username_and_password_after_verifying_current_password(self):
+        self.authenticate("clinic-admin", "AdminPass123!")
+        response = self.client.patch(
+            "/api/v1/auth/account/",
+            {
+                "username": "updated-clinic-admin",
+                "current_password": "AdminPass123!",
+                "new_password": "Another-Very-Strong!2026-X9",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["username"], "updated-clinic-admin")
+        self.admin.refresh_from_db()
+        self.assertTrue(self.admin.check_password("Another-Very-Strong!2026-X9"))
+
+    def test_account_update_rejects_an_incorrect_current_password(self):
+        self.authenticate("clinic-admin", "AdminPass123!")
+        response = self.client.patch(
+            "/api/v1/auth/account/",
+            {
+                "username": "updated-clinic-admin",
+                "current_password": "WrongPassword123!",
+                "new_password": "",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("current_password", response.data)
+        self.admin.refresh_from_db()
+        self.assertEqual(self.admin.username, "clinic-admin")
+
+    def test_admin_can_reset_doctor_password(self):
+        self.authenticate("clinic-admin", "AdminPass123!")
+
+        response = self.client.post(
+            f"/api/v1/auth/users/doctor/{self.doctor.id}/reset-password/",
+            {"new_password": "NewDoctorPassword!2026"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertNotIn("password", response.data)
+        self.dentist.refresh_from_db()
+        self.assertTrue(self.dentist.check_password("NewDoctorPassword!2026"))
+        login_response = self.client.post(
+            reverse("token"),
+            {
+                "username": "clinic-dentist",
+                "password": "NewDoctorPassword!2026",
+            },
+            format="json",
+        )
+        self.assertEqual(login_response.status_code, status.HTTP_200_OK)
+
+    def test_admin_can_reset_linked_patient_password(self):
+        patient_user = User.objects.create_user(
+            username="reset-patient",
+            password="OriginalPatientPassword!2026",
+            role=User.Role.PATIENT,
+        )
+        self.patient.user = patient_user
+        self.patient.save(update_fields=["user"])
+        self.authenticate("clinic-admin", "AdminPass123!")
+
+        response = self.client.post(
+            f"/api/v1/auth/users/patient/{self.patient.id}/reset-password/",
+            {"new_password": "NewPatientPassword!2026"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        patient_user.refresh_from_db()
+        self.assertTrue(patient_user.check_password("NewPatientPassword!2026"))
+
+    def test_admin_password_reset_enforces_password_validators(self):
+        self.authenticate("clinic-admin", "AdminPass123!")
+
+        response = self.client.post(
+            f"/api/v1/auth/users/doctor/{self.doctor.id}/reset-password/",
+            {"new_password": "12345678"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.dentist.refresh_from_db()
+        self.assertTrue(self.dentist.check_password("DentistPass123!"))
+
+    def test_admin_password_reset_rejects_patient_without_linked_account(self):
+        self.authenticate("clinic-admin", "AdminPass123!")
+
+        response = self.client.post(
+            f"/api/v1/auth/users/patient/{self.patient.id}/reset-password/",
+            {"new_password": "NewPatientPassword!2026"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("chưa liên kết tài khoản", response.data["detail"])
+
+    def test_non_admin_cannot_reset_patient_or_doctor_password(self):
+        patient_user = User.objects.create_user(
+            username="reset-patient",
+            password="OriginalPatientPassword!2026",
+            role=User.Role.PATIENT,
+        )
+        self.patient.user = patient_user
+        self.patient.save(update_fields=["user"])
+        self.authenticate("clinic-dentist", "DentistPass123!")
+
+        response = self.client.post(
+            f"/api/v1/auth/users/patient/{self.patient.id}/reset-password/",
+            {"new_password": "NewPatientPassword!2026"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        patient_user.refresh_from_db()
+        self.assertTrue(patient_user.check_password("OriginalPatientPassword!2026"))
+        doctor_response = self.client.post(
+            f"/api/v1/auth/users/doctor/{self.doctor.id}/reset-password/",
+            {"new_password": "NewDoctorPassword!2026"},
+            format="json",
+        )
+        self.assertEqual(doctor_response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_patient_login_link_status_is_only_returned_to_admins(self):
+        patient_user = User.objects.create_user(
+            username="linked-patient",
+            password="OriginalPatientPassword!2026",
+            role=User.Role.PATIENT,
+        )
+        self.patient.user = patient_user
+        self.patient.save(update_fields=["user"])
+        self.authenticate("clinic-admin", "AdminPass123!")
+
+        admin_response = self.client.get("/api/v1/patients/")
+
+        self.assertEqual(admin_response.status_code, status.HTTP_200_OK)
+        admin_patient = next(
+            patient for patient in admin_response.data if patient["id"] == self.patient.id
+        )
+        self.assertTrue(admin_patient["has_login_account"])
+        self.assertEqual(admin_patient["login_username"], "linked-patient")
+
+        self.authenticate("clinic-dentist", "DentistPass123!")
+        dentist_response = self.client.get("/api/v1/patients/")
+
+        self.assertEqual(dentist_response.status_code, status.HTTP_200_OK)
+        if dentist_response.data:
+            self.assertNotIn("has_login_account", dentist_response.data[0])
+            self.assertNotIn("login_username", dentist_response.data[0])
+
+    def test_public_registration_always_creates_a_patient_not_staff(self):
+        response = self.client.post(
+            "/api/v1/auth/register/",
+            {
+                "username": "new-patient",
+                "password": "SecureDemoPassword!2026",
+                "full_name": "Nguyen Thi B",
+                "phone": "0912345678",
+                "date_of_birth": "1995-03-12",
+                "role": "ADMIN",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        user = User.objects.get(username="new-patient")
+        self.assertFalse(user.is_staff)
+        self.assertFalse(user.is_superuser)
+        self.assertEqual(user.role, User.Role.PATIENT)
+        self.assertEqual(user.patient_profile.full_name, "Nguyen Thi B")
+        self.assertEqual(user.patient_profile.phone, "0912345678")
+
+    def test_patient_account_can_only_read_its_own_records(self):
+        registration = self.client.post(
+            "/api/v1/auth/register/",
+            {
+                "username": "portal-patient",
+                "password": "SecureDemoPassword!2026",
+                "full_name": "Portal Patient",
+            },
+            format="json",
+        )
+        self.assertEqual(registration.status_code, status.HTTP_201_CREATED)
+        own_patient = User.objects.get(username="portal-patient").patient_profile
+        own_appointment = Appointment.objects.create(
+            patient=own_patient,
+            doctor=self.doctor,
+            appointment_date=timezone.now(),
+        )
+        own_record = MedicalRecord.objects.create(
+            appointment=own_appointment,
+            diagnosis="Private diagnosis",
+            treatment_plan="Private care plan",
+        )
+        own_plan = TreatmentPlan.objects.create(
+            patient=own_patient,
+            dentist=self.doctor,
+            title="Kế hoạch riêng",
+        )
+        other_appointment = Appointment.objects.create(
+            patient=self.patient,
+            doctor=self.doctor,
+            appointment_date=timezone.now() + timedelta(days=1),
+        )
+        MedicalRecord.objects.create(
+            appointment=other_appointment,
+            diagnosis="Other patient's diagnosis",
+            treatment_plan="Other patient's plan",
+        )
+        TreatmentPlan.objects.create(
+            patient=self.patient,
+            dentist=self.doctor,
+            title="Kế hoạch của bệnh nhân khác",
+        )
+        self.authenticate("portal-patient", "SecureDemoPassword!2026")
+
+        patient_list = self.client.get("/api/v1/patients/")
+        appointments = self.client.get("/api/v1/appointments/")
+        records = self.client.get("/api/v1/medical-records/")
+        plans = self.client.get("/api/v1/treatment-plans/")
+
+        self.assertEqual(patient_list.status_code, status.HTTP_200_OK)
+        self.assertEqual([row["id"] for row in patient_list.data], [own_patient.id])
+        self.assertEqual(appointments.status_code, status.HTTP_200_OK)
+        self.assertEqual([row["patient"] for row in appointments.data], [own_patient.id])
+        self.assertEqual(records.status_code, status.HTTP_200_OK)
+        self.assertEqual([row["id"] for row in records.data], [own_record.id])
+        self.assertNotIn("Other patient's diagnosis", str(records.data))
+        self.assertEqual(plans.status_code, status.HTTP_200_OK)
+        self.assertEqual([row["id"] for row in plans.data], [own_plan.id])
+        self.assertNotIn("Kế hoạch của bệnh nhân khác", str(plans.data))
+
+    def test_patient_account_cannot_use_staff_management_apis(self):
+        self.client.post(
+            "/api/v1/auth/register/",
+            {
+                "username": "limited-patient",
+                "password": "SecureDemoPassword!2026",
+                "full_name": "Limited Patient",
+            },
+            format="json",
+        )
+        self.authenticate("limited-patient", "SecureDemoPassword!2026")
+        patient_create = self.client.post(
+            "/api/v1/patients/",
+            {"patient_code": "INJECTED", "full_name": "Injected"},
+            format="json",
+        )
+        treatment_create = self.client.post(
+            "/api/v1/treatment-plans/",
+            {"patient": self.patient.id, "dentist": self.doctor.id, "title": "Injected"},
+            format="json",
+        )
+        self.assertEqual(patient_create.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(treatment_create.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_staff_can_manage_treatment_plans_and_steps(self):
+        tooth = Tooth.objects.create(
+            code="A01",
+            dentition_type=Patient.ADULT,
+            display_order=1,
+        )
+        Appointment.objects.create(
+            patient=self.patient,
+            doctor=self.doctor,
+            appointment_date=timezone.now(),
+        )
+        self.authenticate("clinic-admin", "AdminPass123!")
+        plan_response = self.client.post(
+            "/api/v1/treatment-plans/",
+            {
+                "patient": self.patient.id,
+                "dentist": self.doctor.id,
+                "title": "Kế hoạch điều trị tổng quát",
+                "status": TreatmentPlan.ACTIVE,
+                "start_date": "2026-10-30",
+                "end_date": "2026-11-30",
+            },
+            format="json",
+        )
+        self.assertEqual(plan_response.status_code, status.HTTP_201_CREATED)
+        item_response = self.client.post(
+            "/api/v1/treatment-items/",
+            {
+                "plan": plan_response.data["id"],
+                "service": self.service.id,
+                "procedure_name": "Khám và vệ sinh răng",
+                "tooth": tooth.id,
+                "cost": "250000.00",
+                "status": TreatmentItem.PLANNED,
+            },
+            format="json",
+        )
+        self.assertEqual(item_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(item_response.data["tooth_code"], "A01")
+
+        self.authenticate("clinic-dentist", "DentistPass123!")
+        plans = self.client.get("/api/v1/treatment-plans/")
+        self.assertEqual(plans.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(plans.data), 1)
+        self.assertEqual(plans.data[0]["items"][0]["procedure_name"], "Khám và vệ sinh răng")
+        dentist_plan = self.client.post(
+            "/api/v1/treatment-plans/",
+            {
+                "patient": self.patient.id,
+                "dentist": self.doctor.id,
+                "title": "Kế hoạch do bác sĩ tạo",
+            },
+            format="json",
+        )
+        self.assertEqual(dentist_plan.status_code, status.HTTP_201_CREATED)
+
+        other_staff = User.objects.create_user(
+            username="other-dentist",
+            password="DentistPass456!",
+        )
+        other_profile = ClinicUser.objects.create(
+            user=other_staff,
+            role=self.dentist_role,
+        )
+        other_doctor = Doctor.objects.create(
+            clinic_user=other_profile,
+            license_number="DMS-TEST-002",
+        )
+        other_plan = TreatmentPlan.objects.create(
+            patient=self.patient,
+            dentist=other_doctor,
+            title="Kế hoạch của bác sĩ khác",
+        )
+        plans_after = self.client.get("/api/v1/treatment-plans/")
+        self.assertEqual(plans_after.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(plans_after.data), 2)
+        self.assertNotIn(other_plan.title, str(plans_after.data))
+
+    def test_unassigned_admin_role_does_not_unlock_staff_access(self):
         User.objects.create_user(
             username="unassigned-admin",
             password="AdminPass123!",
@@ -84,7 +423,7 @@ class AuthenticationAndManagementApiTests(APITestCase):
         self.authenticate("unassigned-admin", "AdminPass123!")
         response = self.client.get("/api/v1/auth/me/")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["role"], "RECEPTIONIST")
+        self.assertEqual(response.data["role"], "UNASSIGNED")
 
     def test_admin_can_manage_services_and_authenticated_user_can_read_doctors(self):
         self.authenticate("clinic-admin", "AdminPass123!")

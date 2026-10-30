@@ -18,6 +18,8 @@ from .models import (
     Service,
     Tooth,
     ToothCondition,
+    TreatmentItem,
+    TreatmentPlan,
     WorkSchedule,
 )
 
@@ -69,14 +71,36 @@ class DentalServiceSerializer(serializers.ModelSerializer):
 
 
 class PatientSerializer(serializers.ModelSerializer):
+    has_login_account = serializers.SerializerMethodField()
+    login_username = serializers.SerializerMethodField()
+
     class Meta:
         model = Patient
         fields = [
             "id", "patient_code", "full_name", "phone", "date_of_birth",
             "dentition_type", "medical_history", "allergies",
             "ai_processing_consent", "sms_reminder_consent", "created_at",
+            "has_login_account", "login_username",
         ]
         read_only_fields = ["id", "created_at"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        clinic_profile = getattr(user, "clinic_profile", None)
+        if not user or not (
+            user.is_superuser
+            or (clinic_profile and clinic_profile.role.code == "ADMIN")
+        ):
+            self.fields.pop("has_login_account", None)
+            self.fields.pop("login_username", None)
+
+    def get_has_login_account(self, patient):
+        return bool(patient.user_id)
+
+    def get_login_username(self, patient):
+        return patient.user.username if patient.user_id else None
 
     def validate(self, attrs):
         phone = attrs.get("phone", getattr(self.instance, "phone", ""))
@@ -178,6 +202,93 @@ class ToothConditionSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"tooth": "The selected tooth does not match the patient's dentition."}
             )
+        return attrs
+
+
+class TreatmentItemSerializer(serializers.ModelSerializer):
+    service_name = serializers.CharField(source="service.name", read_only=True, allow_null=True)
+    tooth_code = serializers.CharField(source="tooth.code", read_only=True, allow_null=True)
+
+    class Meta:
+        model = TreatmentItem
+        fields = [
+            "id", "plan", "appointment", "service", "service_name", "procedure_name",
+            "tooth", "tooth_code", "cost", "status",
+        ]
+        read_only_fields = ["id"]
+
+    def validate(self, attrs):
+        plan = attrs.get("plan", self.instance.plan if self.instance else None)
+        tooth = attrs.get("tooth", self.instance.tooth if self.instance else None)
+        appointment = attrs.get(
+            "appointment", self.instance.appointment if self.instance else None
+        )
+        if plan and tooth and tooth.dentition_type != plan.patient.dentition_type:
+            raise serializers.ValidationError(
+                {"tooth": "Răng được chọn không khớp với bộ răng của bệnh nhân."}
+            )
+        if appointment and plan and (
+            appointment.patient_id != plan.patient_id
+            or appointment.doctor_id != plan.dentist_id
+        ):
+            raise serializers.ValidationError(
+                {"appointment": "Lịch khám phải thuộc đúng bệnh nhân và bác sĩ điều trị."}
+            )
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        clinic_profile = getattr(user, "clinic_profile", None)
+        if plan and clinic_profile and clinic_profile.role.code == "DENTIST":
+            if plan.dentist_id != getattr(
+                getattr(clinic_profile, "doctor_profile", None), "id", None
+            ):
+                raise serializers.ValidationError(
+                    {"plan": "Bạn chỉ được cập nhật kế hoạch điều trị của mình."}
+                )
+        return attrs
+
+
+class TreatmentPlanSerializer(serializers.ModelSerializer):
+    patient_name = serializers.CharField(source="patient.full_name", read_only=True)
+    dentist_name = serializers.SerializerMethodField()
+    items = TreatmentItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = TreatmentPlan
+        fields = [
+            "id", "patient", "patient_name", "dentist", "dentist_name", "title",
+            "status", "start_date", "end_date", "created_at", "items",
+        ]
+        read_only_fields = ["id", "created_at"]
+
+    def get_dentist_name(self, plan):
+        user = plan.dentist.clinic_user.user
+        return user.get_full_name() or user.username
+
+    def validate(self, attrs):
+        dentist = attrs.get("dentist", self.instance.dentist if self.instance else None)
+        patient = attrs.get("patient", self.instance.patient if self.instance else None)
+        start_date = attrs.get("start_date", self.instance.start_date if self.instance else None)
+        end_date = attrs.get("end_date", self.instance.end_date if self.instance else None)
+        if start_date and end_date and end_date < start_date:
+            raise serializers.ValidationError(
+                {"end_date": "Ngày kết thúc không được trước ngày bắt đầu."}
+            )
+        request = self.context.get("request")
+        clinic_profile = getattr(getattr(request, "user", None), "clinic_profile", None)
+        if clinic_profile and clinic_profile.role.code == "DENTIST":
+            assigned_doctor = getattr(clinic_profile, "doctor_profile", None)
+            if not assigned_doctor or dentist != assigned_doctor:
+                raise serializers.ValidationError(
+                    {"dentist": "Bác sĩ chỉ được lập kế hoạch điều trị cho chính mình."}
+                )
+            from appointments.models import Appointment
+
+            if patient and not Appointment.objects.filter(
+                patient=patient, doctor=assigned_doctor
+            ).exists():
+                raise serializers.ValidationError(
+                    {"patient": "Bệnh nhân chưa có lịch khám được phân công cho bác sĩ."}
+                )
         return attrs
 
 

@@ -9,11 +9,12 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends unixodbc \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt /app/requirements.txt
+COPY backend/requirements.txt /app/requirements.txt
 RUN python -m pip install --no-cache-dir --upgrade pip \
-    && python -m pip install --no-cache-dir -r requirements.txt
+    && python -m pip install --no-cache-dir -r /app/requirements.txt
 
-COPY . /app
+COPY backend/ /app
+COPY prompts/ /prompts
 
 EXPOSE 8000
 

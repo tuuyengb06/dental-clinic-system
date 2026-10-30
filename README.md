@@ -73,13 +73,26 @@ Kiểm tra API sau khi khởi chạy bằng `http://localhost:8080/api/v1/health
 
 Tóm tắt AI dùng Gemini API; SMS dùng Twilio. Hai tích hợp mặc định tắt khi chưa có cấu hình. Không commit khóa API hoặc thông tin tài khoản vào Git.
 
+Các prompt vận hành được quản lý riêng, có phiên bản trong thư mục `prompts/`; backend đọc các tệp này khi chạy. Bản Docker cũng đóng gói thư mục prompt cùng ứng dụng. Trợ lý trong giao diện nhận câu hỏi học tập về phân tích yêu cầu, thiết kế cơ sở dữ liệu, kiến trúc hệ thống và prompt AI. Câu hỏi học tập được gửi tới Gemini khi đã cấu hình khóa; không nhập thông tin bệnh nhân hoặc dữ liệu bí mật.
+
+Khi chạy local, cấu hình khóa trong **cùng cửa sổ PowerShell dùng để chạy backend**. Nếu backend đã chạy, dừng bằng `Ctrl+C`, đặt biến môi trường rồi khởi động lại. Không đặt khóa trong frontend hoặc biến `VITE_*`, vì chúng có thể bị công khai trong trình duyệt.
+
+Tạo API key trong Google AI Studio, sau đó tại thư mục gốc repo mở PowerShell và dán trực tiếp khóa vào terminal local; không gửi khóa vào chat, ảnh chụp màn hình hoặc Git. Biến môi trường chỉ có hiệu lực với tiến trình backend được khởi động từ cửa sổ đó. Mặc định model là `gemini-2.5-flash`; nếu model không được tài khoản hỗ trợ, hãy chọn một model khả dụng trong AI Studio và đặt lại `DMS_GEMINI_MODEL`.
+
 ```powershell
+cd backend
 $env:DMS_GEMINI_API_KEY = "<Gemini API key>"
 $env:DMS_GEMINI_MODEL = "gemini-2.5-flash"
+# Các biến Twilio bên dưới chỉ cần nếu bật gửi SMS
 $env:DMS_TWILIO_ACCOUNT_SID = "<Twilio account SID>"
 $env:DMS_TWILIO_AUTH_TOKEN = "<Twilio auth token>"
 $env:DMS_TWILIO_FROM_NUMBER = "<Twilio sender number>"
+python manage.py runserver 8000
 ```
+
+Nếu dùng Docker Compose, đặt các biến tương ứng trong file `.env` ở thư mục gốc rồi chạy lại container backend. Không chia sẻ hoặc commit file `.env`.
+
+Để câu trả lời tư vấn đề tài đủ chỗ trả lời nhiều phần mà không bị cắt, luồng này giới hạn đầu ra ở 8192 token, timeout kết nối/đọc lần lượt 3/60 giây và không tự gọi lại khi nhà cung cấp quá chậm. Với Gemini 2.5, ngân sách suy luận được đặt bằng 0 cho luồng tư vấn đồ án để dành token cho nội dung trả lời; các luồng AI nghiệp vụ khác vẫn dùng chính sách timeout/retry chung. Câu trả lời chưa hoàn tất sẽ không được hiển thị như kết quả hợp lệ.
 
 Lễ tân/Admin chỉ bật consent khi bệnh nhân đã đồng ý. Bác sĩ/Admin có thể yêu cầu tóm tắt tại hồ sơ EMR; nội dung chỉ trả về cho người dùng để rà soát, không tự ghi vào bệnh án. Gemini chỉ nhận chẩn đoán, kế hoạch điều trị, đơn thuốc, ghi chú, tên dịch vụ và mã răng sau khi backend lọc tên/mã bệnh nhân, số điện thoại, email và các định dạng ngày thường gặp nếu phát hiện. Không gửi riêng ngày sinh, dị ứng, tiền sử, thông tin liên hệ hay thông tin lịch hẹn từ hồ sơ bệnh nhân. Đây là lọc theo mẫu, không bảo đảm ẩn danh hoàn toàn; dữ liệu lâm sàng vẫn nhạy cảm, vì vậy cơ sở khám phải duyệt việc dùng nhà cung cấp và điều khoản xử lý dữ liệu trước khi cấu hình khóa thật.
 
@@ -94,7 +107,7 @@ Có thể đặt lệnh thứ hai trong Windows Task Scheduler, chạy mỗi ng�
 
 Lễ tân/Admin cũng có thể mở mục **Follow-up reminders**, chọn hồ sơ có ngày tái khám và tạo bản nháp bằng Gemini để xem trước, sao chép gửi thủ công qua SMS hoặc Zalo. Chỉ hồ sơ có SMS consent mới được tạo bản nháp. API `POST /api/ai/generate-reminder` chỉ nhận ID hồ sơ; ngày được lấy từ database và ghép vào câu mời chung do AI tạo. Tên, mã, số điện thoại, ngày tái khám và dữ liệu lâm sàng không được gửi cho Gemini; bản nháp không tự gửi. API giới hạn 10 yêu cầu/người dùng/giờ. Tính năng này cần `DMS_GEMINI_API_KEY`, nhưng không cần cấu hình Twilio để tạo hoặc sao chép bản nháp.
 
-Các API tóm tắt EMR, sinh bản nháp nhắc tái khám và giải thích dịch vụ dùng timeout kết nối 3 giây, timeout đọc phản hồi 5 giây cho mỗi lần gọi. Backend chỉ tự thử lại một lần (tối đa hai lần gọi), nghỉ 0,5 giây giữa các lần và chỉ retry timeout, lỗi kết nối, HTTP 408/429 hoặc 5xx; lỗi cấu hình và dữ liệu đầu vào không tự retry. Phản hồi JSON sai cấu trúc, thiếu nội dung hoặc rỗng được xem là lỗi đầu ra, trả thông báo rõ ràng và cho phép người dùng thử lại thủ công. API trả mã lỗi cùng cờ `retryable`; giao diện hiển thị thông báo tiếng Việt và chỉ cho thử lại khi phù hợp. Tóm tắt không lưu đè hồ sơ, bản nháp không tự gửi SMS. Chatbot hỏi giá/lịch vẫn tra cứu quy tắc nội bộ; riêng yêu cầu giải thích dịch vụ gọi Gemini với tên và mô tả công khai trong danh mục, không gửi câu hỏi hay dữ liệu bệnh nhân. Nếu thiếu cấu hình AI hoặc mô tả dịch vụ, chatbot trả thông báo phù hợp; lỗi kết nối/timeout cho phép gửi lại câu hỏi.
+Các luồng AI nghiệp vụ khác dùng timeout kết nối 3 giây và đọc phản hồi 5 giây cho mỗi lần gọi. Backend chỉ tự thử lại một lần (tối đa hai lần gọi), nghỉ 0,5 giây giữa các lần và chỉ retry timeout, lỗi kết nối, HTTP 408/429 hoặc 5xx; lỗi cấu hình và dữ liệu đầu vào không tự retry. Phản hồi JSON sai cấu trúc, thiếu nội dung hoặc rỗng được xem là lỗi đầu ra, trả thông báo rõ ràng và cho phép người dùng thử lại thủ công. API trả mã lỗi cùng cờ `retryable`; giao diện hiển thị thông báo tiếng Việt và chỉ cho thử lại khi phù hợp. Tóm tắt không lưu đè hồ sơ, bản nháp không tự gửi SMS. Chatbot hỏi giá/lịch vẫn tra cứu quy tắc nội bộ; giải thích dịch vụ dùng tên và mô tả công khai trong danh mục; câu hỏi học tập gửi câu hỏi của người dùng cùng prompt hệ thống về phạm vi đề tài, không lấy thêm dữ liệu bệnh nhân từ cơ sở dữ liệu. Nếu thiếu cấu hình AI hoặc mô tả dịch vụ, chatbot trả thông báo phù hợp; lỗi kết nối/timeout cho phép gửi lại câu hỏi.
 
 ## 3. Khởi chạy frontend
 
@@ -108,9 +121,19 @@ npm run dev -- --host 0.0.0.0
 
 Máy chạy frontend/backend và người cùng nhóm cần dùng chung một mạng Wi-Fi/LAN. Mở URL Vite hiển thị trong terminal trên máy chủ, rồi cho người kia truy cập `http://<IP-máy-chủ>:5173` (lấy địa chỉ IPv4 bằng `ipconfig`). Nếu Windows Firewall hỏi, chỉ cho phép trên mạng Private. Vite chuyển tiếp `/api` đến backend trên cùng máy ở `http://127.0.0.1:8000`; vì vậy cả hai người dùng cùng một backend và database SQLite trên máy chủ. Chỉ dùng cách này trên mạng tin cậy cho demo, không mở development server ra Internet. Tailwind CSS v4 đã được tích hợp với Vite; Lucide Icons được dùng làm bộ biểu tượng giao diện. Khi triển khai riêng frontend và backend, đặt `VITE_API_BASE_URL` thành URL gốc API.
 
-Đăng nhập bằng username/password của tài khoản Django có hồ sơ clinic. Tài khoản quản trị demo có username `admin`; đặt mật khẩu bằng `python manage.py changepassword admin` hoặc cấu hình `DMS_SEED_ADMIN_PASSWORD` trước khi seed. Mật khẩu của tài khoản bác sĩ/lễ tân được đặt bằng `python manage.py changepassword doctor1`, `doctor2` hoặc `receptionist1`. JWT access/refresh token được lưu trong LocalStorage và tự refresh khi access token hết hạn.
+Các trang có đường dẫn riêng, ví dụ `/tong-quan`, `/benh-nhan`, `/lich-hen` và `/nhac-tai-kham`. Chọn mục trong menu sẽ cập nhật URL; có thể tải lại trang hoặc dùng nút Back/Forward của trình duyệt. Tên tab được giữ cố định là “DMS | Hệ thống quản lý nha khoa”, không đổi theo từng trang.
 
-Sidebar hiển thị mục theo role `ADMIN`, `DENTIST` hoặc `RECEPTIONIST`. Chỉ ADMIN được tạo/sửa/ngừng dịch vụ; các hồ sơ bác sĩ có thể xem trong danh mục Doctors.
+Đăng nhập bằng tên đăng nhập và mật khẩu của tài khoản phòng khám. Tài khoản quản trị demo có tên `admin`; đặt mật khẩu bằng `python manage.py changepassword admin` hoặc cấu hình `DMS_SEED_ADMIN_PASSWORD` trước khi nạp dữ liệu. Tạo mật khẩu cho bác sĩ/lễ tân bằng `python manage.py changepassword doctor1`, `doctor2` hoặc `receptionist1`. Các tài khoản demo nhân viên chưa có mật khẩu sử dụng được cho đến khi được đặt mật khẩu.
+
+Để trình diễn nhiều vai trò trên cùng một máy, đăng nhập rồi chọn **Đăng xuất** trước khi đăng nhập bằng tài khoản khác. Sau đó có thể lần lượt xem giao diện quản trị viên, bác sĩ và bệnh nhân trong cùng trình duyệt:
+
+- Quản trị viên: `admin`; tạo mật khẩu bằng `python manage.py changepassword admin`.
+- Bác sĩ: `doctor1` hoặc `doctor2`; tạo mật khẩu bằng `python manage.py changepassword doctor1` hoặc `python manage.py changepassword doctor2`.
+- Bệnh nhân: tại màn hình đăng nhập, chọn **Bệnh nhân mới? Tạo tài khoản**. Đăng ký sẽ tự tạo tài khoản bệnh nhân và hồ sơ liên kết; có thể dùng chính tài khoản đó để đăng nhập trên bất kỳ máy nào đang kết nối tới cùng backend.
+
+Đăng ký công khai chỉ tạo tài khoản bệnh nhân, không cho tự chọn quyền quản trị viên/bác sĩ/lễ tân. Người dùng đã đăng nhập có thể mở **Tài khoản** ở góc trên để đổi tên đăng nhập và/hoặc mật khẩu; cần xác nhận mật khẩu hiện tại. Các mục giao diện và thông báo được hiển thị bằng tiếng Việt. Một số tên dịch vụ/chuyên môn tiếng Anh từ dữ liệu demo cũ được dịch khi hiển thị; dữ liệu gốc và nội dung tùy chỉnh không bị ghi đè. Quyền xem/sửa dữ liệu được giới hạn theo vai trò và hồ sơ được liên kết; bệnh nhân chỉ xem hồ sơ của mình. Chỉ quản trị viên được tạo/sửa/ngừng dịch vụ; bác sĩ chỉ xem và cập nhật dữ liệu trong phạm vi được phân công.
+
+Quản trị viên mở **Tài khoản** trong danh sách bác sĩ hoặc hồ sơ bệnh nhân để xem tên đăng nhập và đặt mật khẩu mới. Bệnh nhân cần có tài khoản liên kết; mật khẩu mới phải đáp ứng chính sách Django và được nhập lại để xác nhận. API không trả lại mật khẩu sau khi lưu; quản trị viên cần chuyển mật khẩu cho người dùng qua kênh riêng.
 
 ## 4. Dữ liệu demo
 
@@ -130,11 +153,16 @@ Chạy `python manage.py migrate` để tạo schema từ migration. Sau đó ch
 - `POST /api/v1/auth/token/` (đăng nhập, lấy JWT)
 - `POST /api/v1/auth/token/refresh/` (làm mới JWT)
 - `GET /api/v1/auth/me/` (hồ sơ người dùng và role, cần JWT)
+- `PATCH /api/v1/auth/account/` (đổi tên đăng nhập và/hoặc mật khẩu, yêu cầu mật khẩu hiện tại)
+- `POST /api/v1/auth/users/doctor/{id}/reset-password/` (Admin đặt lại mật khẩu bác sĩ; cần JWT và mật khẩu đạt chính sách)
+- `POST /api/v1/auth/users/patient/{id}/reset-password/` (Admin đặt lại mật khẩu bệnh nhân đã liên kết; cần JWT và mật khẩu đạt chính sách)
 - `GET/POST /api/v1/patients/` (hồ sơ gồm ngày sinh, kiểu răng, tiền sử bệnh và dị ứng)
 - `PATCH /api/v1/patients/{id}/` (cập nhật hồ sơ và consent; Admin/Lễ tân)
 - `POST /api/v1/medical-records/{id}/ai-summary/` (tạo bản tóm tắt Gemini; bác sĩ phụ trách/Admin, cần consent)
 - `GET /api/v1/patients/?search=<mã|tên|điện thoại>` (tra cứu hồ sơ bệnh nhân; yêu cầu role Admin hoặc Receptionist)
 - `GET/POST /api/v1/appointments/` (danh sách/đặt lịch; giờ hẹn phải nằm trong ca làm của bác sĩ và không trùng lịch)
+- `GET/POST /api/v1/treatment-plans/` (danh sách/tạo kế hoạch điều trị; bác sĩ chỉ xem kế hoạch được phân công, bệnh nhân chỉ xem kế hoạch của mình)
+- `GET/POST /api/v1/treatment-items/` (danh sách/thêm bước điều trị thuộc kế hoạch)
 - `POST /api/v1/appointments/{id}/cancel/` (lễ tân/Admin hủy lịch Pending hoặc Confirmed; lịch Completed hoặc đã Cancelled bị từ chối)
 - `GET/POST /api/v1/schedules/` (xem/đặt ca làm theo bác sĩ, ngày và giờ; không cho phép ca chồng nhau)
 - `GET /api/v1/teeth/` (danh mục răng để lập hồ sơ bệnh án)

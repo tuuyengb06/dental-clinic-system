@@ -45,28 +45,39 @@ class IsAppointmentStaff(BasePermission):
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
-        if request.method in ("GET", "HEAD", "OPTIONS"):
-            return True
         clinic_profile = getattr(request.user, "clinic_profile", None)
-        return bool(
-            request.user.is_superuser
-            or (clinic_profile and clinic_profile.role.code in ("ADMIN", "RECEPTIONIST"))
-        )
+        clinic_role = clinic_profile.role.code if clinic_profile else None
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return bool(
+                request.user.is_superuser
+                or clinic_role in ("ADMIN", "DENTIST", "RECEPTIONIST")
+                or getattr(request.user, "patient_profile", None)
+            )
+        if (
+            getattr(view, "allow_patient_booking", False)
+            and getattr(view, "action", None) == "create"
+            and request.method == "POST"
+        ):
+            return bool(
+                request.user.is_superuser
+                or clinic_role in ("ADMIN", "RECEPTIONIST")
+                or getattr(request.user, "patient_profile", None)
+            )
+        return bool(request.user.is_superuser or clinic_role in ("ADMIN", "RECEPTIONIST"))
 
 
 class IsDentistOrAdmin(BasePermission):
     def has_permission(self, request, view):
         clinic_profile = getattr(request.user, "clinic_profile", None)
+        if not request.user or not request.user.is_authenticated:
+            return False
+        if request.user.is_superuser or (
+            clinic_profile and clinic_profile.role.code in ("ADMIN", "DENTIST")
+        ):
+            return True
         return bool(
-            request.user
-            and request.user.is_authenticated
-            and (
-                request.user.is_superuser
-                or (
-                    clinic_profile
-                    and clinic_profile.role.code in ("ADMIN", "DENTIST")
-                )
-            )
+            request.method in ("GET", "HEAD", "OPTIONS")
+            and getattr(request.user, "patient_profile", None)
         )
 
 
@@ -89,7 +100,15 @@ class IsScheduleStaff(BasePermission):
         if not request.user or not request.user.is_authenticated:
             return False
         if request.method in ("GET", "HEAD", "OPTIONS"):
-            return True
+            return bool(
+                request.user.is_superuser
+                or getattr(request.user, "patient_profile", None)
+                or (
+                    getattr(request.user, "clinic_profile", None)
+                    and request.user.clinic_profile.role.code
+                    in ("ADMIN", "DENTIST", "RECEPTIONIST")
+                )
+            )
         clinic_profile = getattr(request.user, "clinic_profile", None)
         return bool(
             request.user.is_superuser
@@ -100,6 +119,7 @@ class IsScheduleStaff(BasePermission):
 class AppointmentViewSet(viewsets.ModelViewSet):
     serializer_class = AppointmentSerializer
     permission_classes = [IsAppointmentStaff]
+    allow_patient_booking = True
 
     def get_queryset(self):
         queryset = Appointment.objects.select_related(
@@ -108,6 +128,11 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         clinic_profile = getattr(self.request.user, "clinic_profile", None)
         if clinic_profile and clinic_profile.role.code == "DENTIST":
             return queryset.filter(doctor__clinic_user=clinic_profile)
+        patient = getattr(self.request.user, "patient_profile", None)
+        if patient:
+            return queryset.filter(patient=patient)
+        if not self.request.user.is_superuser and not clinic_profile:
+            return queryset.none()
         return queryset
 
     @action(detail=True, methods=["post"])
@@ -139,6 +164,11 @@ class MedicalRecordViewSet(viewsets.ModelViewSet):
         clinic_profile = getattr(self.request.user, "clinic_profile", None)
         if clinic_profile and clinic_profile.role.code == "DENTIST":
             return queryset.filter(appointment__doctor__clinic_user=clinic_profile)
+        patient = getattr(self.request.user, "patient_profile", None)
+        if patient:
+            return queryset.filter(appointment__patient=patient)
+        if not self.request.user.is_superuser and not clinic_profile:
+            return queryset.none()
         return queryset
 
     def get_throttles(self):
